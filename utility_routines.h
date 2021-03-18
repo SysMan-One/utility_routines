@@ -289,9 +289,16 @@ enum	{
 	STS$K_ERROR	= 2,
 	STS$K_INFO	= 3,
 	STS$K_FATAL	= 4,
-	STS$K_UNDEF	= 4,
-	STS$K_SYSLOG	= 16	/* This option force sending message to the syslog service	*/
+	STS$K_UNDEF	= 5,
+	STS$K_UNDEF5	= 5,
+	STS$K_UNDEF6	= 6,
+	STS$K_UNDEF7	= 7,
+
+
+	STS$K_MAX	= 7			/* End-Of-List */
 };
+
+#define	STS$M_SYSLOG	16			/* This option force sending message to the syslog service	*/
 
 #define	STS$C__WARN	"W"
 #define	STS$C__SUCCESS	"S"
@@ -310,6 +317,12 @@ enum	{
 #define	$FAC(code)		((code) >> 16)
 #define	$MSG(code)		((code) >> 3)
 #define	$SEV(code)		((code) & 0x7)
+
+
+#define	$DEFFAC(code)		((code) << 16)
+#define	$DEFMSG(code)		(0xFFff0000UL & ((code) << 3)))
+#define	$DEFSEV(code)		((code) & 0x7)
+
 
 
 typedef	struct __emsg_record__	{

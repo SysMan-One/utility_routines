@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-01"
-#define	__REV__		"1.01.0"
+#define	__IDENT__	"V.01-01ECO1"
+#define	__REV__		"1.01.1"
 
 
 /*
@@ -55,7 +55,9 @@
 **
 **	 7-MAY-2020	RRL	Fixed incorrect value of 'mode' argument of open() under Windows.
 **
-**	17-MAR-2021	RRL	V.01-01 :  Added a set of routines to mimicrate to $GETMSG/$PUTMSG service routines.
+**	17-MAR-2021	RRL	V.01-01 :  Added a set of routines to mimic to $GETMSG/$PUTMSG service routines.
+**
+**	18-MAR-2021	RRL	V.01-01ECO1 : Adopting for WIN32 .
 **
 */
 
@@ -302,11 +304,10 @@ va_list arglist;
 const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " ";
 const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number %08X, fac=%#x/%d, sev=%#x/%d, msgno=%#x/%d"};
 const char severity[]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
-char	pref[128], out[1024];
+char	out[1024];
 unsigned olen, sev;
 struct tm _tm;
 struct timespec now;
-struct iovec iov [3];
 EMSG_RECORD *msgrec;
 
 	/*
@@ -320,36 +321,29 @@ EMSG_RECORD *msgrec;
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	olen = snprintf (pref, sizeof(pref), lfmt,			/* Format a prefix part of the message: time + PID ... */
+	olen = snprintf (out, sizeof(out), lfmt,			/* Format a prefix part of the message: time + PID ... */
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		(unsigned) gettid());
 
-	iov[0].iov_base = pref;
-	iov[0].iov_len = olen;
-
-	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retrive the message record */
+	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
 		va_start (arglist, sts);				/* Fromat text message */
-		olen = vsnprintf(out, sizeof(out), msgrec->text, arglist);
+		olen += vsnprintf(out + olen, sizeof(out) - olen, msgrec->text, arglist);
 		va_end (arglist);
 		}
 	else	{							/* Format text message with the default FAO */
 		sev = $SEV(sts);
-		olen = snprintf(out, sizeof(out), defmsgfao, severity[sev], sts,
+		olen += snprintf(out + olen, sizeof(out) - olen, defmsgfao, severity[sev], sts,
 			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
 		}
 
-	iov[1].iov_base = out;
-	iov[1].iov_len = olen;
-
 
 	/* Add <LF> at end of record*/
-	iov[2].iov_base = "\n";
-	iov[2].iov_len = 1;
+	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	writev (logoutput, iov, $ARRSZ(iov) );
+	write (logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID
@@ -1112,7 +1106,7 @@ struct timespec now;
 /*
  *
  */
-const char severity[STS$K_UNDEF + 1][16] = { "-W: ", "-S: ", "-E: ", "-I: ", "-F: ", "-?: "};
+const char severity[STS$K_MAX][16] = { "-W: ", "-S: ", "-E: ", "-I: ", "-F: ", "-?: "};
 
 unsigned	__util$log
 			(
@@ -1126,7 +1120,7 @@ unsigned	__util$log
 va_list arglist;
 const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " %%%s%3s";
 char	out[1024];
-unsigned olen, _sev = sev, opcom = sev & STS$K_SYSLOG;
+unsigned olen, _sev = sev, opcom = sev & STS$M_SYSLOG;
 struct tm _tm;
 struct timespec now;
 
@@ -1264,11 +1258,11 @@ va_list arglist;
 const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%u] %%%s%3s"},
 	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%s\\%u] %%%s%3s"};
 char	out[1024];
-unsigned olen, _sev = sev, opcom = sev & STS$K_SYSLOG;
+unsigned olen, _sev = sev, opcom = sev & STS$M_SYSLOG;
 struct tm _tm = {0};
 struct timespec now = {0};
 
-	sev &= ~STS$K_SYSLOG;
+	sev &= ~STS$M_SYSLOG;
 
 	/*
 	** Some sanity check
