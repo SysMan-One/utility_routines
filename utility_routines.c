@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-00"
-#define	__REV__		"1.00.0"
+#define	__IDENT__	"V.01-01"
+#define	__REV__		"1.01.0"
 
 
 /*
@@ -54,6 +54,9 @@
 **	19-MAR-2020	RRL	Addeв O_APPEND flag in call of open() in the __util$deflog().
 **
 **	 7-MAY-2020	RRL	Fixed incorrect value of 'mode' argument of open() under Windows.
+**
+**	17-MAR-2021	RRL	V.01-01 :  Added a set of routines to mimicrate to $GETMSG/$PUTMSG service routines.
+**
 */
 
 
@@ -137,7 +140,7 @@
 
 int	logoutput = STDOUT_FILENO;	/* Default descriptor for default output device		*/
 
-struct sockaddr_in slogsock;	/* SYSLOG Host socket					*/
+struct sockaddr_in slogsock;		/* SYSLOG Host socket					*/
 
 #ifndef	WIN32
 
@@ -162,6 +165,200 @@ static inline pid_t	gettid(void)
 
 #endif	/* ANDROID */
 #endif
+
+
+static EMSG_RECORD_DESC	*emsg_record_desc_root;				/* A root to the message records descriptior */
+
+/*
+ *   DESCRIPTION: Message record compare routine
+ *
+ *   INPUT:
+ *
+ *   OUTPUT:
+ *	NONE
+ *
+ *   RETURNS:
+ *	a - b
+ */
+static int __msgcmp (const void *a, const void *b)
+{
+const EMSG_RECORD *m1 = a, *m2 = b;
+
+
+	return	( (int)m1->sts - (int)m2->sts);
+}
+
+
+/*
+ *   DESCRIPTION: Sorting message records according <sts> field as a key,
+ *	link message records descriptor in to the global list.
+ *	This routine is should be called once at task initialization time before any
+ *	consecutive $GETMSG/$PUTMSG calls!
+ *
+ *   IMPLICITE INPUTS:
+ *	emsg_record_desc_root
+ *
+ *   INPUTS:
+ *	msgdsc:	Message Records Descriptior
+ *
+ *   OUTPUTS:
+ *	NONE
+ *
+ *   IMPLICITE OUTPUTS:
+ *	msgdsc:
+ *
+ *   RETURNS:
+ *	STS$K_WARN	- non-principal error
+ *	condition code
+ */
+unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc)
+{
+EMSG_RECORD_DESC *md;
+
+	if ( !msgdsc )
+		return	STS$K_WARN;
+
+	/* At first level we try to find the message records descriptor by using facility number */
+	for  (md = emsg_record_desc_root; md; md = md->link)
+		if ( md->facno == msgdsc->facno)
+			return	STS$K_WARN;
+
+
+	qsort(msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), __msgcmp);
+
+	msgdsc->link = emsg_record_desc_root;
+	emsg_record_desc_root = msgdsc;
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ *   DESCRIPTION: Retreive message record by using message number code.
+ *
+ *   IMPLICITE INPUTS:
+ *	emsg_record_desc_root
+ *
+ *   INPUTS:
+ *	sts:	condition code/message number code
+ *
+ *   OUTPUTS:
+ *	outmsg:	A found message record
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS	- outmsg contains an address of the has been found mssage record
+ *	condition code
+ */
+unsigned	__util$getmsg	(unsigned sts, EMSG_RECORD **outmsg )
+{
+unsigned	facno;
+EMSG_RECORD_DESC *msgdsc;
+EMSG_RECORD *msgrec;
+
+	/* At first level we try to find the message records descriptor by using facility number */
+	facno = $FAC(sts);
+	for  (msgdsc = emsg_record_desc_root; msgdsc; msgdsc = msgdsc->link)
+		if ( msgdsc->facno == facno)
+			break;
+
+	if ( !msgdsc )
+		return	STS$K_ERROR;		/* RNF */
+
+	/* We found message records descriptor for the facility,
+	 * so we can try to find the message record with the given <msgno>
+	 */
+	if ( !(msgrec = bsearch(&sts, msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), __msgcmp)) )
+		return	STS$K_ERROR;		/* RNF */
+
+	*outmsg = msgrec;
+
+	return	STS$K_SUCCESS;
+}
+
+/*
+ *   DESCRIPTION: Format a message to be output on the SYS$OUTPUT by using a format from the message record
+ *
+ *   IMPLICITE INPUTS:
+ *	emsg_record_desc_root
+ *
+ *   INPUTS:
+ *	sts:	condition code/message number code
+ *	...:	Additional parameters, according the FAO of the message
+ *
+ *   OUTPUTS:
+ *	NONE
+ *
+ *   RETURNS:
+ *	<sts>
+ */
+unsigned	__util$putmsg
+			(
+		unsigned	sts,
+			...
+			)
+
+{
+va_list arglist;
+const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " ";
+const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number %08X, fac=%#x/%d, sev=%#x/%d, msgno=%#x/%d"};
+const char severity[]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
+char	pref[128], out[1024];
+unsigned olen, sev;
+struct tm _tm;
+struct timespec now;
+struct iovec iov [3];
+EMSG_RECORD *msgrec;
+
+	/*
+	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
+	*/
+	____time(&now);
+
+#ifdef	WIN32
+	localtime_s(&_tm, (time_t *)&now);
+#else
+	localtime_r((time_t *)&now, &_tm);
+#endif
+
+	olen = snprintf (pref, sizeof(pref), lfmt,			/* Format a prefix part of the message: time + PID ... */
+		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
+		(unsigned) gettid());
+
+	iov[0].iov_base = pref;
+	iov[0].iov_len = olen;
+
+	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retrive the message record */
+		{
+		va_start (arglist, sts);				/* Fromat text message */
+		olen = vsnprintf(out, sizeof(out), msgrec->text, arglist);
+		va_end (arglist);
+		}
+	else	{							/* Format text message with the default FAO */
+		sev = $SEV(sts);
+		olen = snprintf(out, sizeof(out), defmsgfao, severity[sev], sts,
+			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
+		}
+
+	iov[1].iov_base = out;
+	iov[1].iov_len = olen;
+
+
+	/* Add <LF> at end of record*/
+	iov[2].iov_base = "\n";
+	iov[2].iov_len = 1;
+
+	/* Write to file and flush buffer depending on severity level */
+	writev (logoutput, iov, $ARRSZ(iov) );
+
+	/* ARL - for android logcat */
+	#ifdef ANDROID
+		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
+	#endif
+
+	return	sts;
+}
+
 
 /*
  *
@@ -1461,10 +1658,6 @@ const unsigned char  *p = (unsigned char *) buf;
 
 	return crc ^ ~0U;
 }
-
-
-
-
 
 
 /*

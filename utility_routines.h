@@ -36,6 +36,8 @@
 **	25-JUN-2019	RRL	Redefined macro $TRACE() to eliminate "if (cond) ..."
 **
 **	10-JUL-2019	RRL	Warning fix.
+**
+**	17-MAR-2021	RRL	Added a set of data structures EMSG_* to support $INIMSG/$PUTMSG/$GETMSG routines.
 */
 
 #if _WIN32
@@ -280,12 +282,23 @@ typedef	struct	__queue	{
 	#define	__FAC$_UTILS__	0x01
 #endif
 
-#define STS$K_WARN	0
-#define STS$K_SUCCESS	1
-#define STS$K_ERROR	2
-#define STS$K_INFO	3
-#define STS$K_UNDEF	8
-#define	STS$K_SYSLOG	16	/* This option force sending message to the syslog service	*/
+
+enum	{
+	STS$K_WARN	= 0,
+	STS$K_SUCCESS	= 1,
+	STS$K_ERROR	= 2,
+	STS$K_INFO	= 3,
+	STS$K_FATAL	= 4,
+	STS$K_UNDEF	= 4,
+	STS$K_SYSLOG	= 16	/* This option force sending message to the syslog service	*/
+};
+
+#define	STS$C__WARN	"W"
+#define	STS$C__SUCCESS	"S"
+#define	STS$C__ERROR	"E"
+#define	STS$C__INFO	"I"
+#define	STS$C__FATAL	"F"
+#define	STS$C__UNDEF	"?"
 
 #define $STS_ERROR(code) 	( ((code) & STS$K_ERROR ) || ((code) & STS$K_ERROR) )
 
@@ -298,6 +311,33 @@ typedef	struct	__queue	{
 #define	$MSG(code)		((code) >> 3)
 #define	$SEV(code)		((code) & 0x7)
 
+
+typedef	struct __emsg_record__	{
+		//EMSG_STS	sts;
+		int		sts;				/* Message number, LONGWORD*/
+
+#pragma pack(push, 1)
+		struct {
+		unsigned char	textl,				/* Message FAO, ASCIC */
+				text[254];
+		};
+#pragma pack(pop)
+
+} EMSG_RECORD;
+
+
+
+typedef struct __emsg_record_desc__ {
+		struct __emsg_record_desc__	*link;		/* A link to next Message Descriptor */
+		unsigned		msgnr;			/* A number of messages in the msgs[] */
+		unsigned		facno;			/* A facility number */
+		struct __emsg_record__	*msgrec;			/* An address of the message records */
+} EMSG_RECORD_DESC;
+
+
+unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc);
+unsigned	__util$getmsg	(unsigned sts, EMSG_RECORD **outmsg);
+unsigned	__util$putmsg	(unsigned sts, ...);
 
 unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$logd	(const char *fac, unsigned severity, const char *fmt, const char *mod, const char *func, unsigned line, ...);
@@ -326,8 +366,7 @@ unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int 
  *	STS$K_ERROR
  */
 
-
-
+#define	$LOCK_LONG(lock)	__util$lockspin(lock)
 
 inline	static int __util$lockspin (void volatile * lock)
 {
@@ -349,9 +388,6 @@ int	status = 0;
 }
 
 
-#define	$LOCK_LONG(lock)	__util$lockspin(lock)
-
-
 /*
  * Description: Release has been set lock flag, set the lock value to 0.
  *
@@ -361,6 +397,8 @@ int	status = 0;
  * Return:
  *	STS$K_SUCCESS
  */
+#define	$UNLOCK_LONG(lock)	__util$unlockspin(lock)
+
 inline	static	int __util$unlockspin (void * lock)
 {
 
@@ -372,11 +410,6 @@ inline	static	int __util$unlockspin (void * lock)
 
 	return	STS$K_SUCCESS;
 }
-
-
-
-#define	$UNLOCK_LONG(lock)	__util$unlockspin(lock)
-
 
 
 
