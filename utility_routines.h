@@ -358,9 +358,11 @@ unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, un
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
 
 #ifdef	_DEBUG
+	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $LOG(severity, fmt, ...)	__util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : severity
 #else
+	#define $PUTMSG(sts, ...)		__util$putmsg(sts, ## __VA_ARGS__)
 	#define $LOG(severity, fmt, ...)	__util$log(__FAC__, severity, fmt, ## __VA_ARGS__)
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)	: severity
 

@@ -293,6 +293,10 @@ EMSG_RECORD *msgrec;
  *   RETURNS:
  *	<sts>
  */
+
+const char severity[STS$K_MAX]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
+const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number %08X, fac=%#x/%d, sev=%#x/%d, msgno=%#x/%d"};
+
 unsigned	__util$putmsg
 			(
 		unsigned	sts,
@@ -302,8 +306,6 @@ unsigned	__util$putmsg
 {
 va_list arglist;
 const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " ";
-const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number %08X, fac=%#x/%d, sev=%#x/%d, msgno=%#x/%d"};
-const char severity[]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
 char	out[1024];
 unsigned olen, sev;
 struct tm _tm;
@@ -352,6 +354,163 @@ EMSG_RECORD *msgrec;
 
 	return	sts;
 }
+
+
+
+unsigned	__util$putmsgd
+			(
+		unsigned	sts,
+		const char *	__mod,
+		const char *	__fi,
+		unsigned	__li,
+			...
+			)
+
+{
+va_list arglist;
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%u] "},
+	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%s\\%u] "};
+char	out[1024];
+unsigned olen, sev;
+struct tm _tm;
+struct timespec now;
+EMSG_RECORD *msgrec;
+
+	/*
+	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
+	*/
+	____time(&now);
+
+#ifdef	WIN32
+	localtime_s(&_tm, (time_t *)&now);
+#else
+	localtime_r((time_t *)&now, &_tm);
+#endif
+
+	olen = __mod
+		? sprintf (out, mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
+			(unsigned) gettid(), __mod, __fi, __li)
+		: sprintf (out, lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
+			(unsigned) gettid(), __fi, __li);
+
+	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
+		{
+		va_start (arglist, sts);				/* Fromat text message */
+		olen += vsnprintf(out + olen, sizeof(out) - olen, msgrec->text, arglist);
+		va_end (arglist);
+		}
+	else	{							/* Format text message with the default FAO */
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, sizeof(out) - olen, defmsgfao, severity[sev], sts,
+			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
+		}
+
+
+	/* Add <LF> at end of record*/
+	out[olen++] = '\n';
+
+	/* Write to file and flush buffer depending on severity level */
+	write (logoutput, out, olen);
+
+	/* ARL - for android logcat */
+	#ifdef ANDROID
+		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
+	#endif
+
+	return	sts;
+}
+
+
+
+
+
+
+unsigned	__util$logd
+			(
+		const char *	fac,
+		unsigned	sev,
+		const char *	fmt,
+		const char *	__mod,
+		const char *	__fi,
+		unsigned	__li,
+			...
+			)
+
+{
+va_list arglist;
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%u] %%%s-%c:"},
+	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%s\\%u] %%%s-%c:"};
+char	out[1024];
+unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
+struct tm _tm = {0};
+struct timespec now = {0};
+
+	sev &= ~STS$M_SYSLOG;
+
+	/*
+	** Some sanity check
+	*/
+	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_ERROR)) )
+		sev = STS$K_UNDEF;
+
+	/*
+	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]-E-:" prefix
+	*/
+	____time(&now);
+
+#ifdef	WIN32
+	localtime_s(&_tm, (time_t *)&now);
+#else
+	localtime_r((time_t *)&now, &_tm);
+#endif
+
+	olen = __mod
+		? sprintf (out, mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
+			(unsigned) gettid(), __mod, __fi, __li, fac, severity[_sev])
+		: sprintf (out, lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
+			(unsigned) gettid(), __fi, __li, fac, severity[_sev]);
+
+	va_start (arglist, __li);
+	olen += vsnprintf(out + olen, sizeof(out) - olen, fmt, arglist);
+	va_end (arglist);
+
+	olen = $MIN(olen, sizeof(out) - 1);
+
+	/* Add <LF> at end of record*/
+	out[olen++] = '\n';
+
+	/* Write to file and flush buffer depending on severity level */
+	write (logoutput, out, olen );
+
+		/* ARL - for android logcat */
+	#ifdef ANDROID
+		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
+	#endif
+
+
+#ifdef	__SYSLOG__
+#ifndef	WIN32
+	va_start (arglist, __li);
+	olen = vsnprintf(out, sizeof(out), fmt, arglist);
+	va_end (arglist);
+
+	__util$syslog (LOG_USER, LOG_DEBUG, fac, out, olen);
+
+//	syslog( LOG_PID | ((sev & 1) ? LOG_INFO : LOG_ERR), "%.*s", olen, out);
+#endif
+#endif	/* __SYSLOG__ */
+
+	return	_sev;
+}
+
+
+
+
+
 
 
 /*
@@ -1106,7 +1265,7 @@ struct timespec now;
 /*
  *
  */
-const char severity[STS$K_MAX][16] = { "-W: ", "-S: ", "-E: ", "-I: ", "-F: ", "-?: "};
+//const char severity[STS$K_MAX][16] = { "-W: ", "-S: ", "-E: ", "-I: ", "-F: ", "-?: "};
 
 unsigned	__util$log
 			(
@@ -1118,9 +1277,9 @@ unsigned	__util$log
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " %%%s%3s";
+const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " %%%s-%C: ";
 char	out[1024];
-unsigned olen, _sev = sev, opcom = sev & STS$M_SYSLOG;
+unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
 struct tm _tm;
 struct timespec now;
 
@@ -1144,7 +1303,7 @@ struct timespec now;
 	olen = sprintf (out, lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) gettid(), fac, severity[sev]);
+		(unsigned) gettid(), fac, severity[_sev]);
 
 	va_start (arglist, fmt);
 	olen += vsnprintf(out + olen, sizeof(out) - olen, fmt, arglist);
@@ -1200,7 +1359,7 @@ unsigned	__util$log2buf
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " %%%s%3s";
+const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " %%%s-%C: ";
 char	*__outbuf = (char *) out;
 unsigned	_sev = sev;
 struct tm _tm;
@@ -1236,88 +1395,6 @@ struct timespec now;
 
 	/* Add NIL at end of record*/
 	__outbuf[*outlen] = '\0';
-
-	return	_sev;
-}
-
-
-
-unsigned	__util$logd
-			(
-		const char *	fac,
-		unsigned	sev,
-		const char *	fmt,
-		const char *	__mod,
-		const char *	__fi,
-		unsigned	__li,
-			...
-			)
-
-{
-va_list arglist;
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%u] %%%s%3s"},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%s\\%u] %%%s%3s"};
-char	out[1024];
-unsigned olen, _sev = sev, opcom = sev & STS$M_SYSLOG;
-struct tm _tm = {0};
-struct timespec now = {0};
-
-	sev &= ~STS$M_SYSLOG;
-
-	/*
-	** Some sanity check
-	*/
-	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_ERROR)) )
-		sev = STS$K_UNDEF;
-
-	/*
-	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]-E-:" prefix
-	*/
-	____time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = __mod
-		? sprintf (out, mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __mod, __fi, __li, fac, severity[sev])
-		: sprintf (out, lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __fi, __li, fac, severity[sev]);
-
-	va_start (arglist, __li);
-	olen += vsnprintf(out + olen, sizeof(out) - olen, fmt, arglist);
-	va_end (arglist);
-
-	olen = $MIN(olen, sizeof(out) - 1);
-
-	/* Add <LF> at end of record*/
-	out[olen++] = '\n';
-
-	/* Write to file and flush buffer depending on severity level */
-	write (logoutput, out, olen );
-
-		/* ARL - for android logcat */
-	#ifdef ANDROID
-		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
-	#endif
-
-
-#ifdef	__SYSLOG__
-#ifndef	WIN32
-	va_start (arglist, __li);
-	olen = vsnprintf(out, sizeof(out), fmt, arglist);
-	va_end (arglist);
-
-	__util$syslog (LOG_USER, LOG_DEBUG, fac, out, olen);
-
-//	syslog( LOG_PID | ((sev & 1) ? LOG_INFO : LOG_ERR), "%.*s", olen, out);
-#endif
-#endif	/* __SYSLOG__ */
 
 	return	_sev;
 }
