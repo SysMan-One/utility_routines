@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-01ECO1"
-#define	__REV__		"1.01.1"
+#define	__IDENT__	"V.01-02"
+#define	__REV__		"1.02.0"
 
 
 /*
@@ -58,6 +58,9 @@
 **	17-MAR-2021	RRL	V.01-01 :  Added a set of routines to mimic to $GETMSG/$PUTMSG service routines.
 **
 **	18-MAR-2021	RRL	V.01-01ECO1 : Adopting for WIN32 .
+**
+**	25-APR-2021	RRL	Added has been lost __util$out()
+**
 **
 */
 
@@ -1624,7 +1627,7 @@ int done = FALSE, matched_to_eos = FALSE;
 }
 /******************* end of C_STR$pattern_match *******************/
 
-#if	0
+#if	1
 #ifndef	WIN32
 void	__util$traceback	(void)
 {
@@ -1797,6 +1800,31 @@ size_t	p1len = s1len, cmplen = s2len - 1;
 
 
 
+unsigned	__util$out
+			(
+		char *	fmt,
+			...
+			)
+
+{
+va_list arglist;
+char	out[1024] = {0};
+int	olen = 0;
+
+	va_start (arglist, fmt);
+	olen += vsnprintf(out, sizeof(out) - 1, fmt, arglist);
+	va_end (arglist);
+
+	/* Add <LF> at end of record*/
+	out[olen++] = '\n';
+
+	/* Write to file and flush buffer depending on severity level */
+	fwrite (out, olen , 1, logoutput ? logoutput : stdout);
+
+	fflush (logoutput ? logoutput : stdout);
+
+	return	STS$K_SUCCESS;
+}
 
 
 
