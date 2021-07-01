@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-01ECO1"
-#define	__REV__		"1.01.1"
+#define	__IDENT__	"V.01-01ECO2"
+#define	__REV__		"1.01.2"
 
 
 /*
@@ -58,6 +58,8 @@
 **	17-MAR-2021	RRL	V.01-01 :  Added a set of routines to mimic to $GETMSG/$PUTMSG service routines.
 **
 **	18-MAR-2021	RRL	V.01-01ECO1 : Adopting for WIN32 .
+**
+**	 7-APR-2021	RRL	V.01-01ECO2 : Fixed $PUTMSGD().
 **
 */
 
@@ -121,6 +123,7 @@
 #ifndef	WIN32
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored  "-Wparentheses"
+#pragma GCC diagnostic ignored  "-Wpointer-sign"
 #endif
 
 #ifdef _WIN32
@@ -397,7 +400,7 @@ EMSG_RECORD *msgrec;
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
-		va_start (arglist, sts);				/* Fromat text message */
+		va_start (arglist, __li);				/* Fromat text message */
 		olen += vsnprintf(out + olen, sizeof(out) - olen, msgrec->text, arglist);
 		va_end (arglist);
 		}
@@ -1199,7 +1202,7 @@ const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%u] "
 	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT " [%s\\%s\\%u] "};
 char	out[1024];
 
-unsigned olen, len;
+unsigned olen;
 struct tm _tm;
 struct timespec now;
 

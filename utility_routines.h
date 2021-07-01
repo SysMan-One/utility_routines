@@ -71,6 +71,7 @@ extern "C" {
 #ifndef	WIN32
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored  "-Wparentheses"
+#pragma GCC diagnostic ignored  "-Wpointer-sign"
 #endif
 
 #define	CRLFCRLF_LW	0x0a0d0a0d
@@ -295,7 +296,7 @@ enum	{
 	STS$K_UNDEF7	= 7,
 
 
-	STS$K_MAX	= 7			/* End-Of-List */
+	STS$K_MAX	= 8			/* End-Of-List */
 };
 
 #define	STS$M_SYSLOG	16			/* This option force sending message to the syslog service	*/
@@ -351,6 +352,8 @@ typedef struct __emsg_record_desc__ {
 unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc);
 unsigned	__util$getmsg	(unsigned sts, EMSG_RECORD **outmsg);
 unsigned	__util$putmsg	(unsigned sts, ...);
+unsigned	__util$putmsgd	(unsigned sts, const char *__mod, const char *__fi, unsigned __li, ...);
+
 
 unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$logd	(const char *fac, unsigned severity, const char *fmt, const char *mod, const char *func, unsigned line, ...);
@@ -1810,14 +1813,16 @@ char *	_dst = (char *) dst;
 
 
 /**
- * @brief __UTIL$STRXOR - XORing octet source string with a given key to produde result to the destination buffer
+ * @brief __UTIL$STRXOR - XORing octet source string with a given key , result is in destination buffer.
+ *	<ctx> - keep context between consecutive calls. Should be set to -1 at first call.
  *
  * @param key	- a buffer with the key
  * @param keysz	- a length of the key
  * @param src	- a buffer with the data to be XOR-ed
  * @param srcsz	- a lenth of the source data
- * @param src	- a buffer to accept XOR-ed data
- * @param srcsz	- a size of the output buffer
+ * @param dst	- a buffer to accept XOR-ed data
+ * @param dstsz	- a size of the output buffer
+ * @param ctx	- an internal context , can be NULL is is not used
  * @return
  */
 static inline	int	__util$strxor	(
@@ -1826,20 +1831,30 @@ static inline	int	__util$strxor	(
 		void	*	src,
 		int		srcsz,
 		void	*	dst,
-		int		dstsz
+		int		dstsz,
+		int	*	ctx
 			)
 {
-unsigned char	*kp, *sp, *dp;
+unsigned char* kp, * sp, *dp, * ep;
 int	sz = (srcsz > dstsz) ? dstsz : srcsz;
 
-	for ( kp = key, sp = src, dp = dst; sz; sz--, dp++, sp++, kp++ )
+	if (ctx && (*ctx > 0) && (*ctx > keysz))		/* Check that <ctx> is in key's area */
+		return	STS$K_ERROR;
+
+	kp = (ctx && *ctx > 0) ? ((unsigned char *) key + (*ctx)) : key;	/* Set key's pointer to initial position */
+	ep = (unsigned char *) key + keysz;				/* Compute end of key address for future use */
+
+	for ( sp = src, dp = dst; sz; sz--, dp++, sp++, kp++ )
 		{
-		if ( kp >= ( (char *) key + keysz) )		/* Check and reset a pointer to byte in the key buffer */
+		if ( kp >= ep  )				/* Check and reset a pointer to byte in the key buffer */
 			kp = key;
 
 		(*dp) = (*sp) ^ (*kp);				/* XOR */
-
 		}
+
+
+	if ( ctx )						/* Do we need to keep context between calls */
+		*ctx = (kp - ((unsigned char *) key));			/* Store a current key's position */
 
 	return	STS$K_SUCCESS;
 }
