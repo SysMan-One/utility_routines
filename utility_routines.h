@@ -301,12 +301,6 @@ enum	{
 
 #define	STS$M_SYSLOG	16			/* This option force sending message to the syslog service	*/
 
-#define	STS$C__WARN	"W"
-#define	STS$C__SUCCESS	"S"
-#define	STS$C__ERROR	"E"
-#define	STS$C__INFO	"I"
-#define	STS$C__FATAL	"F"
-#define	STS$C__UNDEF	"?"
 
 #define $STS_ERROR(code) 	( ((code) & STS$K_ERROR ) || ((code) & STS$K_ERROR) )
 
