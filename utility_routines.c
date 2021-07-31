@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-01ECO2"
-#define	__REV__		"1.01.2"
+#define	__IDENT__	"V.01-01ECO3"
+#define	__REV__		"1.01.3"
 
 
 /*
@@ -1629,7 +1629,7 @@ int done = FALSE, matched_to_eos = FALSE;
 }
 /******************* end of C_STR$pattern_match *******************/
 
-#if	1
+#if	0
 #ifndef	WIN32
 void	__util$traceback	(void)
 {
@@ -1821,9 +1821,7 @@ int	olen = 0;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	fwrite (out, olen , 1, logoutput ? logoutput : stdout);
-
-	fflush (logoutput ? logoutput : stdout);
+	write (logoutput, out, olen);
 
 	return	STS$K_SUCCESS;
 }
