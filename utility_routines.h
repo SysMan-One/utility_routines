@@ -78,6 +78,54 @@ extern "C" {
 #define	CRLFCRLF	"\r\n\r\n"
 #define	CRLF		"\r\n"
 
+
+
+
+
+#ifndef	WIN32
+
+	#ifndef	_GNU_SOURCE
+		#define	_GNU_SOURCE	1
+	#endif
+
+#include		<sys/syscall.h>
+
+#ifndef ANDROID
+
+static inline pid_t	gettid(void)
+{
+	return	syscall (
+#if defined(__APPLE__) || defined(__OSX__)
+	SYS_thread_selfid
+#else
+		SYS_gettid
+#endif
+	);
+}
+
+
+static inline int	getcpu(void)
+{
+	return	sched_getcpu();
+}
+
+#endif	/* ANDROID */
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /*
  * A Macro to compute an arrays size in elements at compilation time
  */
