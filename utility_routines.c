@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-01ECO4"
-#define	__REV__		"1.01.4"
+#define	__IDENT__	"V.01-01ECO5"
+#define	__REV__		"1.01.5"
 
 
 /*
@@ -68,6 +68,9 @@
 **
 **	12-AUG-2021	RRL	V.01-01ECO4 : Fixed incorrect length of the buffer in the __util$trace().
 **
+**	 8-SEP-2021	RRL	V.01-01ECO5 : Win32 related corrections.
+**				V.01-01ECO5 : Remove useless stuff (getcpu()), some other corrections.
+**
 */
 
 
@@ -108,7 +111,7 @@
 #include	<syslog.h>
 
 #define	PID_FMT		"%6d "
-#define	CPUID_FMT	"[#%02x] "
+
 
 
 	#define	TIMSPECDEVIDER	1000000	/* Used to convert timespec's nanosec tro miliseconds */
@@ -116,7 +119,7 @@
 	#define	gettid()	GetCurrentThreadId()
 	//#define	gettid()	GetCurrentProcessId()
 	#define	TIMSPECDEVIDER	1000	/* Used to convert timeval's microseconds to miliseconds */
-	#define	PID_FMT	"%6d"
+	#define	PID_FMT		"%6d "
 #else
 	#define	gettid()	(0xDEADBEEF)
 #endif
@@ -292,7 +295,7 @@ unsigned	__util$putmsg
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " CPUID_FMT PID_FMT;
+const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT;
 char	out[1024];
 unsigned olen, sev;
 struct tm _tm;
@@ -313,7 +316,7 @@ EMSG_RECORD *msgrec;
 	olen = snprintf (out, sizeof(out), lfmt,			/* Format a prefix part of the message: time + PID ... */
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) getcpu(), (unsigned) gettid());
+		(unsigned) gettid());
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
@@ -355,8 +358,8 @@ unsigned	__util$putmsgd
 
 {
 va_list arglist;
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " CPUID_FMT PID_FMT "[%s\\%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " CPUID_FMT PID_FMT "[%s\\%s\\%u] "};
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT "[%s\\%u] "},
+	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] "};
 char	out[1024];
 unsigned olen, sev;
 struct tm _tm;
@@ -377,10 +380,10 @@ EMSG_RECORD *msgrec;
 	olen = __mod
 		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) getcpu(), (unsigned) gettid(), __mod, __fi, __li)
+			(unsigned) gettid(), __mod, __fi, __li)
 		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) getcpu(), (unsigned) gettid(), __fi, __li);
+			(unsigned) gettid(), __fi, __li);
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
@@ -427,8 +430,8 @@ unsigned	__util$logd
 
 {
 va_list arglist;
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " CPUID_FMT PID_FMT "[%s\\%u] %%%s-%c:"},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " CPUID_FMT PID_FMT "[%s\\%s\\%u] %%%s-%c:"};
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%u] %%%s-%c:"},
+	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] %%%s-%c:"};
 char	out[1024];
 unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
 struct tm _tm = {0};
@@ -450,10 +453,10 @@ struct timespec now = {0};
 	olen = __mod
 		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) getcpu(), (unsigned) gettid(), __mod, __fi, __li, fac, severity[_sev])
+			(unsigned) gettid(), __mod, __fi, __li, fac, severity[_sev])
 		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) getcpu(), (unsigned) gettid(), __fi, __li, fac, severity[_sev]);
+			(unsigned) gettid(), __fi, __li, fac, severity[_sev]);
 
 	va_start (arglist, __li);
 	olen += vsnprintf(out + olen, sizeof(out) - olen, fmt, arglist);
@@ -575,7 +578,7 @@ struct	msghdr  msg_desc = {0};
 	msg_desc.dwBufferCount = sizeof(bufv)/sizeof(bufv[0]);
 
 	/* Form <priority + severity> part, add the tag field */
-	bufv[0].len = sprintf(buf, "<%d> %s: ", fac  + sev, tag);
+	bufv[0].len = snprintf(buf, sizeof(buf), "<%d> %s: ", fac  + sev, tag);
 
 	if ( 0 >  WSASendMsg (sd, &msg_desc, 0, 0, 0, 0) )
 		{
@@ -592,7 +595,7 @@ struct	msghdr  msg_desc = {0};
 	msg_desc.msg_iovlen = sizeof(bufv)/sizeof(bufv[0]);
 
 	/* Form <priority + severity> part, add the tag field */
-	bufv[0].iov_len = sprintf(buf, "<%d> %16s: ", fac  + sev, tag);
+	bufv[0].iov_len = snprintf(buf, sizeof(buf), "<%d> %16s: ", fac  + sev, tag);
 	if ( 0 >  sendmsg (sd, &msg_desc, 0) )
 		{
 		perror("sendto");
@@ -1050,7 +1053,7 @@ struct timespec now;
 	*/
 	for (i = 0; i < ((srclen / 16));  i++)
 		{
-		olen = sprintf(out, "\t+%04x:  ", i * 16);
+		olen = snprintf(out, sizeof(out), "\t+%04x:  ", i * 16);
 		memset(out + olen, ' ', sizeof(out) - olen);
 
 		for (j = 0; j < 16; j++, srcp++)
@@ -1073,7 +1076,7 @@ struct timespec now;
 
 	if ( srclen % 16 )
 		{
-		olen = sprintf(out, "\t+%04x:  ", i * 16);
+		olen = snprintf(out, sizeof(out), "\t+%04x:  ", i * 16);
 		memset(out + olen, ' ', sizeof(out) - olen);
 
 		for (j = 0; j < srclen % 16; j++, srcp++)
@@ -1176,8 +1179,8 @@ void	__util$trace	(
 {
 va_list arglist;
 
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " CPUID_FMT PID_FMT "[%s\\%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " CPUID_FMT PID_FMT "[%s\\%s\\%u] "};
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%u] "},
+	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] "};
 char	out[1024];
 
 unsigned olen;
@@ -1202,10 +1205,10 @@ struct timespec now;
 	olen = __mod
 		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) getcpu(), (unsigned) gettid(), __mod, __fi, __li)
-		: sprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+			(unsigned) gettid(), __mod, __fi, __li)
+		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) getcpu(), (unsigned) gettid(), __fi, __li);
+			(unsigned) gettid(), __fi, __li);
 
 	/*
 	** Format variable part of string line
@@ -1281,7 +1284,7 @@ struct timespec now;
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	olen = sprintf (out, lfmt,
+	olen = snprintf (out, sizeof(out), lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		(unsigned) gettid(), fac, severity[_sev]);
@@ -1363,7 +1366,7 @@ struct timespec now;
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	*outlen = sprintf (__outbuf, lfmt,
+	*outlen = snprintf (__outbuf, sizeof(__outbuf), lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900+_tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		(unsigned) gettid(), fac, severity[sev]);
