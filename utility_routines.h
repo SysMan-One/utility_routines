@@ -38,6 +38,10 @@
 **	10-JUL-2019	RRL	Warning fix.
 **
 **	17-MAR-2021	RRL	Added a set of data structures EMSG_* to support $INIMSG/$PUTMSG/$GETMSG routines.
+**
+**	28-SEP-2021	Anton	Added changes to fix compilation reports;
+**				added an reference to an external logging handler routine.
+**
 */
 
 #if _WIN32
@@ -79,7 +83,10 @@ extern "C" {
 #define	CRLF		"\r\n"
 
 
-
+/*
+ * For bagent logging
+*/
+extern void (*p_cb_log_f)(const char * buf, unsigned int olen);
 
 
 #ifndef	WIN32
@@ -90,7 +97,7 @@ extern "C" {
 
 #include		<sys/syscall.h>
 
-#ifndef ANDROID
+#if !defined(ANDROID) && !defined(Q_OS_LINUX)
 
 static inline pid_t	gettid(void)
 {
@@ -103,13 +110,7 @@ static inline pid_t	gettid(void)
 	);
 }
 
-
-static inline int	getcpu(void)
-{
-	return	sched_getcpu();
-}
-
-#endif	/* ANDROID */
+#endif	/* ANDROID && LINUX*/
 #endif
 
 
@@ -1273,7 +1274,7 @@ unsigned char *__bufp = (unsigned char *) bufp;
 	bufsz %= sizeof(unsigned short);
 
 	if ( bufsz )
-		__bufp = '\0';
+		__bufp = (unsigned char *)'\0';
 
 	return	STS$K_SUCCESS;
 }
@@ -1891,20 +1892,20 @@ int	sz = (srcsz > dstsz) ? dstsz : srcsz;
 	if (ctx && (*ctx > 0) && (*ctx > keysz))		/* Check that <ctx> is in key's area */
 		return	STS$K_ERROR;
 
-	kp = (ctx && *ctx > 0) ? ((unsigned char *) key + (*ctx)) : key;	/* Set key's pointer to initial position */
-	ep = (unsigned char *) key + keysz;				/* Compute end of key address for future use */
+	kp = (ctx && *ctx > 0) ? ((unsigned char *) key + (*ctx)) : (unsigned char *)key;	/* Set key's pointer to initial position */
+	ep = (unsigned char *) key + keysz;			/* Compute end of key address for future use */
 
-	for ( sp = src, dp = dst; sz; sz--, dp++, sp++, kp++ )
+	for ( sp = (unsigned char *)src, dp = (unsigned char *)dst; sz; sz--, dp++, sp++, kp++ )
 		{
 		if ( kp >= ep  )				/* Check and reset a pointer to byte in the key buffer */
-			kp = key;
+			kp = (unsigned char *)key;
 
-		(*dp) = (*sp) ^ (*kp);				/* XOR */
+		(*dp) = (*sp) ^ (*kp);				/* XOR single octet */
 		}
 
 
 	if ( ctx )						/* Do we need to keep context between calls */
-		*ctx = (kp - ((unsigned char *) key));			/* Store a current key's position */
+		*ctx = (kp - ((unsigned char *) key));		/* Store a current key's position */
 
 	return	STS$K_SUCCESS;
 }

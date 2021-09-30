@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-01ECO5"
-#define	__REV__		"1.01.5"
+#define	__IDENT__	"V.01-01ECO6"
+#define	__REV__		"1.01.6"
 
 
 /*
@@ -51,7 +51,7 @@
 **
 **	30-DEC-2019	RRL	Improved error handling during processing _CONF option.
 **
-**	19-MAR-2020	RRL	Addeв O_APPEND flag in call of open() in the __util$deflog().
+**	19-MAR-2020	RRL	Added O_APPEND flag in call of open() in the __util$deflog().
 **
 **	 7-MAY-2020	RRL	Fixed incorrect value of 'mode' argument of open() under Windows.
 **
@@ -70,6 +70,9 @@
 **
 **	 8-SEP-2021	RRL	V.01-01ECO5 : Win32 related corrections.
 **				V.01-01ECO5 : Remove useless stuff (getcpu()), some other corrections.
+**
+**	28-SEP-2021	Anton	V.01-01ECO6 : Changes to allow to use an external message handler for accept messages;
+**			RRL	cleanup from unused stuff, small other fixes.
 **
 */
 
@@ -154,12 +157,17 @@
 
 #endif // _WIN32
 
-static int	g_logoutput = STDOUT_FILENO;	/* Default descriptor for default output device		*/
-
-struct sockaddr_in slogsock;		/* SYSLOG Host socket					*/
+static int	g_logoutput = STDOUT_FILENO;				/* Default descriptor for default output device		*/
 
 
-static EMSG_RECORD_DESC	*emsg_record_desc_root;				/* A root to the message records descriptior */
+void (*p_cb_log_f) (const char * buf, unsigned int olen) = NULL;	/* A reference to an exteranl routine to accept
+									   a has been formated message. It's is supposed to be used
+									   instead of write() to a STDOUT */
+
+struct sockaddr_in slogsock;						/* SYSLOG Host socket					*/
+
+
+static EMSG_RECORD_DESC	*emsg_record_desc_root;				/* A root to the message records descriptior		*/
 
 /*
  *   DESCRIPTION: Message record compare routine
@@ -335,11 +343,13 @@ EMSG_RECORD *msgrec;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen);
+	if ( p_cb_log_f )
+		p_cb_log_f(out, olen);
+	else	write (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
-	#ifdef ANDROID
-		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
+	#ifdef ANDROID_LOGCAT
+		__android_log_print(ANDROID_LOG_VERBOSE, " --- ", "%.*s", olen, out);
 	#endif
 
 	return	sts;
@@ -402,11 +412,13 @@ EMSG_RECORD *msgrec;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen);
+	if ( p_cb_log_f )
+		p_cb_log_f(out, olen);
+	else	write (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
-	#ifdef ANDROID
-		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
+	#ifdef ANDROID_LOGCAT
+		__android_log_print(ANDROID_LOG_VERBOSE, __mod, "%.*s", olen, out);
 	#endif
 
 	return	sts;
@@ -468,10 +480,12 @@ struct timespec now = {0};
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen );
+	if ( p_cb_log_f )
+		p_cb_log_f(out, olen);
+	else	write (g_logoutput, out, olen );
 
 		/* ARL - for android logcat */
-	#ifdef ANDROID
+	#ifdef ANDROID_LOGCAT
 		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
 	#endif
 
@@ -1044,7 +1058,10 @@ struct timespec now;
 
 	/* Add <LF> at end of record*/
 	out[$MIN(olen++, sizeof(out))] = '\n';
-	write (g_logoutput, out, olen );
+
+	if ( p_cb_log_f )
+		p_cb_log_f(out, olen);
+	else	write (g_logoutput, out, olen );
 
 	memset(out, ' ', sizeof(out));
 
@@ -1071,7 +1088,9 @@ struct timespec now;
 		out[sizeof(out) - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
-		write (g_logoutput, out, sizeof(out) );
+		if ( p_cb_log_f )
+			p_cb_log_f(out, sizeof(out));
+		else	write (g_logoutput, out, sizeof(out) );
 		}
 
 	if ( srclen % 16 )
@@ -1094,7 +1113,9 @@ struct timespec now;
 		out[sizeof(out) - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
-		write (g_logoutput, out, sizeof(out) );
+		if ( p_cb_log_f )
+			p_cb_log_f(out, sizeof(out));
+		else	write (g_logoutput, out, sizeof(out) );
 		}
 }
 
@@ -1126,6 +1147,7 @@ unsigned char *srcp = (unsigned char *) src, low, high;
 unsigned j;
 
 	memset(out, ' ', outsz);
+	srclen = $MIN(16, srclen);
 
 	for (j = 0; j < 16; j++, srcp++)
 		{
@@ -1223,12 +1245,14 @@ struct timespec now;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer */
-	write (g_logoutput, out, olen );
+	if ( p_cb_log_f )
+		p_cb_log_f(out, olen);
+	else	write (g_logoutput, out, olen );
 
 
 
 	/* ARL - for android logcat */
-	#ifdef ANDROID
+	#ifdef ANDROID_LOGCAT
 		__android_log_print(ANDROID_LOG_VERBOSE, __mod, "%.*s", olen, out);
 	#endif
 
@@ -1299,10 +1323,12 @@ struct timespec now;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen );
+	if ( p_cb_log_f )
+		p_cb_log_f(out, olen);
+	else	write (g_logoutput, out, olen );
 
 	/* ARL - for android logcat */
-	#ifdef ANDROID
+	#ifdef ANDROID_LOGCAT
 		__android_log_print(ANDROID_LOG_VERBOSE, fac, "%.*s", olen, out);
 	#endif
 
@@ -1366,7 +1392,7 @@ struct timespec now;
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	*outlen = snprintf (__outbuf, sizeof(__outbuf), lfmt,
+	*outlen = snprintf (__outbuf, outsz, lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900+_tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		(unsigned) gettid(), fac, severity[sev]);
@@ -1435,7 +1461,6 @@ int	fd = -1;
 
 
 	return $LOG(STS$K_SUCCESS, "Log file '%s' has been opened.", logfile);
-
 }
 
 
@@ -1804,7 +1829,9 @@ int	olen = 0;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen);
+	if( p_cb_log_f )
+		p_cb_log_f(out, olen);
+	else	write (g_logoutput, out, olen);
 
 	return	STS$K_SUCCESS;
 }
