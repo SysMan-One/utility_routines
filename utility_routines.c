@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-01ECO6"
-#define	__REV__		"1.01.6"
+#define	__IDENT__	"V.01-02"
+#define	__REV__		"1.02.0"
 
 
 /*
@@ -74,6 +74,10 @@
 **	28-SEP-2021	Anton	V.01-01ECO6 : Changes to allow to use an external message handler for accept messages;
 **			RRL	cleanup from unused stuff, small other fixes.
 **
+**	27-OCT-2021	RRL	V.01-01ECO7 : Added some more GCC related stuff to compile w/o warnings.
+**
+**	14-JUN-2022	RRL	V.01-02 : Added some routines.
+**
 */
 
 
@@ -135,9 +139,12 @@
 
 
 #ifndef	WIN32
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored  "-Wparentheses"
-#pragma GCC diagnostic ignored  "-Wpointer-sign"
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored  "-Wparentheses"
+	#pragma GCC diagnostic ignored  "-Wpointer-sign"
+	#pragma GCC diagnostic ignored  "-Wdiscarded-qualifiers"
+	#pragma GCC diagnostic ignored  "-Wunused-variable"
+	#pragma GCC diagnostic ignored	"-Wunused-result"
 #endif
 
 #ifdef _WIN32
@@ -435,19 +442,19 @@ unsigned	__util$logd
 		unsigned	sev,
 		const char *	fmt,
 		const char *	__mod,
-		const char *	__fi,
-		unsigned	__li,
+		const char *	__func,
+		unsigned	__line,
 			...
 			)
 
 {
 va_list arglist;
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%u] %%%s-%c:"},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] %%%s-%c:"};
+const char	__fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] %%%s-%c:  "};
 char	out[1024];
 unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
 struct tm _tm = {0};
 struct timespec now = {0};
+
 
 	sev &= ~STS$M_SYSLOG;
 
@@ -462,15 +469,11 @@ struct timespec now = {0};
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	olen = __mod
-		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+	olen = snprintf (out, sizeof(out), __fmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __mod, __fi, __li, fac, severity[_sev])
-		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __fi, __li, fac, severity[_sev]);
+			(unsigned) gettid(), __mod, __func, __line, fac, severity[_sev]);
 
-	va_start (arglist, __li);
+	va_start (arglist, __line);
 	olen += vsnprintf(out + olen, sizeof(out) - olen, fmt, arglist);
 	va_end (arglist);
 
@@ -636,7 +639,7 @@ struct	msghdr  msg_desc = {0};
  *
  */
 int	__util$showparams	(
-			OPTS *	opts
+			const OPTS *	opts
 			)
 {
 OPTS	*optp;
@@ -822,10 +825,12 @@ OPTS	*optp, *optp2;
 				break;
 
 			case	OPTS$K_INT:
+				{
+				char *endptr = NULL;
+
+
 				switch ( optp->sz )
 					{
-					char *endptr = NULL;
-
 					case (sizeof (unsigned long long)):
 						* ((unsigned long long *) optp->ptr) =  strtoull(valp, &endptr, 0);
 						break;
@@ -835,6 +840,7 @@ OPTS	*optp, *optp2;
 						break;
 
 					}
+				}
 				break;
 
 			case	OPTS$K_PWD:
@@ -876,7 +882,7 @@ OPTS	*optp, *optp2;
 int	__util$getparams	(
 			int	argc,
 			char *	argv[],
-			OPTS *	opts
+		const OPTS *	opts
 			)
 {
 int	i;
@@ -977,10 +983,11 @@ OPTS	*optp;
 				break;
 
 			case	OPTS$K_INT:
+				{
+				char *endptr = NULL;
+
 				switch ( optp->sz )
 					{
-					char *endptr = NULL;
-
 					case (sizeof (unsigned long long)):
 						* ((unsigned long long *) optp->ptr) =  strtoull(valp, &endptr, 0);
 						break;
@@ -990,6 +997,7 @@ OPTS	*optp;
 						break;
 
 					}
+				}
 				break;
 
 			case	OPTS$K_PWD:
@@ -1027,9 +1035,9 @@ OPTS	*optp;
  */
 
 void	__util$dumphex	(
-		char *	__fi,
+		const char *	__fi,
 		unsigned	__li,
-		void *	src,
+		const void *	src,
 		unsigned short	srclen
 			)
 {
@@ -1189,6 +1197,7 @@ unsigned j;
  *
  *--
  */
+const	char spaces[32] = {"                                "};
 
 void	__util$trace	(
 			int	cond,
@@ -1204,8 +1213,7 @@ va_list arglist;
 const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%u] "},
 	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] "};
 char	out[1024];
-
-unsigned olen;
+int	olen, len;
 struct tm _tm;
 struct timespec now;
 
@@ -1231,6 +1239,12 @@ struct timespec now;
 		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 			(unsigned) gettid(), __fi, __li);
+
+	if ( 0 < (len = (64 - olen)) )
+		{
+		memcpy(out + olen, spaces, len);
+		olen += len;
+		}
 
 	/*
 	** Format variable part of string line
@@ -2220,4 +2234,16 @@ char	buf[1024];
 	return STS$K_SUCCESS;
 }
 #endif
+#endif
+
+
+
+
+
+
+
+
+
+#ifndef	WIN32
+#pragma GCC diagnostic pop
 #endif

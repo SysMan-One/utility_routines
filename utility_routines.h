@@ -73,9 +73,10 @@ extern "C" {
 #include	<string.h>
 
 #ifndef	WIN32
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored  "-Wparentheses"
-#pragma GCC diagnostic ignored  "-Wpointer-sign"
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored  "-Wparentheses"
+	#pragma GCC diagnostic ignored  "-Wpointer-sign"
+	#pragma GCC diagnostic ignored	"-Wunused-result"
 #endif
 
 #define	CRLFCRLF_LW	0x0a0d0a0d
@@ -407,9 +408,10 @@ unsigned	__util$putmsgd	(unsigned sts, const char *__mod, const char *__fi, unsi
 
 
 unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
-unsigned	__util$logd	(const char *fac, unsigned severity, const char *fmt, const char *mod, const char *func, unsigned line, ...);
+unsigned	__util$logd	(const char *fac, unsigned severity, const char *fmt, const char *mod, const char *__func, unsigned __line, ...);
 unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
+unsigned	__util$out	(char *fmt, ...);
 
 #ifdef	_DEBUG
 	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
@@ -1354,12 +1356,16 @@ int	status;
 }
 
 #define	$DUMPHEX(s,l)	__util$dumphex(__FUNCTION__, __LINE__ , s, l)
-void	__util$dumphex	(char *__fi, unsigned __li, void  * src, unsigned short srclen);
+void	__util$dumphex	(const char *__fi, unsigned __li, const void *src, unsigned short srclen);
 
 /*
 ** @RRL: Perform an addittion of two times with overflow control and handling.
 */
-inline static void __util$add_time(struct timespec* time1, struct timespec* time2, struct timespec* result_time)
+inline static void __util$add_time(
+		const struct timespec* time1,
+		const struct timespec* time2,
+		struct timespec* result_time
+		)
 {
 time_t sec = time1->tv_sec + time2->tv_sec;
 long nsec = time1->tv_nsec + time2->tv_nsec;
@@ -1445,10 +1451,10 @@ typedef struct _opts	{
 
 #define	OPTS_NULL { {0, 0}, NULL, 0, 0}
 
-int	__util$getparams	(int, char *[], OPTS *);
+int	__util$getparams	(int, char *[], const OPTS *);
 int	__util$readparams	(int, char *[], OPTS *);
 int	__util$readconfig	(char *, OPTS *);
-int	__util$showparams	(OPTS *	opts);
+int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);
 int	__util$rewindlogfile	(int);
@@ -1840,7 +1846,7 @@ int	len;
 static inline	int	__util$fill	(
 		void	*	dst,
 		int		dstsz,
-		void	*	src,
+	const void	*	src,
 		int		srcsz
 			)
 {
@@ -2003,6 +2009,147 @@ static inline int	__util$movc5	(
 #ifdef	__TRACE__
 //	#define	$TRACEBACK(expr)	{if ( (expr) ) __util$traceback ( #expr, (expr) ); }
 #endif
+
+
+
+
+/* Follow stuff are for debug/development purpose only	*/
+
+typedef	struct __sym_rec__ {
+	unsigned long long	val;		/* binary value or mask		*/
+	unsigned char		len, *sym;	/* ASCII counted string		*/
+} SYM_REC;
+
+
+
+
+
+/*
+ *  DESCRIPTION: translate mask of bits to human readable ASCII string
+ *
+ *  INPUTS:
+ *      mask:   64-bits unsigned long long
+ *      tbl:    a table of bit = bit's name
+ *      src:    a buffer to accept output
+ *      srcsz:  a size of the buffer
+ *
+ *  OUTPUTS:
+ *      NONE
+ *
+ *  RETURNS:
+ *	length of actual data in the output buffer
+ */
+static inline int	__util$mask2sym	(
+	unsigned long long	 mask,
+	const	SYM_REC		*sym,
+		unsigned char	*out,
+			int	 outsz
+			)
+{
+int	outlen = 0;
+
+	for ( ; sym->val && sym->sym; sym++)
+		{
+		if ( !(mask & sym->val) )
+			continue;
+
+		if ( outsz > sym->len )
+			{
+			if ( outlen )
+				{
+				*(out++) = '|';
+				outlen++;
+				outsz--;
+				}
+
+			memcpy(out, sym->sym, sym->len);
+			out	+= sym->len;
+			outlen	+= sym->len;
+			outsz	-= sym->len;
+			}
+		else	break;
+		}
+
+	*out = '\0';
+
+	return	outlen;
+}
+
+
+
+/*
+ *  DESCRIPTION:    translate value to human readable ASCII string
+ *
+ *  INPUTS:
+ *      dst:    value, 64-bits unsigned long long
+ *      tbl:    a table of bit = bit's name
+ *      src:    a buffer to accept output
+ *      srcsz:  a size of the buffer
+ *
+ *  OUTPUTS:
+ *      NONE
+ *
+ *  RETURNS:
+ *      length of actual data in the output buffer
+ */
+static inline int	__util$val2sym	(
+	unsigned long long	 val,
+	const	SYM_REC		*sym,
+		unsigned char	*out,
+			int	 outsz
+			)
+{
+int	outlen = 0;
+
+	for ( sym = sym; sym->len && sym->sym; sym++)
+		{
+		if ( (val != sym->val) )
+			continue;
+
+		if ( outsz > sym->len )
+			{
+			memcpy(out, sym->sym, sym->len);
+			out	+= sym->len;
+			outlen	+= sym->len;
+
+			break;
+			}
+		}
+
+	*out = '\0';
+
+	return	outlen;
+}
+
+
+
+
+
+
+
+
+#define	$SYM_REC_INI(s) {s, sizeof(#s)-1, #s}
+#define	$SYM_REC_EOL	{0, 0, NULL}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #ifndef	WIN32
 #pragma GCC diagnostic pop
