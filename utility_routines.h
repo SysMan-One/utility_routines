@@ -1288,7 +1288,7 @@ unsigned char *__bufp = (unsigned char *) bufp;
 /* Tracing facility	*/
 void	__util$trace	(int cond, const char *fmt, const char *mod, const char *func, unsigned line, ...);
 
-#ifdef	__TRACE__
+#ifndef	NDEBUG
 	#ifndef	$TRACE
 		#define $TRACE(fmt, ...)	__util$trace(1, fmt, __MODULE__, __FUNCTION__, __LINE__ , ## __VA_ARGS__)
 	#endif
