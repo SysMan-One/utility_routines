@@ -397,7 +397,7 @@ typedef struct __emsg_record_desc__ {
 		struct __emsg_record_desc__	*link;		/* A link to next Message Descriptor */
 		unsigned		msgnr;			/* A number of messages in the msgs[] */
 		unsigned		facno;			/* A facility number */
-		struct __emsg_record__	*msgrec;			/* An address of the message records */
+		struct __emsg_record__	*msgrec;		/* An address of the message records */
 } EMSG_RECORD_DESC;
 
 
@@ -413,7 +413,7 @@ unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, un
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
 unsigned	__util$out	(char *fmt, ...);
 
-#ifdef	_DEBUG
+#ifndef	NDEBUG
 	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $LOG(severity, fmt, ...)	__util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : severity
