@@ -71,6 +71,9 @@ extern "C" {
 #include	<limits.h>
 #include	<stdarg.h>
 #include	<string.h>
+#include	<pthread.h>
+#include	<unistd.h>
+
 
 #ifndef	WIN32
 	#pragma GCC diagnostic push
@@ -84,10 +87,21 @@ extern "C" {
 #define	CRLF		"\r\n"
 
 
+#ifndef	likely
+	#define likely(x)       __builtin_expect((x),1)
+#endif
+
+#ifndef	unlikely
+	#define unlikely(x)     __builtin_expect((x),0)
+#endif
+
+
 /*
  * For bagent logging
 */
 extern void (*p_cb_log_f)(const char * buf, unsigned int olen);
+
+
 
 
 #ifndef	WIN32
@@ -100,23 +114,38 @@ extern void (*p_cb_log_f)(const char * buf, unsigned int olen);
 
 #if !defined(ANDROID) && !defined(Q_OS_LINUX)
 
+
+
+#if	0 //_REENTRANT
+static inline pid_t	gettid(void)
+{
+
+pthread_t	tid = 0;
+
+
+	tid = pthread_self();
+	tid = tid < 0 ? getpid() : tid;
+
+	return	-tid;
+}
+#else
+
+
 static inline pid_t	gettid(void)
 {
 	return	syscall (
 #if defined(__APPLE__) || defined(__OSX__)
 	SYS_thread_selfid
 #else
-		SYS_gettid
-#endif
+	SYS_gettid
+#endif	/* ANDROID && LINUX*/
 	);
 }
 
-#endif	/* ANDROID && LINUX*/
+#endif	/* #if !defined(ANDROID) && !defined(Q_OS_LINUX) */
+#endif	/* #ifndef	WIN32 */
+
 #endif
-
-
-
-
 
 
 
@@ -384,8 +413,8 @@ typedef	struct __emsg_record__	{
 
 #pragma pack(push, 1)
 		struct {
-		unsigned char	textl,				/* Message FAO, ASCIC */
-				text[254];
+		unsigned char	textl;				/* Message FAO, ASCIC */
+			char	text[254];
 		};
 #pragma pack(pop)
 
@@ -1238,10 +1267,10 @@ unsigned char *__bufp = (unsigned char *) bufp;
  */
 inline static int __util$bzero	(
 		void *	bufp,
-		int	bufsz
+		size_t	bufsz
 			)
 {
-int	i;
+size_t	i;
 unsigned char *__bufp = (unsigned char *) bufp;
 
 	/*
@@ -1340,6 +1369,23 @@ inline static int	__util$str2asc
 }
 
 
+/* Copying ASCIIZ string to ASCIC container */
+inline static int	__util$asc2str
+			(
+		ASC *	src,
+		char *	dst
+
+			)
+{
+	memcpy(dst, $ASCPTR(src), $ASCLEN(src) );
+	*(dst + $ASCLEN(src)) = '\0';
+
+	return	$ASCLEN(src);
+}
+
+
+
+
 /* Comparing two ASCIC */
 inline static int	__util$cmpasc
 			(
@@ -1354,6 +1400,47 @@ int	status;
 
 	return	memcmp($ASCPTR(s1), $ASCPTR(s2), $ASCLEN(s1) );
 }
+
+
+
+/* Comparing two ASCIC */
+inline static int	__util$cmpasc_blind
+			(
+		ASC *	s1,
+		ASC *	s2
+			)
+{
+int	status;
+
+	if ( status = ($ASCLEN(s1) - $ASCLEN(s2)) )
+		return	status;
+
+	return	strncasecmp($ASCPTR(s1), $ASCPTR(s2), $ASCLEN(s1) );
+}
+
+
+
+
+
+
+/* Copy ASCIC */
+inline static int	__util$cpyasc
+			(
+		ASC *	a_src,
+		ASC *	a_dst
+			)
+{
+
+	$ASCLEN(a_dst) =  $ASCLEN(a_src);
+
+	memmove($ASCPTR(a_dst), $ASCPTR(a_src), $ASCLEN(a_dst)) ;
+
+	return	$ASCLEN(a_dst);
+}
+
+
+
+
 
 #define	$DUMPHEX(s,l)	__util$dumphex(__FUNCTION__, __LINE__ , s, l)
 void	__util$dumphex	(const char *__fi, unsigned __li, const void *src, unsigned short srclen);
@@ -1457,7 +1544,7 @@ int	__util$readconfig	(char *, OPTS *);
 int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);
-int	__util$rewindlogfile	(int);
+int	__util$rewindlogfile	(ssize_t);
 int	__util$pattern_match	(char * str$, char * pattern$);
 
 char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);

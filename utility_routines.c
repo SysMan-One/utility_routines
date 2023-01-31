@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-02"
-#define	__REV__		"1.02.0"
+#define	__IDENT__	"V.01-02ECO2"
+#define	__REV__		"1.02.2"
 
 
 /*
@@ -78,6 +78,10 @@
 **
 **	14-JUN-2022	RRL	V.01-02 : Added some routines.
 **
+**	10-NOV-2021	RRL	V.01-02ECO1 : Reduced compilation warnings
+**
+**	 9-DEC-2022	RRL	V.01-02ECO2 : Reduced GCC's compilation warnings
+**
 */
 
 
@@ -117,15 +121,16 @@
 #include	<arpa/inet.h>
 #include	<syslog.h>
 
-#define	PID_FMT		"%6d "
+#define	UTIL$T_PID_FMT	"%6d "
+#define	UTIL$SZ_OUTBUF	2048
 
 
+	#define	TIMSPECDEVIDER	(1024*1024)	/* Used to convert timespec's nanosec tro miliseconds */
 
-	#define	TIMSPECDEVIDER	1000000	/* Used to convert timespec's nanosec tro miliseconds */
 #elif	_WIN32
 	#define	gettid()	GetCurrentThreadId()
 	//#define	gettid()	GetCurrentProcessId()
-	#define	TIMSPECDEVIDER	1000	/* Used to convert timeval's microseconds to miliseconds */
+	#define	TIMSPECDEVIDER	1024		/* Used to convert timeval's microseconds to miliseconds */
 	#define	PID_FMT		"%6d "
 #else
 	#define	gettid()	(0xDEADBEEF)
@@ -140,11 +145,7 @@
 
 #ifndef	WIN32
 	#pragma GCC diagnostic push
-	#pragma GCC diagnostic ignored  "-Wparentheses"
-	#pragma GCC diagnostic ignored  "-Wpointer-sign"
-	#pragma GCC diagnostic ignored  "-Wdiscarded-qualifiers"
-	#pragma GCC diagnostic ignored  "-Wunused-variable"
-	#pragma GCC diagnostic ignored	"-Wunused-result"
+	//#pragma GCC diagnostic ignored  "-Wdiscarded-qualifiers"
 #endif
 
 #ifdef _WIN32
@@ -206,7 +207,7 @@ const EMSG_RECORD *m1 = a, *m2 = b;
  *	emsg_record_desc_root
  *
  *   INPUTS:
- *	msgdsc:	Message Records Descriptior
+ *	msgdsc:	Message Records Descriptor
  *
  *   OUTPUTS:
  *	NONE
@@ -241,7 +242,7 @@ EMSG_RECORD_DESC *md;
 
 
 /*
- *   DESCRIPTION: Retreive message record by using message number code.
+ *   DESCRIPTION: Retrieve message record by using message number code.
  *
  *   IMPLICITE INPUTS:
  *	emsg_record_desc_root
@@ -269,7 +270,7 @@ EMSG_RECORD *msgrec;
 			break;
 
 	if ( !msgdsc )
-		return	STS$K_ERROR;		/* RNF */
+		return	STS$K_ERROR;		/* RNF - Record-Not-Found */
 
 	/* We found message records descriptor for the facility,
 	 * so we can try to find the message record with the given <msgno>
@@ -310,9 +311,9 @@ unsigned	__util$putmsg
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT;
-char	out[1024];
-unsigned olen, sev;
+const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT;
+char	out[UTIL$SZ_OUTBUF + 8];
+int	olen, sev;
 struct tm _tm;
 struct timespec now;
 EMSG_RECORD *msgrec;
@@ -328,20 +329,20 @@ EMSG_RECORD *msgrec;
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	olen = snprintf (out, sizeof(out), lfmt,			/* Format a prefix part of the message: time + PID ... */
+	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,			/* Format a prefix part of the message: time + PID ... */
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		(unsigned) gettid());
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
-		va_start (arglist, sts);				/* Fromat text message */
-		olen += vsnprintf(out + olen, sizeof(out) - olen, msgrec->text, arglist);
+		va_start (arglist, sts);				/* Format text message */
+		olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, msgrec->text, arglist);
 		va_end (arglist);
 		}
 	else	{							/* Format text message with the default FAO */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, sizeof(out) - olen, defmsgfao, severity[sev], sts,
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, defmsgfao, severity[sev], sts,
 			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
 		}
 
@@ -350,9 +351,7 @@ EMSG_RECORD *msgrec;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	if ( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen);
+	write (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -361,8 +360,6 @@ EMSG_RECORD *msgrec;
 
 	return	sts;
 }
-
-
 
 unsigned	__util$putmsgd
 			(
@@ -375,10 +372,10 @@ unsigned	__util$putmsgd
 
 {
 va_list arglist;
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT "[%s\\%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] "};
-char	out[1024];
-unsigned olen, sev;
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "[%s:%u] "},
+	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] "};
+char	out[UTIL$SZ_OUTBUF + 8];
+size_t olen, sev;
 struct tm _tm;
 struct timespec now;
 EMSG_RECORD *msgrec;
@@ -395,23 +392,23 @@ EMSG_RECORD *msgrec;
 #endif
 
 	olen = __mod
-		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+		? snprintf (out, UTIL$SZ_OUTBUF, mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 			(unsigned) gettid(), __mod, __fi, __li)
-		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+		: snprintf (out, UTIL$SZ_OUTBUF, lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 			(unsigned) gettid(), __fi, __li);
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
 		va_start (arglist, __li);				/* Fromat text message */
-		olen += vsnprintf(out + olen, sizeof(out) - olen, msgrec->text, arglist);
+		olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, msgrec->text, arglist);
 		va_end (arglist);
 		}
 	else	{							/* Format text message with the default FAO */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, sizeof(out) - olen, defmsgfao, severity[sev], sts,
-			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, defmsgfao, severity[sev], sts,
+			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
 		}
 
 
@@ -419,9 +416,7 @@ EMSG_RECORD *msgrec;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	if ( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen);
+	write (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -449,9 +444,12 @@ unsigned	__util$logd
 
 {
 va_list arglist;
-const char	__fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] %%%s-%c:  "};
-char	out[1024];
-unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
+const char	__fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] %%%s-%c:  "};
+char	out[UTIL$SZ_OUTBUF + 8];
+unsigned olen, _sev = $SEV(sev);
+#ifdef	__SYSLOG__
+unsigned opcom = sev & STS$M_SYSLOG;
+#endif
 struct tm _tm = {0};
 struct timespec now = {0};
 
@@ -469,23 +467,21 @@ struct timespec now = {0};
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	olen = snprintf (out, sizeof(out), __fmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
+	olen = snprintf (out, UTIL$SZ_OUTBUF, __fmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 			(unsigned) gettid(), __mod, __func, __line, fac, severity[_sev]);
 
 	va_start (arglist, __line);
-	olen += vsnprintf(out + olen, sizeof(out) - olen, fmt, arglist);
+	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
 	va_end (arglist);
 
-	olen = $MIN(olen, sizeof(out) - 1);
+	olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	if ( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen );
+	write (g_logoutput, out, olen );
 
 		/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -496,7 +492,7 @@ struct timespec now = {0};
 #ifdef	__SYSLOG__
 #ifndef	WIN32
 	va_start (arglist, __li);
-	olen = vsnprintf(out, sizeof(out), fmt, arglist);
+	olen = vsnprintf(out, UTIL$SZ_OUTBUF, fmt, arglist);
 	va_end (arglist);
 
 	__util$syslog (LOG_USER, LOG_DEBUG, fac, out, olen);
@@ -505,7 +501,7 @@ struct timespec now = {0};
 #endif
 #endif	/* __SYSLOG__ */
 
-	return	_sev;
+	return	sev;
 }
 
 
@@ -556,7 +552,7 @@ WSAMSG msg_desc = { 0 };
 WSABUF   bufv[] = {{buf, 0}, {msg, msglen}};
 
 #else
-struct	iovec bufv[] = {{buf, 0}, {msg, msglen}};
+struct	iovec bufv[] = {{buf, 0}, {(void *) msg, msglen}};
 struct	msghdr  msg_desc = {0};
 #endif
 
@@ -644,7 +640,7 @@ int	__util$showparams	(
 {
 OPTS	*optp;
 
-	for (optp = opts; $ASCLEN(&optp->name); optp++)
+	for (optp = (OPTS *) opts; $ASCLEN(&optp->name); optp++)
 		{
 		switch ( optp->type )
 			{
@@ -718,7 +714,7 @@ int	__util$readconfig	(
 int	i, argslen;
 FILE	*finp = stdin;
 const char novalp [ 32 ] = {0};
-char	*argp, *valp = novalp, buf[256];
+char	*argp, *valp = (char *) novalp, buf[256];
 OPTS	*optp, *optp2;
 
 	/*
@@ -743,18 +739,18 @@ OPTS	*optp, *optp2;
 
 		if ( (*(argp = buf) != '-') && (*(argp = buf) != '/') )
 			{
-			$LOG(STS$K_ERROR, "%s : %d : Option must be started with a '-' or '/', skip : '%s'", fconf, i, buf);
+			$LOG(STS$K_ERROR, "%s :%d : Option must be started with a '-' or '/', skip : '%s'", fconf, i, buf);
 			continue;
 			}
 
-		if ( valp = strchr(++argp, '=') )
+		if ( (valp = strchr(++argp, '=')) )
 			{
 			argslen = (int) (valp - argp);
 			valp++;
 			}
 		else	{
 			argslen = (int) strlen(argp);
-			valp = novalp;
+			valp = (char *) novalp;
 			}
 
 
@@ -795,7 +791,7 @@ OPTS	*optp, *optp2;
 
 		if ( !optp2 || !$ASCLEN(&optp2->name) )
 			{
-			$LOG(STS$K_WARN, "%s : %d : Skip unrecognized or unused option", fconf, i);
+			$LOG(STS$K_WARN, "%s :%d : Skip unrecognized or unused option", fconf, i);
 			continue;
 			}
 
@@ -817,7 +813,7 @@ OPTS	*optp, *optp2;
 #else
 				if ( !inet_aton(valp, (struct in_addr *) optp->ptr) )
 #endif
-					$LOG(STS$K_ERROR, "%s : %d : Error conversion '%s' to IP4 address", fconf, i, valp);
+					$LOG(STS$K_ERROR, "%s :%d : Error conversion '%s' to IP4 address", fconf, i, valp);
 				break;
 
 			case	OPTS$K_OPT:
@@ -851,7 +847,7 @@ OPTS	*optp, *optp2;
 				break;
 
 			default:
-				$LOG(STS$K_ERROR, "%s : %d : Unrecognized option's '%.*s' internal type : 0x%X", fconf, i, $ASC(&optp->name), optp->type);
+				$LOG(STS$K_ERROR, "%s :%d : Unrecognized option's '%.*s' internal type : 0x%X", fconf, i, $ASC(&optp->name), optp->type);
 			}
 		}
 
@@ -888,7 +884,7 @@ int	__util$getparams	(
 int	i;
 size_t	argslen;
 const char novalp [ 32 ] = {0};
-char	*argp, *valp = novalp;
+char	*argp, *valp = (char *) novalp;
 OPTS	*optp;
 
 
@@ -911,14 +907,14 @@ OPTS	*optp;
 			continue;
 			}
 
-		if ( valp = strchr(++argp, '=') )
+		if ( (valp = strchr(++argp, '=')) )
 			{
 			argslen = valp - argp;
 			valp++;
 			}
 		else	{
 			argslen = strlen(argp);
-			valp = novalp;
+			valp = (char *) novalp;
 			}
 
 		/*
@@ -927,7 +923,7 @@ OPTS	*optp;
 		*
 		* We allow an shortened keywords but it can be a reao of conflicts.
 		*/
-		for (optp = opts; $ASCLEN(&optp->name); optp++)
+		for (optp = (OPTS *) opts; $ASCLEN(&optp->name); optp++)
 			{
 			if ( argslen != $ASCLEN(&optp->name) )
 				continue;
@@ -960,7 +956,7 @@ OPTS	*optp;
 					((ASC *)optp->ptr)->sts[((ASC *)optp->ptr)->len] = '\0';
 					}
 
-				if ( !(1 & __util$readconfig (valp, opts)) )
+				if ( !(1 & __util$readconfig (valp, (OPTS *) opts)) )
 					return	STS$K_ERROR;
 
 				break;
@@ -1041,7 +1037,7 @@ void	__util$dumphex	(
 		unsigned short	srclen
 			)
 {
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u [%s\\%u] Dump of %u octets follows:"};
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u [%s:%u] Dump of %u octets follows:"};
 char	out[80];
 unsigned char *srcp = (unsigned char *) src, low, high;
 unsigned olen = 0, i, j;
@@ -1197,7 +1193,7 @@ unsigned j;
  *
  *--
  */
-const	char spaces[32] = {"                                "};
+const	char spaces[64] = {"                                                                "};
 
 void	__util$trace	(
 			int	cond,
@@ -1210,8 +1206,8 @@ void	__util$trace	(
 {
 va_list arglist;
 
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  PID_FMT "[%s\\%s\\%u] "};
+const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s:%u] "},
+	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] "};
 char	out[1024];
 int	olen, len;
 struct tm _tm;
@@ -1240,7 +1236,7 @@ struct timespec now;
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 			(unsigned) gettid(), __fi, __li);
 
-	if ( 0 < (len = (64 - olen)) )
+	if ( 0 < (len = (72 - olen)) )
 		{
 		memcpy(out + olen, spaces, len);
 		olen += len;
@@ -1284,10 +1280,6 @@ struct timespec now;
 
 }
 
-/*
- *
- */
-//const char severity[STS$K_MAX][16] = { "-W: ", "-S: ", "-E: ", "-I: ", "-F: ", "-?: "};
 
 unsigned	__util$log
 			(
@@ -1299,8 +1291,8 @@ unsigned	__util$log
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT "%%%s-%C: ";
-char	out[1024];
+const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "%%%s-%C: ";
+char	out[UTIL$SZ_OUTBUF + 8];
 unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
 struct tm _tm;
 struct timespec now;
@@ -1322,13 +1314,13 @@ struct timespec now;
 	localtime_r((time_t *)&now, &_tm);
 #endif
 
-	olen = snprintf (out, sizeof(out), lfmt,
+	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		(unsigned) gettid(), fac, severity[_sev]);
 
 	va_start (arglist, fmt);
-	olen += vsnprintf(out + olen, sizeof(out) - olen, fmt, arglist);
+	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
 	va_end (arglist);
 
 	olen = $MIN(olen, sizeof(out) - 1);
@@ -1337,9 +1329,7 @@ struct timespec now;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	if ( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen );
+	write (g_logoutput, out, olen );
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -1351,14 +1341,14 @@ struct timespec now;
 	if ( opcom )
 		{
 		va_start (arglist, fmt);
-		olen = vsnprintf(out, sizeof(out), fmt, arglist);
+		olen = vsnprintf(out, UTIL$SZ_OUTBUF, fmt, arglist);
 		va_end (arglist);
 
 		syslog( LOG_PID | ((sev & 1) ? LOG_INFO : LOG_ERR), "%.*s", olen, out);
 		}
 #endif
 
-	return	_sev;
+	return	sev;
 }
 
 /**
@@ -1383,7 +1373,7 @@ unsigned	__util$log2buf
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " PID_FMT "%%%s-%C:";
+const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "%%%s-%C:";
 char	*__outbuf = (char *) out;
 unsigned	_sev = sev;
 struct tm _tm;
@@ -1485,7 +1475,7 @@ int	fd = -1;
  *	condition status, see STS$ constants
  */
 int	__util$rewindlogfile	(
-			int	limit
+			ssize_t	limit
 				)
 {
 int	status;
@@ -2128,7 +2118,7 @@ DWORD WINAPI worker_f2b (void *arg)
 int	status, count, i;
 struct _stm_buf	* sbuf;
 
-	$LOG(STS$K_INFO, "tid : %d running ...", GetCurrentThreadId());
+	$LOG(STS$K_INFO, "tid :%d running ...", GetCurrentThreadId());
 
 	for (i = 0; i < 10000 * 500; i++)
 		{
@@ -2157,7 +2147,7 @@ DWORD WINAPI worker_b2f (void *arg)
 	int	status, count, i;
 	struct _stm_buf	* sbuf;
 
-	$LOG(STS$K_INFO, "tid : %d running ...", GetCurrentThreadId());
+	$LOG(STS$K_INFO, "tid :%d running ...", GetCurrentThreadId());
 
 	for (i = 0; i < 10000 * 500; i++)
 		{
@@ -2219,14 +2209,14 @@ char	buf[1024];
 	for (i = 0; i <  32; i++)
 		{
 		if ( (scan_tid = CreateThread(NULL, 0, worker_f2b, NULL, 0, NULL)) == NULL )
-			return $LOG(STS$K_ERROR, "Creation streaming thread was failed : %d", GetLastError());
+			return $LOG(STS$K_ERROR, "Creation streaming thread was failed :%d", GetLastError());
 		}
 
 
 	for (i = 0; i <  32; i++)
 		{
 		if ( (scan_tid = CreateThread(NULL, 0, worker_b2f, NULL, 0, NULL)) == NULL )
-			return $LOG(STS$K_ERROR, "Creation streaming thread was failed : %d", GetLastError());
+			return $LOG(STS$K_ERROR, "Creation streaming thread was failed :%d", GetLastError());
 		}
 
 	WaitForSingleObject(scan_tid, INFINITE);
