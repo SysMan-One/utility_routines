@@ -1357,7 +1357,7 @@ typedef	struct _asc
 /* Copying ASCIIZ string to ASCIC container */
 inline static int	__util$str2asc
 			(
-		char *	src,
+	const char *	src,
 		ASC *	dst
 			)
 {
