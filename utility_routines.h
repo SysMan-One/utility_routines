@@ -79,11 +79,6 @@ extern "C" {
 #ifndef	WIN32
 	#include	<pthread.h>
 	#include	<unistd.h>
-
-	//#pragma GCC diagnostic push
-	//#pragma GCC diagnostic ignored  "-Wparentheses"
-	//#pragma GCC diagnostic ignored  "-Wpointer-sign"
-	//#pragma GCC diagnostic ignored	"-Wunused-result"
 #endif
 
 #define	CRLFCRLF_LW	0x0a0d0a0d
@@ -1598,7 +1593,7 @@ typedef struct _opts	{
 
 int	__util$getparams	(int, char *[], const OPTS *);
 int	__util$readparams	(int, char *[], OPTS *);
-int	__util$readconfig	(char *, OPTS *);
+int	__util$readconfig	(const char *, OPTS *);
 int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);

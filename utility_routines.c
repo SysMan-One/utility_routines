@@ -707,7 +707,7 @@ OPTS	*optp;
  *
  */
 int	__util$readconfig	(
-			char *	fconf,
+		const	char *	fconf,
 			OPTS *	opts
 			)
 {
