@@ -42,6 +42,10 @@
 **	28-SEP-2021	Anton	Added changes to fix compilation reports;
 **				added an reference to an external logging handler routine.
 **
+**	19-MAR-2023	RRL	Added int __util$uint32_2_dec()
+**
+**	26-JUN-2023	RRL	Revised and refacttored __util$lookup_key
+**
 */
 
 #if _WIN32
@@ -71,28 +75,30 @@ extern "C" {
 #include	<limits.h>
 #include	<stdarg.h>
 #include	<string.h>
-#include	<pthread.h>
-#include	<unistd.h>
+
 
 
 #ifndef	WIN32
-	#pragma GCC diagnostic push
-	#pragma GCC diagnostic ignored  "-Wparentheses"
-	#pragma GCC diagnostic ignored  "-Wpointer-sign"
-	#pragma GCC diagnostic ignored	"-Wunused-result"
+	#include	<pthread.h>
+	#include	<unistd.h>
 #endif
 
 #define	CRLFCRLF_LW	0x0a0d0a0d
 #define	CRLFCRLF	"\r\n\r\n"
 #define	CRLF		"\r\n"
 
-
+#ifdef		WIN32
+	#define likely(x)       (x)
+	#define unlikely(x)     (x)
+#else
 #ifndef	likely
 	#define likely(x)       __builtin_expect((x),1)
 #endif
 
 #ifndef	unlikely
 	#define unlikely(x)     __builtin_expect((x),0)
+#endif
+
 #endif
 
 
@@ -1354,10 +1360,55 @@ typedef	struct _asc
 #define	$ASCNIL		0,0
 
 
+
+
+/*
+ *   DESCRIPTION: Convert 32-x bits unsigned interegr ot the decimal text string.
+ *
+ *   INPUT:
+ *	a_src:		Source value to be converted, unsigned long
+ *	a_dst:		An address of the destination buffer
+ *	a_dstsz:	A size of the destination buffer
+ *
+ *   OUTPUT:
+ *	[a_retlen]:	A length of the result decimal string, optional
+ */
+inline	static int __util$uint32_2_dec
+		(
+	unsigned int	a_src,
+		char	*a_dst,
+		size_t	a_dstsz,
+		size_t	*a_retlen
+		)
+{
+size_t	l_retlen;
+char	*l_dstp;
+
+	assert(a_dstsz);								/* Check for non-zero buffer */
+	l_retlen = 0;									/* Preset length of result string to zero */
+	l_dstp = a_dst + a_dstsz;							/* Set <l_dstp> to end of the output buffer */
+
+	for (; a_src && a_dstsz;
+		l_dstp--, a_dstsz--, l_retlen++)					/* Adjust counters and pointers .... */
+		{
+		*l_dstp = '0' + a_src % 10;						/* Put reminder of deivision to the currect output buffer */
+		a_src /= 10;								/* <a_src> keep a result of devision */
+		}
+
+	if ( a_retlen )									/* Do we need to return a length of the decimal string ? */
+		*a_retlen = l_retlen;
+
+	if ( l_dstp != a_dst )
+		memmove(a_dst, l_dstp, l_retlen);					/* Move result string to begin of the <a_dst> buffer */
+
+	a_dst[l_retlen] = '\0';								/* Esspesialy for snaike oil mothefukkerzzzz */
+}
+
+
 /* Copying ASCIIZ string to ASCIC container */
 inline static int	__util$str2asc
 			(
-		char *	src,
+	const char *	src,
 		ASC *	dst
 			)
 {
@@ -1414,8 +1465,12 @@ int	status;
 
 	if ( status = ($ASCLEN(s1) - $ASCLEN(s2)) )
 		return	status;
-
+#ifdef WIN32
+	return	_stricmp($ASCPTR(s1), $ASCPTR(s2));
+#else
 	return	strncasecmp($ASCPTR(s1), $ASCPTR(s2), $ASCLEN(s1) );
+#endif // WIN32
+
 }
 
 
@@ -1505,9 +1560,9 @@ struct timespec temp;
 inline static int __util$cmp_time(struct timespec * time1, struct timespec* time2)
 {
 	if ( time1->tv_sec - time2->tv_sec )
-		return	(time1->tv_sec - time2->tv_sec);
+		return	(int) (time1->tv_sec - time2->tv_sec);
 
-	return	(time1->tv_nsec - time2->tv_nsec);
+	return	(int) (time1->tv_nsec - time2->tv_nsec);
 }
 
 /*
@@ -1540,11 +1595,11 @@ typedef struct _opts	{
 
 int	__util$getparams	(int, char *[], const OPTS *);
 int	__util$readparams	(int, char *[], OPTS *);
-int	__util$readconfig	(char *, OPTS *);
+int	__util$readconfig	(const char *, OPTS *);
 int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);
-int	__util$rewindlogfile	(ssize_t);
+int	__util$rewindlogfile	(size_t);
 int	__util$pattern_match	(char * str$, char * pattern$);
 
 char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
@@ -1642,6 +1697,28 @@ int	retlen = srcbinlen * 2;
 	return	retlen;
 }
 
+
+
+/**
+ * @brief __util$bin2dec - convert a sequence of bytes from binary from
+ *		to a hexadecimal string. It's expected that output buffer have
+ *		enough space to accept <source_length * 2> characters.
+ *
+ * @param srcbin	-	An address of source data buffer to convert from
+ * @param dsthex	-	An address of the output buffer to accept hex-string
+ * @param srcbinlen	-	A length of the source data
+ *
+ * @return	-	A length of the data in the output buffer
+ *
+ */
+
+
+
+
+
+
+
+
 #define	$BIN2HEX(s,d,l)	__util$bin2hex((char*) s, (char*) d, (unsigned short) l)
 
 /*
@@ -1733,7 +1810,6 @@ char *	cp;
 }
 
 /*
- *
  *  Description: removes all spaces or tabs (HT and VT, CR, LF) from string
  *  Input:
  *	src:	a pointer to the buffer with string to process
@@ -1822,21 +1898,38 @@ int	srclen, status = STS$K_ERROR;
 
 
 /*
-*/
-#define	util$K_LOOKUP_NCASE	(1 << 0)
-#define	util$K_LOOKUP_ABBREV	(1 << 1)
+ *  DESCRIPTION: Do a translation a given keyword string to binary representative against given Keywords table
+ *
+ *  INPUTS:
+ *	src:	a pointer to the buffer with string to process
+ *	srclen:	a length of the source buffer
+ *	kbtl:	A keyword table
+ *	ktblsz:	A size of the keywords table (in elements)
+ *	flags:	A bitfield mask for string comparing/matching flag
+ *
+ *  OUTPUTS:
+ *	kwd:	A has been found keyword's entry
+ *
+ *
+ *  RETURNS:
+ *	SS$-NORMAL	- keywords has been found, result in the <kwd>
+ *	condition code
+ *
+ */
+#define	UTIL$K_LOOKUP_NCASE	(1 << 0)
+#define	UTIL$K_LOOKUP_ABBREV	(1 << 1)
 
 typedef	struct _kwdent
 {
-	ASC *	kwd;
-	union	{
+	ASC	kwd;									/* Keyword string, ASCIC */
+	union	{									/* Assosiated value/address */
 		int	val;
 		void *	ptr;
 		};
 } KWDENT;
 
 inline	static	int	__util$lookup_key	(
-			char	*src,
+		const	char	*src,
 			int	srclen,
 
 		KWDENT *	ktbl,
@@ -1853,28 +1946,28 @@ KWDENT *	k = ktbl;
 	for ( k = ktbl, len = 0; ktblsz; ktblsz--, k++)
 		{
 		/* Exact comparing or abbreviated ? */
-		if ( !(flags & util$K_LOOKUP_ABBREV) )
-			if ( srclen != k->kwd->len )
+		if ( !(flags & UTIL$K_LOOKUP_ABBREV) )
+			if ( srclen != k->kwd.len )
 				continue;
 
 		/*
 		* We performs a comparing only in case when a compare length is
 		* more then at previous step.
 		*/
-		if ( len < $MIN(srclen, k->kwd->len) )
-			len = $MIN(srclen, k->kwd->len);
+		if ( len < $MIN(srclen, k->kwd.len) )
+			len = $MIN(srclen, k->kwd.len);
 		else	continue;
 
 
 		/* Comparing ... */
-		status = (flags & util$K_LOOKUP_NCASE) ?
+		status = (flags & UTIL$K_LOOKUP_NCASE) ?
 #ifdef	WIN32
 
 			_strnicmp
 #else
 			strncasecmp
 #endif
-			(src, k->kwd->sts, len) : memcmp(src, k->kwd->sts, len);
+			(src, k->kwd.sts, len) : memcmp(src, k->kwd.sts, len);
 
 		if ( status )
 			continue;
@@ -1998,7 +2091,7 @@ int	sz = (srcsz > dstsz) ? dstsz : srcsz;
 
 
 	if ( ctx )						/* Do we need to keep context between calls */
-		*ctx = (kp - ((unsigned char *) key));		/* Store a current key's position */
+		*ctx = (int) (kp - ((unsigned char *) key));	/* Store a current key's position */
 
 	return	STS$K_SUCCESS;
 }

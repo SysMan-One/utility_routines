@@ -115,6 +115,9 @@
 #include	<android/log.h>
 #endif
 
+
+#define	UTIL$SZ_OUTBUF	2048
+
 #ifndef	_WIN32
 #include	<unistd.h>
 //#include	<execinfo.h>
@@ -122,16 +125,13 @@
 #include	<syslog.h>
 
 #define	UTIL$T_PID_FMT	"%6d "
-#define	UTIL$SZ_OUTBUF	2048
-
-
 	#define	TIMSPECDEVIDER	(1024*1024)	/* Used to convert timespec's nanosec tro miliseconds */
 
 #elif	_WIN32
 	#define	gettid()	GetCurrentThreadId()
 	//#define	gettid()	GetCurrentProcessId()
 	#define	TIMSPECDEVIDER	1024		/* Used to convert timeval's microseconds to miliseconds */
-	#define	PID_FMT		"%6d "
+	#define	UTIL$T_PID_FMT	"%6d "
 #else
 	#define	gettid()	(0xDEADBEEF)
 #endif
@@ -549,7 +549,7 @@ char	buf[128];
 #ifdef	_WIN32
 
 WSAMSG msg_desc = { 0 };
-WSABUF   bufv[] = {{buf, 0}, {msg, msglen}};
+WSABUF   bufv[] = {{0, buf, }, {msglen, msg}};
 
 #else
 struct	iovec bufv[] = {{buf, 0}, {(void *) msg, msglen}};
@@ -707,7 +707,7 @@ OPTS	*optp;
  *
  */
 int	__util$readconfig	(
-			char *	fconf,
+		const	char *	fconf,
 			OPTS *	opts
 			)
 {
@@ -1193,7 +1193,7 @@ unsigned j;
  *
  *--
  */
-const	char spaces[64] = {"                                                                "};
+static const	char spaces[64] = {"                                                                "};
 
 void	__util$trace	(
 			int	cond,
@@ -1475,7 +1475,7 @@ int	fd = -1;
  *	condition status, see STS$ constants
  */
 int	__util$rewindlogfile	(
-			ssize_t	limit
+			size_t	limit
 				)
 {
 int	status;
