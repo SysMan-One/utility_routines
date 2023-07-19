@@ -2302,31 +2302,8 @@ int	outlen = 0;
 }
 
 
-
-
-
-
-
-
 #define	$SYM_REC_INI(s) {s, sizeof(#s)-1, #s}
 #define	$SYM_REC_EOL	{0, 0, NULL}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
