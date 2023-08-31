@@ -301,7 +301,7 @@ EMSG_RECORD *msgrec;
  */
 
 const char severity[STS$K_MAX]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
-const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number %08X, fac=%#x/%d, sev=%#x/%d, msgno=%#x/%d"};
+const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: %#x/%d, sev: %#x/%d, msgno: %#x/%d]"};
 
 unsigned	__util$putmsg
 			(
@@ -332,7 +332,7 @@ EMSG_RECORD *msgrec;
 	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,			/* Format a prefix part of the message: time + PID ... */
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) gettid());
+		(unsigned) __gettid());
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
@@ -394,10 +394,10 @@ EMSG_RECORD *msgrec;
 	olen = __mod
 		? snprintf (out, UTIL$SZ_OUTBUF, mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __mod, __fi, __li)
+			(unsigned) __gettid(), __mod, __fi, __li)
 		: snprintf (out, UTIL$SZ_OUTBUF, lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __fi, __li);
+			(unsigned) __gettid(), __fi, __li);
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
@@ -469,7 +469,7 @@ struct timespec now = {0};
 
 	olen = snprintf (out, UTIL$SZ_OUTBUF, __fmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __mod, __func, __line, fac, severity[_sev]);
+			(unsigned) __gettid(), __mod, __func, __line, fac, severity[_sev]);
 
 	va_start (arglist, __line);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
@@ -1231,10 +1231,10 @@ struct timespec now;
 	olen = __mod
 		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __mod, __fi, __li)
+			(unsigned) __gettid(), __mod, __fi, __li)
 		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) gettid(), __fi, __li);
+			(unsigned) __gettid(), __fi, __li);
 
 	if ( 0 < (len = (72 - olen)) )
 		{
@@ -1317,7 +1317,7 @@ struct timespec now;
 	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) gettid(), fac, severity[_sev]);
+		(unsigned) __gettid(), fac, severity[_sev]);
 
 	va_start (arglist, fmt);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
@@ -1399,7 +1399,7 @@ struct timespec now;
 	*outlen = snprintf (__outbuf, outsz, lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900+_tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) gettid(), fac, severity[sev]);
+		(unsigned) __gettid(), fac, severity[sev]);
 
 	va_start (arglist, fmt);
 	*outlen += vsnprintf(__outbuf + *outlen, outsz - *outlen, fmt, arglist);
@@ -1486,7 +1486,7 @@ int	status;
 	if ( 0 > (status = lseek (g_logoutput, 0, SEEK_CUR)) )
 		return	$LOG(STS$K_ERROR, "lseek() -> %d", errno);
 
-	if ( status < limit )
+	if ( status < (int) limit )
 		return	STS$K_SUCCESS;
 
 	if ( 0 > (status = lseek(g_logoutput, 0L, SEEK_SET)) )

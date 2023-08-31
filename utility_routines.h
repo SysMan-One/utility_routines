@@ -137,7 +137,7 @@ pthread_t	tid = 0;
 #else
 
 
-static inline pid_t	gettid(void)
+static inline pid_t	__gettid(void)
 {
 	return	syscall (
 #if defined(__APPLE__) || defined(__OSX__)
@@ -2301,11 +2301,8 @@ int	outlen = 0;
 	return	outlen;
 }
 
-
 #define	$SYM_REC_INI(s) {s, sizeof(#s)-1, #s}
 #define	$SYM_REC_EOL	{0, 0, NULL}
-
-
 
 
 #ifndef	WIN32
