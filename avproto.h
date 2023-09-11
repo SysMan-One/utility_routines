@@ -197,10 +197,10 @@ void	avproto_dump (void *pdu);
  *	condition code
  */
 inline static int	avproto_hset	(
-	void		*pdup,
-	unsigned char	*sig,
-	unsigned	u_csr,
-	unsigned	u_seq
+		void		*pdup,
+	const unsigned char	*sig,
+		unsigned	u_csr,
+		unsigned	u_seq
 			)
 {
 AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
@@ -231,14 +231,14 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
  *	condition code
  */
 inline static int	avproto_hget	(
-	void		*pdup,
-	unsigned char	*sig,
-	unsigned	*u_len,
-	unsigned	*u_csr,
-	unsigned	*u_seq
+		void		*pdup,
+	const unsigned char	*sig,
+		unsigned	*u_len,
+		unsigned	*u_csr,
+		unsigned	*u_seq
 			)
 {
-int	len;
+size_t	len;
 AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
 	*u_csr = STS$K_ERROR;

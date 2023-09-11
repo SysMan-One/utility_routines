@@ -86,6 +86,7 @@
 **--
 */
 
+#include	<stdint.h>
 #include	<stddef.h>
 #include	<ctype.h>
 #include	<limits.h>
@@ -154,39 +155,39 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 		{
 		case	TAG$K_WORD:	/* 16 bits */
 			{
-			unsigned short *vptr = (unsigned short *) ptlv->b_val;
+			uint16_t *vptr = (unsigned short *) ptlv->b_val;
 
 			*vptr = 0;
-			memcpy(vptr, val, valsz ? valsz : sizeof( unsigned short));
+			memcpy(vptr, val, valsz ? valsz : sizeof( uint16_t));
 			*(vptr) = htobe16(*vptr);
 
-			ptlv->w_len = htobe16( len = sizeof(unsigned short) );
+			ptlv->w_len = htobe16( len = sizeof(uint16_t) );
 
 			break;
 			}
 
 		case	TAG$K_LONGWORD:	/* 32 bits */
 			{
-			unsigned *vptr = (unsigned *) ptlv->b_val;
+			uint32_t *vptr = (uint32_t *) ptlv->b_val;
 
 			*vptr = 0UL;
-			memcpy(vptr, val, valsz ? valsz : sizeof( unsigned));
+			memcpy(vptr, val, valsz ? valsz : sizeof( uint32_t));
 			*(vptr) = htobe32(*vptr);
 
-			ptlv->w_len = htobe16( len = sizeof(unsigned) );
+			ptlv->w_len = htobe16( len = sizeof(uint32_t) );
 
 			break;
 			}
 
 		case	TAG$K_QWORD:	/* 64 bits */
 			{
-			unsigned long long *vptr = (unsigned long long *) ptlv->b_val;
+			uint64_t *vptr = (uint64_t *) ptlv->b_val;
 
 			*vptr = 0ULL;
-			memcpy(vptr, val, valsz ? valsz : sizeof( unsigned long long));
+			memcpy(vptr, val, valsz ? valsz : sizeof( uint64_t));
 			*(vptr) = htobe64(*vptr);
 
-			ptlv->w_len = htobe16( len = sizeof(unsigned long long) );
+			ptlv->w_len = htobe16( len = sizeof(uint64_t) );
 
 			break;
 			}
@@ -290,27 +291,27 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 	switch ( *v_type )
 		{
 		case	TAG$K_WORD:	/* 16 bits */
-			*((unsigned short *) val) = be16toh(ptlv->w_val[0]);
-			len  = sizeof(unsigned short);
+			*((uint16_t *) val) = be16toh(ptlv->w_val[0]);
+			len  = sizeof(uint16_t);
 
 			break;
 
 		case	TAG$K_LONGWORD:	/* 32 bits */
-			*((unsigned  *) val) = be32toh(ptlv->u_val[0]);
-			len  = sizeof(unsigned);
+			*((uint32_t  *) val) = be32toh(ptlv->u_val[0]);
+			len  = sizeof(uint32_t);
 
 			break;
 
 		case	TAG$K_QWORD:	/* 64 bits */
-			*((unsigned long long *) val) = be64toh(ptlv->q_val[0]);
-			len  = sizeof(unsigned long long);
+			*((uint64_t *) val) = be64toh(ptlv->q_val[0]);
+			len  = sizeof(uint64_t);
 
 			break;
 
 		case	TAG$K_UUID:	/* 16 octets  */
 			len = 16;
 			w_len = $MIN(w_len, 16);
-			__util$movc5 (&w_len, ptlv->b_val,  0, &len, val);
+			__util$movc5 (&w_len, ptlv->b_val,  0, (unsigned short *)  &len, val);
 
 			break;
 		default:
