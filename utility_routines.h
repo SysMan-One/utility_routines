@@ -44,7 +44,9 @@
 **
 **	19-MAR-2023	RRL	Added int __util$uint32_2_dec()
 **
-**	26-JUN-2023	RRL	Revised and refacttored __util$lookup_key
+**	26-JUN-2023	RRL	Revised and refactored __util$lookup_key
+**
+**	 9-OCT-2023	RRL	Revised and refactored __util$lookup_key
 **
 */
 
