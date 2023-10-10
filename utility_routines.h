@@ -1954,7 +1954,7 @@ KWDENT *	k = ktbl;
 		* We performs a comparing only in case when a compare length is
 		* more then at previous step.
 		*/
-		if ( len < $MIN(srclen, k->kwd.len) )
+		if ( len <= $MIN(srclen, k->kwd.len) )
 			len = $MIN(srclen, k->kwd.len);
 		else	continue;
 
@@ -1969,8 +1969,8 @@ KWDENT *	k = ktbl;
 #endif
 			(src, k->kwd.sts, len) : memcmp(src, k->kwd.sts, len);
 
-		if ( status )
-			continue;
+		if ( !status &&  !(flags & UTIL$K_LOOKUP_ABBREV) )
+			break;
 		}
 
 	/* No matching ... */
@@ -1978,6 +1978,8 @@ KWDENT *	k = ktbl;
 		return	STS$K_ERROR;
 
 	*kwd = k;
+
+	return	STS$K_SUCCESS;
 }
 
 
