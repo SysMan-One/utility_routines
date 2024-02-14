@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-02ECO2"
-#define	__REV__		"1.02.2"
+#define	__IDENT__	"V.01-03"
+#define	__REV__		"1.03.0"
 
 
 /*
@@ -81,6 +81,8 @@
 **	10-NOV-2021	RRL	V.01-02ECO1 : Reduced compilation warnings
 **
 **	 9-DEC-2022	RRL	V.01-02ECO2 : Reduced GCC's compilation warnings
+**
+**	14-FEB-2023	RRL	V.01-03 : __util$vfao -  like SYS$FAO from DIGITAL VMS-World!
 **
 */
 
@@ -1846,7 +1848,7 @@ int	olen = 0;
 
 
 
-#if __util_DEBUG__
+
 
 
 /*
@@ -1856,85 +1858,90 @@ int	olen = 0;
  * Do NOT use sprintf-style formatting codes in
  * message strings! Use the formatting directives
  * below:
- * !AD
- * !AZ
- * !AC
- * !U{L, W, B} = unsigned int, short, byte
- * !S{L, W, B} = signed int, short, byte
- * !X{L, W, B} = hexadecimal int, short, byte
+ * !A{D, Z, C}
+ * !U{Q, L, W, B} = unsigned quad\int64, int32, short, byte
+ * !S{Q, L, W, B} = signed quad\int64, int32, short, byte
+ * !X{Q, L, W, B} = hexadecimal quad\int64, int32, short, byte
  * !P = pointer
+ * !T = time (DD-MMM-YYYY HH:MM:SS)
+ * !D = date (DD-MMM-YYYY)
  * !! = exclamation point
  */
 #ifdef	WIN32
 #define	snprintf(buf, len, format,...)	_snprintf_s(buf, len, len, format, __VA_ARGS__)
 #endif
 
-static int	__util$vfao (char *fmt, char *buf, size_t bufsz, va_list ap)
+static int	__util$vfao (char *a_fmt, char *a_buf, size_t a_bufsz, va_list a_ap)
 {
-int	len;
-char	tmpbuf[32], *outp = buf;
+int	l_len;
+char	l_tmpbuf[256], *outp = a_buf;
 
-	for ( ;bufsz && *fmt; )
+	for ( ; (a_bufsz && *a_fmt); )
 		{
-		if (*fmt != '!')
+		if (*a_fmt != '!')
 			{
-			*outp++ = *fmt++;
-			bufsz--;
+			*outp++ = *a_fmt++;
+			a_bufsz--;
 
 			continue;
 			}
 
-		if ( !(*(++fmt)) )
+		if ( !(*(++a_fmt)) )
 			break;
 
 		/* !!
 		*/
-		if (*fmt == '!')
+		if (*a_fmt == '!')
 			{
-			*outp++ = *fmt++;
-			bufsz--;
+			*outp++ = *a_fmt++;
+			a_bufsz--;
 
 			continue;
 			}
 
-		/* !X{L, W, B}, U{L, W, B}, S{L, W, B}
+		/* !X{L, W, B}, U{L, W, B}, S{L, W, B}, Q{L, W, B}
 		*/
-		if (*fmt == 'U' || *fmt == 'X' || *fmt == 'S' )
+		if (*a_fmt == 'U' || *a_fmt == 'X' || *a_fmt == 'S' )
 			{
-			unsigned long val = 0;
+			uint64_t l_val = 0;
 
-			if (*(fmt+1) == 'B')
+			if (*(a_fmt+1) == 'B')
 				{
-				val = va_arg(ap, unsigned char);
-				len = snprintf(tmpbuf, sizeof(tmpbuf),  ((*fmt == 'X') ?  "0x%02X" : (*fmt == 'U') ? "%3u" : "%3d"),
-					(unsigned char) val);
+				l_val = va_arg(a_ap, int);
+				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%02X" : (*a_fmt == 'U') ? "%3u" : "%3d"),
+					(unsigned char) l_val);
 				}
-			else if (*(fmt + 1) == 'W')
+			else if (*(a_fmt + 1) == 'W')
 				{
-				val = va_arg(ap, unsigned short);
-				len = snprintf(tmpbuf, sizeof(tmpbuf),  ((*fmt == 'X') ?  "0x%04X" : ( *fmt == 'U') ? "%5u" : "%6d"),
-					(unsigned short) val);
+				l_val = va_arg(a_ap, int);
+				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%04X" : ( *a_fmt == 'U') ? "%5u" : "%6d"),
+					(uint16_t) l_val);
 				}
-			else if (*(fmt + 1) == 'L')
+			else if (*(a_fmt + 1) == 'L')
 				{
-				val = va_arg(ap, unsigned long);
-				len = snprintf(tmpbuf, sizeof(tmpbuf),  ((*fmt == 'X') ?  "0x%08X": ( *fmt == 'U') ? "%11u" : "%11d"),
-					(unsigned long) val);
+				l_val = va_arg(a_ap, uint32_t);
+				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%08X": ( *a_fmt == 'U') ? "%lu" : "%ld"),
+					(uint32_t) l_val);
+
+				}
+			else if (*(a_fmt + 1) == 'Q')
+				{
+				l_val = va_arg(a_ap, uint64_t);
+				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%016llx": ( *a_fmt == 'U') ? "%llu" : "%lld"),
+					(uint64_t) l_val);
 
 				}
 			else	continue;
 
-			if ( len < 0 )
+			if ( l_len < 0 )
 				break;
 
-			if (len >= bufsz)
-				len = bufsz - 1;
+			if (l_len >= a_bufsz)
+				l_len = a_bufsz - 1;
 
-			memcpy(outp, tmpbuf, len);
-
-			outp	+= len;
-			bufsz	-= len;
-			fmt	+= 2;
+			outp	+= l_len;
+			a_bufsz	-= l_len;
+			a_fmt	+= 2;
 
 			continue;
 			}
@@ -1944,81 +1951,80 @@ char	tmpbuf[32], *outp = buf;
 
 		/* !P
 		*/
-		if (*fmt == 'P')
+		if (*a_fmt == 'P')
 			{
-			if ( 0 > (len = snprintf(tmpbuf, sizeof(tmpbuf), "@%p", va_arg(ap, void *))) )
+			if ( 0 > (l_len = snprintf(outp, a_bufsz, "@%p", va_arg(a_ap, void *))) )
 				break;
 
-			if (len >= bufsz)
-				len = bufsz - 1;
+			if (l_len >= a_bufsz)
+				l_len = a_bufsz - 1;
 
-			memcpy(outp, tmpbuf, len);
-
-			outp	+= len;
-			bufsz	-= len;
-			fmt	+= 1;
+			outp	+= l_len;
+			a_bufsz	-= l_len;
+			a_fmt	+= 1;
 
 			continue;
 			}
 
 		/* !AD, !AC, !AZ ...	*/
-		if (*fmt == 'A')
+		if (*a_fmt == 'A')
 			{
-			unsigned int slen = 0;
-			char *ptr;
+			unsigned int l_slen = 0;
+			char *l_ptr;
 
-			if (*(fmt+1) == 'D')
+			if (*(a_fmt+1) == 'D')
 				{
-				slen	= va_arg(ap, unsigned int);
-				ptr	= va_arg(ap, char *);
+				l_slen	= va_arg(a_ap, unsigned int);
+				l_ptr	= va_arg(a_ap, char *);
 
 				}
-			else if (*(fmt+1) == 'Z')
+			else if (*(a_fmt+1) == 'Z')
 				{
-				ptr	= va_arg(ap, char *);
-				slen	= (unsigned int) strnlen(ptr, bufsz);
+				l_ptr	= va_arg(a_ap, char *);
+				l_slen	= (unsigned int) strnlen(l_ptr, a_bufsz);
 				}
-			else if (*(fmt+1) == 'C')
+			else if (*(a_fmt+1) == 'C')
 				{
-				ptr	= va_arg(ap, char *);
-				slen	= *(ptr++);
+				l_ptr	= va_arg(a_ap, char *);
+				l_slen	= *(l_ptr++);
 				}
 			else	continue;
 
-			if (slen >= (unsigned int) bufsz)
-				slen = (unsigned int)bufsz - 1;
+			if (l_slen >= (unsigned int) a_bufsz)
+				l_slen = (unsigned int)a_bufsz - 1;
 
-			memcpy(outp, ptr, slen);
+			memcpy(outp, l_ptr, l_slen);
 
-			outp	+= slen;
-			bufsz	-= slen;
-			fmt	+= 2;
+			outp	+= l_slen;
+			a_bufsz	-= l_slen;
+			a_fmt	+= 2;
 
 			continue;
-		}
+			}
 
-	// Unrecognized directive here, just loop back up to the top
-	} /* while bufsz > 0 && *fmt != null char */
+		// Unrecognized directive here, just loop back up to the top
+		} /* while bufsz > 0 && *fmt != null char */
 
 	*outp = '\0';
-	return (outp - buf);
+
+	return (outp - a_buf);
 }
 
 
 
-int	__util$fao (void *fmt, void *buf, size_t bufsz, ...)
+int	__util$fao (void *a_fmt, void *a_buf, size_t a_bufsz, ...)
 {
-va_list ap;
-int result;
+va_list l_ap;
+int l_result;
 
-	va_start(ap, bufsz);
-	result = __util$vfao((char *) fmt, (char*) buf, bufsz, ap);
-	va_end(ap);
+	va_start(l_ap, a_bufsz);
+	l_result = __util$vfao((char *) a_fmt, (char*) a_buf, a_bufsz, l_ap);
+	va_end(l_ap);
 
-	return result;
+	return l_result;
 }
 
-
+#if __util_DEBUG__
 
 struct _stm_buf				/* One item of Stream buffer			*/
 {
@@ -2235,5 +2241,5 @@ char	buf[1024];
 
 
 #ifndef	WIN32
-#pragma GCC diagnostic pop
+// #pragma GCC diagnostic pop
 #endif

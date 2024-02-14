@@ -614,7 +614,7 @@ ENTRY *	_entold, *_entnew = (ENTRY *) ent;
 
 	*count = _que->count;
 
-	if ( _entold = _que->tail )
+	if ( (_entold = _que->tail) )
 		_entold->right	= _entnew;
 	else	_que->head	= _entnew;
 
@@ -669,7 +669,7 @@ ENTRY *	_entold, *_entnew = (ENTRY *) ent;
 
 	*count = _que->count;
 
-	if ( _entold = _que->head )
+	if ( (_entold = _que->head) )
 		_entold->left	= _entnew;
 	else	_que->tail = _entnew;
 
@@ -795,9 +795,9 @@ ENTRY *	_entleft, * _entright = NULL;
 	/*
 	** Main work ...
 	*/
-	if ( _entright = _que->tail )
+	if ( (_entright = _que->tail) )
 		{
-		if ( _entleft = _entright->left )
+		if ( (_entleft = _entright->left) )
 			_entleft->right = NULL;
 
 		_que->tail = _entleft;
@@ -864,9 +864,9 @@ ENTRY *	_entleft = NULL, * _entright;
 	/*
 	** Main work ...
 	*/
-	if ( _entleft = _que->head )
+	if ( (_entleft = _que->head) )
 		{
-		if ( _entright = _entleft->right )
+		if ( (_entright = _entleft->right) )
 			_entright->left = NULL;
 
 		_que->head = _entright;
@@ -962,14 +962,14 @@ ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 	/*
 	 * Exclude has been found entry from the chain
 	 */
-	if ( _entleft = entp->left )
+	if ( (_entleft = entp->left) )
 		_entleft->right = entp->right;
 #ifndef	WIN32
 	else	assert ( entp->left );	/* left link can be only on first entry! */
 #endif
 
 
-	if ( _entright= entp->right )
+	if ( (_entright= entp->right) )
 		_entright->left = entp->left;
 
 	/*
@@ -1049,10 +1049,10 @@ ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 	/*
 	 * Exclude has been found entry from the chain
 	 */
-	if ( _entleft = entp->left )
+	if ( (_entleft = entp->left) )
 		_entleft->right = _entright;
 
-	if ( _entright= entp->right )
+	if ( (_entright= entp->right) )
 		_entright->left = _entleft;
 #ifndef	WIN32
 	else assert( entp->right );	/* Right link can be on the last entry ! */
@@ -1402,6 +1402,8 @@ char	*l_dstp;
 		memmove(a_dst, l_dstp, l_retlen);					/* Move result string to begin of the <a_dst> buffer */
 
 	a_dst[l_retlen] = '\0';								/* Esspesialy for snaike oil mothefukkerzzzz */
+
+	return	l_retlen;
 }
 
 
@@ -1446,7 +1448,7 @@ inline static int	__util$cmpasc
 {
 int	status;
 
-	if ( status = ($ASCLEN(s1) - $ASCLEN(s2)) )
+	if ( (status = ($ASCLEN(s1) - $ASCLEN(s2))) )
 		return	status;
 
 	return	memcmp($ASCPTR(s1), $ASCPTR(s2), $ASCLEN(s1) );
@@ -1463,7 +1465,7 @@ inline static int	__util$cmpasc_blind
 {
 int	status;
 
-	if ( status = ($ASCLEN(s1) - $ASCLEN(s2)) )
+	if ( (status = ($ASCLEN(s1) - $ASCLEN(s2))) )
 		return	status;
 #ifdef WIN32
 	return	_stricmp($ASCPTR(s1), $ASCPTR(s2));
@@ -1978,6 +1980,8 @@ KWDENT *	k = ktbl;
 		return	STS$K_ERROR;
 
 	*kwd = k;
+
+	return	STS$K_SUCCESS;
 }
 
 
@@ -2306,7 +2310,7 @@ int	outlen = 0;
 
 
 #ifndef	WIN32
-#pragma GCC diagnostic pop
+// #pragma GCC diagnostic pop
 #endif
 
 #pragma	pack (pop)
