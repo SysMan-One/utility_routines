@@ -44,7 +44,9 @@
 **
 **	19-MAR-2023	RRL	Added int __util$uint32_2_dec()
 **
-**	26-JUN-2023	RRL	Revised and refacttored __util$lookup_key
+**	26-JUN-2023	RRL	Revised and refactored __util$lookup_key
+**
+**	 9-OCT-2023	RRL	Revised and refactored __util$lookup_key
 **
 */
 
@@ -1956,7 +1958,7 @@ KWDENT *	k = ktbl;
 		* We performs a comparing only in case when a compare length is
 		* more then at previous step.
 		*/
-		if ( len < $MIN(srclen, k->kwd.len) )
+		if ( len <= $MIN(srclen, k->kwd.len) )
 			len = $MIN(srclen, k->kwd.len);
 		else	continue;
 
@@ -1971,8 +1973,8 @@ KWDENT *	k = ktbl;
 #endif
 			(src, k->kwd.sts, len) : memcmp(src, k->kwd.sts, len);
 
-		if ( status )
-			continue;
+		if ( !status &&  !(flags & UTIL$K_LOOKUP_ABBREV) )
+			break;
 		}
 
 	/* No matching ... */
