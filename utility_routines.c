@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-03"
-#define	__REV__		"1.03.0"
+#define	__IDENT__	"V.01-04"
+#define	__REV__		"1.04.0"
 
 
 /*
@@ -84,6 +84,8 @@
 **
 **	14-FEB-2023	RRL	V.01-03 : __util$vfao -  like SYS$FAO from DIGITAL VMS-World!
 **
+**	14-FEB-2023	RRL	V.01-04 : Added SYS_FAOL from Dave Jonse OSU WEB with some cosmetic changes for more readability
+**
 */
 
 
@@ -146,8 +148,11 @@
 
 
 #ifndef	WIN32
-	#pragma GCC diagnostic push
-	//#pragma GCC diagnostic ignored  "-Wdiscarded-qualifiers"
+	#pragma	GCC diagnostic push
+
+	#pragma GCC diagnostic ignored  "-Wformat"
+	#pragma GCC diagnostic ignored  "-Wunused-result"
+	#pragma GCC diagnostic ignored  "-Wunused-value"
 #endif
 
 #ifdef _WIN32
@@ -532,7 +537,7 @@ struct timespec now = {0};
  *
  *
  *  Return:
- *	SS$_NORMAL
+ *	STS$K_SUCCESS
  *
  */
 
@@ -633,7 +638,7 @@ struct	msghdr  msg_desc = {0};
  *
  *
  *  Return:
- *	SS$_NORMAL
+ *	STS$K_SUCCESS
  *
  */
 int	__util$showparams	(
@@ -705,7 +710,7 @@ OPTS	*optp;
  *	fills the 'runparams' vector by option
  *
  *  Return:
- *	SS$_NORMAL
+ *	STS$K_SUCCESS
  *
  */
 int	__util$readconfig	(
@@ -874,7 +879,7 @@ OPTS	*optp, *optp2;
  *	fills the 'runparams' vector by option
  *
  *  Return:
- *	SS$_NORMAL
+ *	STS$K_SUCCESS
  *
  */
 int	__util$getparams	(
@@ -1920,15 +1925,15 @@ char	l_tmpbuf[256], *outp = a_buf;
 			else if (*(a_fmt + 1) == 'L')
 				{
 				l_val = va_arg(a_ap, uint32_t);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%08X": ( *a_fmt == 'U') ? "%lu" : "%ld"),
-					(uint32_t) l_val);
+				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%08X": ( *a_fmt == 'U') ? "%u" : "%d"),
+					( *a_fmt == 'U') ? (uint32_t) l_val : (int32_t) l_val);
 
 				}
 			else if (*(a_fmt + 1) == 'Q')
 				{
 				l_val = va_arg(a_ap, uint64_t);
 				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%016llx": ( *a_fmt == 'U') ? "%llu" : "%lld"),
-					(uint64_t) l_val);
+					( *a_fmt == 'U') ? (unsigned long long) l_val : (int64_t) l_val);
 
 				}
 			else	continue;
@@ -2024,19 +2029,598 @@ int l_result;
 	return l_result;
 }
 
-#if __util_DEBUG__
 
-struct _stm_buf				/* One item of Stream buffer			*/
+
+
+
+
+
+/*
+ * Emulate VMS system services SYS$FAOL and SYS$NUMTIM (as SYS_FAOL and
+ * SYS_NUMTIM)
+ *
+ * The following FAO directives are supported:
+ *     !Sx !Ux !Zx !Ox !%S !%D !%T !AS !AZ !AC !AD !AF !n*c
+ *
+ * Times are represented as pointers to time_t values rather than
+ * pointers to VMS time structures.
+ *
+ * Revised:	1-NOV-1995		Fix bug in !XL processing.
+ * Revised:	3-JAN-1995		Fix bug in NUMTIM emulation (month #).
+ * Revised:	15-FEB-2024	RRL	Reorganizing code to be more readable, removed SYS_NUMTIM.
+ */
+
+
+
+#ifndef VMS
+typedef struct tm tm_t;
+#endif
+
+
+#define SS$_BUFFEROVF 1537
+#define STS$K_SUCCESS 1
+#define SS$_BADPARAM 20
+
+#define MIN_INT 0x80000000
+#define MIN_INT_STR "-2147483648"
+#define MIN_INT_STR_L 11
+
+#define LONG unsigned long
+#define APPEND_C(c) if (j<ctx->outsize) ctx->out[j++]=c; else \
+	{ ctx->outused=j; return SS$_BUFFEROVF; }
+
+typedef struct { unsigned short l; char *a; } decsriptor_s;
+typedef struct ctl_buf_t {
+    char *out;				/* Output buffer */
+    LONG *prmlst;			/* Parameter list */
+    int ctloffset;
+    int outused;			/* Output position */
+    int outsize;			/* Size of output buffer */
+    int width_type;
+    int width;
+    int value;				/* last value formatted for !%s */
+} CTL$_BUF;
+
+static int s_output_directive ( int d1, int d2, CTL$_BUF *ctx );
+static int s_fmt_signed ( int value, CTL$_BUF *ctx );
+static int s_fmt_unsigned ( LONG value, int base, char fill, CTL$_BUF *ctx );
+static int s_fmt_pad ( char fill, int cur, CTL$_BUF *ctx );
+
+/************************************************************************/
+static int s_fmt_time (
+			int	date_flag,
+		struct timespec	*a_now,
+		CTL$_BUF	*ctx
+			)
 {
-	ENTRY	links;			/* Left, right links, used by queue macros	*/
-	int	len;			/* Actual length of data in the buffer		*/
-	int	ref;			/* Count of reference				*/
-	char buf[32];		/* Buffer itself				*/
-} _stm_buf_area[32];		/* We declare a static buffers area		*/
+int	i, j;
+char	*out, buf[32];
+tm_t	*local_time;
+struct tm l_tm;
+struct timespec l_now;
 
-QUEUE	free_bufs = QUEUE_INITIALIZER,
-	busy_bufs = QUEUE_INITIALIZER;
+	if ( !a_now )
+		____time(&l_now);
+	else	l_now = *a_now;
 
+#ifdef	WIN32
+	localtime_s(&_tm, (time_t *)&now);
+#else
+	localtime_r((time_t *)&l_now, &l_tm);
+#endif
+
+
+
+
+
+	return	ctx->outused = j, STS$K_SUCCESS;
+}
+
+
+
+
+int	__util$faol (
+	const decsriptor_s	*a_ctlstr,
+			int	*a_outlen,
+		decsriptor_s	*a_outbuf,
+			LONG	*a_prmlst
+		)
+{
+char	*l_ctl, *l_out;
+CTL$_BUF l_ctx;
+int	i, j, k, l_len, l_outsize, l_repcnt, l_rc;
+char	l_d1, l_d2;
+
+	/*
+	* Setup for scanning string.
+	*/
+	l_len = a_ctlstr->l;
+	l_ctl = a_ctlstr->a;
+	l_ctx.outsize = l_outsize = a_outbuf->l;
+	l_ctx.out = l_out = a_outbuf->a;
+	l_ctx.prmlst = a_prmlst;
+	l_ctx.value = 0;
+
+	/*
+	* Main loop, i is position in control string, j = output point.
+	*/
+	for (j = i = 0;  i < l_len; )
+		{
+		/*
+		 * Copy characters until a directive encountered.
+		 */
+		while ( l_ctl[i] != '!' )
+			{
+			if ( j < l_outsize )
+				{
+				l_out[j++] = l_ctl[i++];
+
+				if ( i >= l_len )
+					return *a_outlen = j, STS$K_SUCCESS;		/* All done */
+				}
+			else	return	*a_outlen = l_outsize, SS$_BUFFEROVF;		/* Output buffer full */
+			}
+
+
+		/*
+		* Parse directive, first parse field length/repeat count
+		*/
+		l_ctx.width = l_ctx.width_type = 0;
+		l_repcnt = 0;
+
+		for ( i++; i < l_len; i++ )
+			{
+			if ( l_ctl[i] == '#' )
+				{
+				l_ctx.width_type = 2;
+				break;
+				}
+			else if ( (l_ctl[i] >= '0') && (l_ctl[i] <= '9') )
+				{
+				l_ctx.width_type = 1;
+				l_ctx.width = (l_ctx.width * 10) + (int) l_ctl[i] - (int) '0';
+
+				if ( l_ctx.width > 0x0ffff )
+					return SS$_BADPARAM + 2;
+				}
+			else if ( l_ctl[i] == '(' )
+				{
+				/* Width field is really repeat count */
+				l_repcnt = l_ctx.width;
+				l_ctx.width = 0;
+
+				for ( i++; i < l_len; i++ )
+					{
+					if ( l_ctl[i] == ')' )
+						break;
+
+					if ( l_ctl[i] == '#' )
+						{
+						l_ctx.width_type = 2;
+						break;
+						}
+					else if ( (l_ctl[i] >= '0') && (l_ctl[i] <= '9') )
+						{
+						l_ctx.width_type = 1;
+						l_ctx.width = (l_ctx.width * 10) + (int) l_ctl[i] - (int) '0';
+
+						if ( l_ctx.width > 0x0ffff )
+							return SS$_BADPARAM+4;
+						}
+					}
+				}
+			else	break;	/* end of numerics */
+			}
+
+		if ( i >= l_len )
+			return SS$_BADPARAM + 6;
+
+		if ( l_repcnt == 0 )
+			l_repcnt = 1;
+		else if (l_repcnt < 0)
+			l_repcnt = *l_ctx.prmlst++;
+
+		if ( l_ctx.width_type == 2 )
+			l_ctx.width = *l_ctx.prmlst++;
+
+		/*
+		* Interpret directive.
+		*/
+		l_d1 = l_ctl[i++];
+		l_d2 =  ( i < l_len ) ? l_ctl[i] : '\0';
+
+		l_ctx.outused = j;
+
+		for ( k = 0; k < l_repcnt; k++ )
+			{
+			if ( 1 != (l_rc = s_output_directive ( l_d1, l_d2, &l_ctx )) )
+				return	*a_outlen = l_ctx.outused, l_rc;
+			}
+
+		j = l_ctx.outused;
+		i += l_ctx.ctloffset;
+		}
+
+	return	*a_outlen = j, STS$K_SUCCESS;
+}
+/************************************************************************/
+/* Process single directive.
+ */
+static int s_output_directive ( int d1, int d2, CTL$_BUF *ctx )
+{
+int	j, value, l_rc;
+LONG	uvalue;
+char	*out;
+
+	j = ctx->outused;
+	ctx->ctloffset = 1;
+
+	/* printf("output directive d1: %d(%c), d2: %d(%c)\n", d1, d1, d2, d2 ); */
+	switch ( d1 )
+		{
+		case 'A':
+			{	/* Ascii output */
+			int	srclen;
+			char	*src;
+
+			if ( d2 == 'Z' )
+				{
+				for ( src = (char *) *ctx->prmlst++; *src; src++ )
+					{APPEND_C ( *src );}
+				break;
+
+				}
+			else if ( d2 == 'D' )
+				{
+				srclen = *ctx->prmlst++;
+				src = (char *) *ctx->prmlst++;
+				}
+			else if ( d2 == 'C' )
+				{
+				src = (char *) *ctx->prmlst++;
+				srclen = (unsigned char) *src++;
+				}
+			else if ( d2 == 'S' )
+				{
+				decsriptor_s *desc = (decsriptor_s *) *ctx->prmlst++;
+				srclen = desc->l; src = desc->a;
+				}
+			else if ( d2 == 'F' )
+				{
+				srclen = *ctx->prmlst++;
+
+				for ( src = (char *) *ctx->prmlst++; srclen > 0; srclen-- )
+					{
+					if ( isprint(*src) )
+						{ APPEND_C(*src); }
+					else	{ APPEND_C('.'); }
+
+					src++;
+					}
+
+				break;
+
+				}
+			else	return SS$_BADPARAM + 8;
+
+			if ( srclen > (ctx->outsize-j) )
+				{
+				for ( ; srclen > 0; srclen-- )
+					{ APPEND_C(*src); (void) *src++; }
+				}
+			else	{
+				for ( out = ctx->out; srclen > 0; srclen-- )
+					out[j++] = *src++;
+				}
+			}
+
+			break;
+
+
+		case 'S':
+			{	/* Blank filled signed decimal */
+			value = (int) *ctx->prmlst++;
+
+			if ( d2 == 'L' )
+				{
+				}
+			else if ( d2 == 'B' )
+				{
+				value = (value & 255);
+				if ( value > 127 ) value |= 0xffffff00;
+				}
+			else if ( d2 == 'W' )
+				{
+				value = (value & 0x0ffff);
+				if ( value > 0x7fff )
+					value |= 0xffff0000;
+				}
+			else	{ return SS$_BADPARAM + 10; }
+
+			ctx->value = value;
+			return	l_rc = s_fmt_signed ( value, ctx );
+			}
+
+		case 'U':
+		case 'Z':
+		case 'O':
+		case 'X':
+			{
+			int	l_base = 10;
+			char	l_fill = '0';
+
+			uvalue = *ctx->prmlst++;
+
+			if ( d1 == 'U' )
+				l_fill = ' ';
+			else if  ( d1 == 'X' )
+				l_base = 16;
+			else if ( d1 == 'O' )
+				l_base = 8;
+
+			if ( d2 == 'B' )
+				uvalue = (uvalue & 255);
+			else if ( d2 == 'W' )
+				uvalue = (uvalue & 0x0ffff);
+			else	return SS$_BADPARAM + 12;
+
+			ctx->value = (uvalue == 1) ? 1 : 0;
+			return	l_rc = s_fmt_unsigned ( uvalue, l_base, l_fill, ctx );
+			}
+
+		case '/':	/* newline */
+			ctx->ctloffset = 0;
+			APPEND_C ( '\r' )
+			APPEND_C ( '\n' )
+			break;
+
+		case '_':	/* tab */
+			ctx->ctloffset = 0;
+			APPEND_C ( '\t' );
+			break;
+
+		case '^': 	/* form feed */
+			ctx->ctloffset = 0;
+			APPEND_C ( '\014' );
+			break;
+
+		case '!':	/* exclamation mark */
+			ctx->ctloffset = 0;
+			APPEND_C ( '!' );
+			break;
+
+		case '%':	/* system call, date-time */
+			{
+			if ( d2 == 'D' || d2 == 'T' )
+				return	l_rc = s_fmt_time ( (d2=='D') ? 1 : 0, (struct timespec *) *ctx->prmlst++, ctx );
+			else if ( d2 == 'S' )
+				{
+				if ( (j > 0) && (ctx->value != 1) )
+					{
+					char	l_prev = ctx->out[j-1];
+
+					if ( _tolower(l_prev) == l_prev )
+						{APPEND_C('s');}
+					else	{ APPEND_C('S'); }
+					}
+				}
+			else	return SS$_BADPARAM + 14;
+			}
+			break;
+
+		case '*': 	/* Repeat character */
+			return l_rc = s_fmt_pad ( (char) d2, j, ctx );
+		default:
+
+			return SS$_BADPARAM+16;
+		}
+
+	if ( ctx->width_type )
+		return l_rc = s_fmt_pad ( ' ', j, ctx );
+
+	return	ctx->outused = j, STS$K_SUCCESS;
+}
+/************************************************************************/
+static int s_fmt_pad ( char fill, int cur, CTL$_BUF *ctx )
+{
+char * out;
+int j, limit;
+
+	if ( cur >= 0 )
+		{
+		limit = ctx->width + ctx->outused;
+
+		if ( limit < cur )
+			{ cur = ctx->outused; fill = '*'; ctx->width_type =  (-1); }
+		}
+	else	{
+		/* Right justify, fil field to (-cur) spaces */
+		limit = ctx->width + ctx->outused + cur;
+
+		if ( limit < ctx->outused )
+			{ limit = limit-cur; fill = '*'; ctx->width_type = (-1); }
+
+		cur = ctx->outused;
+		}
+
+	if ( limit <= ctx->outsize )
+		{
+		out = ctx->out;
+		ctx->outused = limit;
+
+		for ( j = cur; j < limit; )
+			out[j++] = fill;
+
+		return STS$K_SUCCESS;
+		}
+
+
+	ctx->outused = ctx->outsize;
+
+	for ( j = cur; j < ctx->outused; )
+		out[j++] = fill;
+
+	return SS$_BUFFEROVF;
+
+}
+
+/************************************************************************/
+static int s_fmt_signed ( int value, CTL$_BUF *ctx )
+{
+int	j, length, status, negative, digit_stack[12];
+
+	/*
+	* Test for zero case (algorithm below results in null string on zero).
+	* If not zero, normalize negative number (should test for MIN_INT).
+	*/
+	j = ctx->outused;
+
+	if ( !value )
+		{
+		if ( ctx->width_type )
+			{
+			status = s_fmt_pad ( ' ', -1, ctx );
+
+			if ( status != 1 )
+				return status;
+
+			j = ctx->outused;
+
+			if ( ctx->width_type == -1 )
+				return STS$K_SUCCESS;
+			}
+
+		APPEND_C ( '0' );
+		return	ctx->outused = j, STS$K_SUCCESS;
+		}
+	else if ( value < 0 )
+		{
+		/* In 2's complement format, the negative of the min. integer can
+		* not be represented in the same number of bits, check for that case.
+		*/
+		if ( value == MIN_INT )
+			{
+			char *str;
+
+			if ( ctx->width_type )
+				{
+				if ( 1 != (status = s_fmt_pad ( ' ', -MIN_INT_STR_L, ctx )) )
+					return status;
+
+				if ( ctx->width_type == -1 )
+					return STS$K_SUCCESS;
+
+				j = ctx->outused;
+				}
+
+			for ( str = MIN_INT_STR; *str; str++ )
+				{APPEND_C ( *str );}
+
+			return	ctx->outused = j, STS$K_SUCCESS;
+			}
+
+		negative = 1;
+		value = -value;
+		}
+	else	negative = 0;
+
+
+	/*
+	*  Build stack of successively higher order digits.
+	*/
+	for (length = 0; value > 0; value = value / 10)
+		digit_stack[length++] = value;
+
+	if ( ctx->width_type )
+		{
+		if ( 1 != (status = s_fmt_pad ( ' ', -(length+negative), ctx )) )
+			return status;
+
+		if ( ctx->width_type == -1 )
+			return STS$K_SUCCESS;
+
+		j = ctx->outused;
+		}
+
+	/*
+	* pop stack and make lowest digit an ascii char in output buffer.
+	*/
+	if ( negative )
+		{APPEND_C('-');}
+
+	for ( digit_stack[length] = 0; length > 0; length-- )
+		{APPEND_C( (char) ((digit_stack[length - 1] - (digit_stack[length] * 10)) + 48) );}
+
+	return	ctx->outused = j, STS$K_SUCCESS;
+}
+/************************************************************************/
+static int s_fmt_unsigned ( LONG value, int base, char fill, CTL$_BUF *ctx )
+{
+int j, status, digit_stack[12], length;
+const char *ascdigit = "0123456789ABCDEF";
+
+	/*
+	* Test for zero case (algorithm below results in null string on zero).
+	*/
+	j = ctx->outused;
+
+	if ( !value )
+		{
+		if ( ctx->width_type )
+			{
+			if ( 1 != (status = s_fmt_pad ( fill, -1, ctx )) )
+				return status;
+
+			if ( ctx->width_type == -1 )
+				return STS$K_SUCCESS;
+
+			j = ctx->outused;
+			}
+
+		APPEND_C ( '0' );
+		ctx->outused = j;
+		return 1;
+		}
+
+	/*
+	*  Build stack of successively higher order digits.
+	*/
+	for (length=0; value > 0; value = value/base)
+		digit_stack[length++] = value;
+
+	if ( ctx->width_type )
+		{
+		if ( 1 != (status = s_fmt_pad ( fill, -(length), ctx )) )
+			return status;
+
+		if ( ctx->width_type == -1 )
+			return STS$K_SUCCESS;
+
+		j = ctx->outused;
+		}
+
+
+	/*
+	* pop stack and make lowest digit an ascii char in output buffer.
+	*/
+	for ( digit_stack[length] = 0; length > 0; length-- )
+		{
+		int l_num = digit_stack[length - 1] -(digit_stack[length] * base);
+
+		APPEND_C ( ascdigit[l_num] );
+		/* APPEND_C( (char)
+		((digit_stack[length-1]-(digit_stack[length]*base)) + 48) ); */
+		}
+
+	return	ctx->outused = j, STS$K_SUCCESS;
+}
+
+
+
+
+
+
+#if __util_DEBUG__
 
 int	main (int argc, char *argv[])
 {
@@ -2060,12 +2644,11 @@ char	buf[1024];
 #undef	$DEFMSG
 
 #define $DEFMSGLIST \
-	$DEFMSG(util,  0, S, NORMAL,		"normal successful completion") \
+	$DEFMSG(util,  0, S, NORMAL,	"normal successful completion") \
 	$DEFMSG(util,  1, W, WARNING,	"unknown warning") \
-	$DEFMSG(util,  2, E, ERROR,		"unknown error") \
+	$DEFMSG(util,  2, E, ERROR,	"unknown error") \
 	$DEFMSG(util,  3, F, FATALERR,	"unknown fatal error") \
 	$DEFMSG(util, 13, E, NUMCNVERR,	"numeric conversion error: !SL") \
-	#DEFMSG(util,122, E, LIBRDERR,	"error reading library file !SZ")
 
 #define	$DEFMSG(fac, num, sev, nam, txt) #nam,
 static const char *__$msgmnemonics[] = {
@@ -2241,5 +2824,5 @@ char	buf[1024];
 
 
 #ifndef	WIN32
-// #pragma GCC diagnostic pop
+	//#pragma GCC diagnostic pop
 #endif

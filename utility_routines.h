@@ -241,7 +241,7 @@ struct _timeb timebuffer;
 
 inline static int	____time(struct timespec *tv)
 {
-	clock_gettime(CLOCK_REALTIME, tv);
+	clock_gettime(CLOCK_REALTIME_COARSE, tv);
 
 	return	0;
 }
