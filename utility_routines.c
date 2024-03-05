@@ -2790,6 +2790,8 @@ char	buf[1024];
 	//InitializeSRWLock(&free_bufs.lock);
 
 
+
+
 	for (i = 0; i < IOBUFCNT; i++)
 		$INSQTAIL(&free_bufs, &_stm_buf_area[i], &count);
 
