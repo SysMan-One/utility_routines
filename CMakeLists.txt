@@ -40,6 +40,10 @@ if (build_type STREQUAL debug)
 endif()
 
 
+add_compile_options(-Wno-format)
+add_compile_options(-Wno-pointer-sign )
+add_compile_options(-Wno-deprecated-non-prototype)
+
 
 include_directories (
                 ./
