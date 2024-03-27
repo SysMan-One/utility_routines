@@ -58,3 +58,4 @@ add_library (starlet STATIC
 target_compile_options(starlet PRIVATE -Wno-format)
 target_compile_options(starlet PRIVATE -Wno-pointer-sign )
 target_compile_options(starlet PRIVATE -Wno-deprecated-non-prototype)
+target_compile_options(starlet PRIVATE -Wno-unused-result)
