@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.10)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_COLOR_MAKEFILE   ON)
 set(CMAKE_C_STANDARD 11)
-#set (CMAKE_C_COMPILER /usr/bin/clang)                                                  # Only fgor debug\test purpose
+#set (CMAKE_C_COMPILER /usr/bin/clang)                                                  # Only for debug\test purpose
 
 
 # Predefine project
@@ -32,29 +32,29 @@ set( CPACK_PACKAGE_VERSION_PATCH 0)
 add_definitions( -D__ARCH__NAME__="${CMAKE_HOST_SYSTEM_PROCESSOR}" )
 
 if (CMAKE_BUILD_TYPE)
-       	string(TOLOWER ${CMAKE_BUILD_TYPE} build_type)                                  # Additional definitons for DEBUG builds
+	string(TOLOWER ${CMAKE_BUILD_TYPE} build_type)                                  # Additional definitions for DEBUG builds
 endif()
 
 if (build_type STREQUAL debug)
-       	add_definitions( -D_DEBUG=1 -D__TRACE__=1 -DDEBUG=1)                            # Add "-w" to disable warnings
+	add_definitions( -D_DEBUG=1 -D__TRACE__=1 -DDEBUG=1)                            # Add "-w" to disable warnings
 endif()
 
 
-add_compile_options(-Wno-format)
-add_compile_options(-Wno-pointer-sign )
-add_compile_options(-Wno-deprecated-non-prototype)
 
 
 include_directories (
-                ./
+		./
 )
-
 
 add_library (starlet STATIC
-               	avproto.c
-               	avproto.h
-               	cli_routines.c
-               	cli_routines.h
-               	utility_routines.c
-               	utility_routines.h
+		avproto.c
+		avproto.h
+		cli_routines.c
+		cli_routines.h
+		utility_routines.c
+		utility_routines.h
 )
+
+target_compile_options(starlet PRIVATE -Wno-format)
+target_compile_options(starlet PRIVATE -Wno-pointer-sign )
+target_compile_options(starlet PRIVATE -Wno-deprecated-non-prototype)
