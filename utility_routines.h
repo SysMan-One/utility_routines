@@ -1355,7 +1355,7 @@ typedef	struct _asc
 
 /* Initialize an ASCIC structure by given string	*/
 #define	$ASCDECL(a,sts)	ASC a = {(unsigned char)sizeof(sts)-1,(sts)}
-#define $ASCINI(a)	(unsigned char)sizeof(a)-1,(a)
+#define $ASCINI(a)	((unsigned char) sizeof(a))-1,(a)
 #define $ASCLEN(a)	(((ASC *) a)->len)
 #define $ASCPTR(a)	(((ASC *) a)->sts)
 #define	$ASC(a)		(((ASC *) a)->len),(((ASC *) a)->sts)
@@ -2203,7 +2203,8 @@ static inline int	__util$movc5	(
 
 typedef	struct __sym_rec__ {
 	unsigned long long	val;		/* binary value or mask		*/
-	unsigned char		len, *sym;	/* ASCII counted string		*/
+	unsigned char		len;
+			char	*sym;		/* ASCII counted string		*/
 } SYM_REC;
 
 
@@ -2228,7 +2229,7 @@ typedef	struct __sym_rec__ {
 static inline int	__util$mask2sym	(
 	unsigned long long	 mask,
 	const	SYM_REC		*sym,
-		unsigned char	*out,
+			 char	*out,
 			int	 outsz
 			)
 {
@@ -2281,7 +2282,7 @@ int	outlen = 0;
 static inline int	__util$val2sym	(
 	unsigned long long	 val,
 	const	SYM_REC		*sym,
-		unsigned char	*out,
+			 char	*out,
 			int	 outsz
 			)
 {
@@ -2307,7 +2308,7 @@ int	outlen = 0;
 	return	outlen;
 }
 
-#define	$SYM_REC_INI(s) {s, sizeof(#s)-1, #s}
+#define	$SYM_REC_INI(s) {s, sizeof(#s)-1,  #s}
 #define	$SYM_REC_EOL	{0, 0, NULL}
 
 
