@@ -1045,7 +1045,8 @@ void	__util$dumphex	(
 			)
 {
 const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u [%s:%u] Dump of %u octets follows:"};
-char	out[80];
+#define		UTILS$SZ_HEXWIDTH	80
+char	out[256];
 unsigned char *srcp = (unsigned char *) src, low, high;
 unsigned olen = 0, i, j;
 struct tm _tm;
@@ -1067,22 +1068,26 @@ struct timespec now;
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		__fi, __li, srclen);
 
+
 	/* Add <LF> at end of record*/
-	out[$MIN(olen++, sizeof(out))] = '\n';
+	olen = $MIN(sizeof(out) - 1, olen);
+	out[olen++] = '\n';
 
 	if ( p_cb_log_f )
 		p_cb_log_f(out, olen);
 	else	write (g_logoutput, out, olen );
 
-	memset(out, ' ', sizeof(out));
+	memset(out, ' ', UTILS$SZ_HEXWIDTH);
 
 	/*
 	** Format variable part of string line
 	*/
 	for (i = 0; i < ((srclen / 16));  i++)
 		{
-		olen = snprintf(out, sizeof(out), "\t+%04x:  ", i * 16);
-		memset(out + olen, ' ', sizeof(out) - olen);
+		olen = snprintf(out, UTILS$SZ_HEXWIDTH, "\t+%04x:  ", i * 16);
+		olen = $MIN(UTILS$SZ_HEXWIDTH - 1, olen);
+
+		memset(out + olen, ' ', UTILS$SZ_HEXWIDTH - olen);
 
 		for (j = 0; j < 16; j++, srcp++)
 			{
@@ -1096,18 +1101,20 @@ struct timespec now;
 			}
 
 		/* Add <LF> at end of record*/
-		out[sizeof(out) - 1] = '\n';
+		out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
 		if ( p_cb_log_f )
-			p_cb_log_f(out, sizeof(out));
-		else	write (g_logoutput, out, sizeof(out) );
+			p_cb_log_f(out, UTILS$SZ_HEXWIDTH);
+		else	write (g_logoutput, out, UTILS$SZ_HEXWIDTH );
 		}
 
 	if ( srclen % 16 )
 		{
-		olen = snprintf(out, sizeof(out), "\t+%04x:  ", i * 16);
-		memset(out + olen, ' ', sizeof(out) - olen);
+		olen = snprintf(out, UTILS$SZ_HEXWIDTH, "\t+%04x:  ", i * 16);
+		olen = $MIN(UTILS$SZ_HEXWIDTH - 1, olen);
+
+		memset(out + olen, ' ', UTILS$SZ_HEXWIDTH - olen);
 
 		for (j = 0; j < srclen % 16; j++, srcp++)
 			{
@@ -1121,12 +1128,12 @@ struct timespec now;
 			}
 
 		/* Add <LF> at end of record*/
-		out[sizeof(out) - 1] = '\n';
+		out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
 		if ( p_cb_log_f )
-			p_cb_log_f(out, sizeof(out));
-		else	write (g_logoutput, out, sizeof(out) );
+			p_cb_log_f(out, UTILS$SZ_HEXWIDTH);
+		else	write (g_logoutput, out, UTILS$SZ_HEXWIDTH );
 		}
 }
 
