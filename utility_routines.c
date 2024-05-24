@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-04"
-#define	__REV__		"1.04.0"
+#define	__IDENT__	"V.01-04ECO1"
+#define	__REV__		"1.04.1"
 
 
 /*
@@ -85,6 +85,8 @@
 **	14-FEB-2023	RRL	V.01-03 : __util$vfao -  like SYS$FAO from DIGITAL VMS-World!
 **
 **	14-FEB-2023	RRL	V.01-04 : Added SYS_FAOL from Dave Jonse OSU WEB with some cosmetic changes for more readability
+**
+**	24-MAY-2024	RRL	V.01-04ECO1 : Fixed possible buffer overrun in the  __util$dumphex()
 **
 */
 
