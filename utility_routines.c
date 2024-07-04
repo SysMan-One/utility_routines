@@ -408,6 +408,8 @@ EMSG_RECORD *msgrec;
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 			(unsigned) __gettid(), __fi, __li);
 
+	olen = $MIN(UTIL$SZ_OUTBUF, olen);
+
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
 		va_start (arglist, __li);				/* Fromat text message */
@@ -420,6 +422,8 @@ EMSG_RECORD *msgrec;
 			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
 		}
 
+
+	olen = $MIN(UTIL$SZ_OUTBUF, olen);
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
