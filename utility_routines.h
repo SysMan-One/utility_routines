@@ -48,6 +48,8 @@
 **
 **	 9-OCT-2023	RRL	Revised and refactored __util$lookup_key
 **
+**	10-OCT-2024	RRL	Fix $IFTRACE() in Release compilation
+**
 */
 
 #if _WIN32
@@ -1334,8 +1336,15 @@ void	__util$trace	(int cond, const char *fmt, const char *mod, const char *func,
 		#define $IFTRACE(cond, fmt, ...) __util$trace(cond, fmt, __MODULE__, __FUNCTION__, __LINE__ , ## __VA_ARGS__)
 	#endif
 #else
-	#define $TRACE(fmt, ...)	{}
-	#define $IFTRACE(cond, fmt, ...)	{}
+#ifndef __UTIL$_NOPE__
+static inline void __util$nope (void) {}
+#define	__UTIL$_NOPE__	1
+#endif /* __UTIL$_NOPE__ */
+
+
+
+	#define $TRACE(fmt, ...)		__util$nope()
+	#define $IFTRACE(cond, fmt, ...)	__util$nope()
 
 #endif
 
