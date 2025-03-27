@@ -1377,7 +1377,7 @@ typedef	struct _asc
  *   DESCRIPTION: Convert 32-x bits unsigned interegr ot the decimal text string.
  *
  *   INPUT:
- *	a_src:		Source value to be converted, unsigned long
+ *	a_src:		Source value to be converted, unsigned int
  *	a_dst:		An address of the destination buffer
  *	a_dstsz:	A size of the destination buffer
  *
@@ -1421,15 +1421,17 @@ char	*l_dstp;
 /* Copying ASCIIZ string to ASCIC container */
 inline static int	__util$str2asc
 			(
-	const char *	src,
-		ASC *	dst
+	const char *	a_src,
+		void *	a_dst
 			)
 {
-	$ASCLEN(dst) = (unsigned char) strnlen(src, ASC$K_SZ);
-	memcpy($ASCPTR(dst), src, $ASCLEN(dst) );
-	dst->sts[dst->len] = '\0';
+ASC	*l_dst = (ASC *) a_dst;;
 
-	return	$ASCLEN(dst);
+	$ASCLEN(a_dst) = (unsigned char) strnlen(a_src, ASC$K_SZ);
+	memcpy($ASCPTR(a_dst), a_src, $ASCLEN(a_dst) );
+	l_dst->sts[l_dst->len] = '\0';
+
+	return	$ASCLEN(a_dst);
 }
 
 
@@ -1450,7 +1452,53 @@ inline static int	__util$asc2str
 
 
 
-/* Comparing two ASCIC */
+/**
+ *  @brief:	Retreive a substring with a given index
+ */
+inline static int	__util$strelem
+			(
+	const ASC	*a_src,
+		int	a_separator,
+		int	a_idx,
+		ASC 	*a_dst
+			)
+{
+char	*l_cp_begin, *l_cp_end;
+int	l_i, l_len;
+
+	l_len = $ASCLEN(a_src);
+	l_cp_begin = $ASCPTR(a_src);
+	if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
+		l_cp_end = l_cp_begin + $ASCLEN(a_src);
+
+	l_len -= l_cp_end - l_cp_begin;						/* Adjust length of rest buffer to has been processed part */
+
+
+	for ( l_i = 0; l_len && (l_i < a_idx); l_i++ )
+		{
+		l_cp_begin = l_cp_end + 1;
+		if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
+			l_cp_end = l_cp_begin + $ASCLEN(a_src);
+
+		l_len -= l_cp_end - l_cp_begin;					/* Adjust length of rest buffer to has been processed part */
+		}
+
+	if ( l_i != a_idx )
+		return	0;
+
+
+	$ASCLEN(a_dst) = l_cp_end - l_cp_begin;
+	memcpy ( $ASCPTR(a_dst), l_cp_begin, $ASCLEN(a_dst));
+
+	return	$ASCLEN(a_dst);
+}
+
+
+
+
+/**
+ *  @brief: Comparing two ASCIC
+*/
 inline static int	__util$cmpasc
 			(
 		ASC *	s1,
@@ -1467,11 +1515,13 @@ int	status;
 
 
 
-/* Comparing two ASCIC */
+/**
+ * @brief: Comparing two ASCIC
+*/
 inline static int	__util$cmpasc_blind
 			(
-		ASC *	s1,
-		ASC *	s2
+		const ASC *	s1,
+		const ASC *	s2
 			)
 {
 int	status;
@@ -1494,8 +1544,8 @@ int	status;
 /* Copy ASCIC */
 inline static int	__util$cpyasc
 			(
-		ASC *	a_src,
-		ASC *	a_dst
+		const ASC *	a_src,
+		const ASC *	a_dst
 			)
 {
 
