@@ -1727,26 +1727,26 @@ int	retlen = (srchexlen + 1) / 2, i;
  *		to a hexadecimal string. It's expected that output buffer have
  *		enough space to accept <source_length * 2> characters.
  *
- * @param srcbin	-	An address of source data buffer to convert from
- * @param dsthex	-	An address of the output buffer to accept hex-string
- * @param srcbinlen	-	A length of the source data
+ * @param a_srcbin	-	An address of source data buffer to convert from
+ * @param a_dsthex	-	An address of the output buffer to accept hex-string
+ * @param a_srcbinlen	-	A length of the source data
  *
  * @return	-	A length of the data in the output buffer
  *
  */
 inline	static int __util$bin2hex
 		(
-		void *	srcbin,
-		void *	dsthex,
-	unsigned short  srcbinlen
+	const void *	a_srcbin,
+		void *	a_dsthex,
+	unsigned short  a_srcbinlen
 		)
 {
-unsigned char    l = 0, h = 0, *__srcbin = (unsigned char *) srcbin, *__dsthex = (unsigned char *) dsthex; ;
-int	retlen = srcbinlen * 2;
+unsigned char    l = 0, h = 0, *__srcbin = (unsigned char *) a_srcbin, *__dsthex = (unsigned char *) a_dsthex; ;
+int	retlen = a_srcbinlen * 2;
 
 	__dsthex[retlen] = '\0';
 
-	for( ; srcbinlen; srcbinlen--, __dsthex += 2, __srcbin++)
+	for( ; a_srcbinlen; a_srcbinlen--, __dsthex += 2, __srcbin++)
 		{
 		h       = (*__srcbin) >> 4;
 		h	&= 0x0F;
