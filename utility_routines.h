@@ -1674,28 +1674,28 @@ unsigned	__util$crc32c	(unsigned int crc, const void *buf, size_t buflen);
  *		It's expected that output buffer have enough space to accept
  *		 <(source_length + 1) / 2> octets.
  *
- * @param srchex	-	An address of source data buffer to convert from
- * @param dstbin	-	An address of the output buffer to accept converted octets
- * @param srchexlen	-	A length of the source data
+ * @param a_srchex	-	An address of source data buffer to convert from
+ * @param a_\dstbin	-	An address of the output buffer to accept converted octets
+ * @param a_srchexlen	-	A length of the source data
  *
  * @return	-	A length of the data in the output buffer
  *
  */
 inline	static int __util$hex2bin
 		(
-		void *	srchex,
-		void *	dstbin,
-	unsigned short  srchexlen
+	const void *	a_srchex,
+		void *	a_dstbin,
+	unsigned short  a_srchexlen
 		)
 {
-unsigned char	c, l = 0, h = 0, *__srchex = (unsigned char *) srchex, *__dstbin = (unsigned char *) dstbin;
-int	retlen = (srchexlen + 1) / 2, i;
+unsigned char	c, l = 0, h = 0, *__srchex = (unsigned char *) a_srchex, *__dstbin = (unsigned char *) a_dstbin;
+int	retlen = (a_srchexlen + 1) / 2, i;
 
 	/* We will converting from tail to head */
-	__srchex += (srchexlen - 1);
+	__srchex += (a_srchexlen - 1);
 	__dstbin += (retlen - 1);
 
-	for( i = (srchexlen / 2); i; i--, __dstbin--, __srchex--)
+	for( i = (a_srchexlen / 2); i; i--, __dstbin--, __srchex--)
 		{
 		c = tolower(*__srchex);
 		l = ((c) <= '9') ? (c) - '0' : (c) - 'a' + 10;
@@ -1709,7 +1709,7 @@ int	retlen = (srchexlen + 1) / 2, i;
 		*__dstbin    = c = l | (h << 4);
 		}
 
-	if ( srchexlen % 2)
+	if ( a_srchexlen % 2)
 		{
 		c = tolower(*__srchex);
 		l = ((c) <= '9') ? (c) - '0' : (c) - 'a' + 10;
