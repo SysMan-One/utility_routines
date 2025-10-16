@@ -1,12 +1,6 @@
 #define	__MODULE__	"AVPROTO"
 #define	__IDENT__	"X.94-07"
 
-#ifdef	__GNUC__	/* We don't interesting in the some warnings */
-
-	#pragma GCC diagnostic ignored  "-Wparentheses"
-	#pragma	GCC diagnostic ignored	"-Wunused-variable"
-#endif
-
 
 /*
 **++
