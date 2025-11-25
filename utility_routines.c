@@ -330,7 +330,7 @@ EMSG_RECORD *msgrec;
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
 	*/
-	____time(&now);
+	s___time(&now);
 
 #ifdef	WIN32
 	localtime_s(&_tm, (time_t *)&now);
@@ -392,7 +392,7 @@ EMSG_RECORD *msgrec;
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
 	*/
-	____time(&now);
+	s___time(&now);
 
 #ifdef	WIN32
 	localtime_s(&_tm, (time_t *)&now);
@@ -472,7 +472,7 @@ struct timespec now = {0};
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]-E-:" prefix
 	*/
-	____time(&now);
+	s___time(&now);
 
 #ifdef	WIN32
 	localtime_s(&_tm, (time_t *)&now);
@@ -1044,102 +1044,103 @@ OPTS	*optp;
  */
 
 void	__util$dumphex	(
-		const char *	__fi,
-		unsigned	__li,
-		const void *	src,
-		unsigned short	srclen
+		const char *	a__fi,
+		unsigned	a__li,
+		const void *	a_src,
+		unsigned short	a_srclen
 			)
 {
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u [%s:%u] Dump of %u octets follows:"};
+const char	l_fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s:%u] Dump of %u octets follows:"};
 #define		UTILS$SZ_HEXWIDTH	80
-char	out[256];
-unsigned char *srcp = (unsigned char *) src, low, high;
-unsigned olen = 0, i, j;
-struct tm _tm;
-struct timespec now;
+char	l_out[256];
+unsigned char *l_src = (unsigned char *) a_src, l_low, l_high;
+unsigned l_olen = 0, i, j;
+struct tm l_tm;
+struct timespec l_now;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]" prefix
 	*/
-	____time(&now);
+	s___time(&l_now);
 
 #ifdef	WIN32
 	localtime_s(&_tm, (time_t *)&now);
 #else
-	localtime_r((time_t *)&now, &_tm);
+	localtime_r((time_t *)&l_now, &l_tm);
 #endif
 
-	olen = snprintf (out, sizeof(out) - 1, lfmt,
-		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		__fi, __li, srclen);
+	l_olen = snprintf (l_out, sizeof(l_out) - 1, l_fmt,
+		l_tm.tm_mday, l_tm.tm_mon + 1, 1900 + l_tm.tm_year,
+		l_tm.tm_hour, l_tm.tm_min, l_tm.tm_sec, (unsigned) l_now.tv_nsec/TIMSPECDEVIDER,
+		(unsigned) __gettid(),
+		a__fi, a__li, a_srclen);
 
 
 	/* Add <LF> at end of record*/
-	olen = $MIN(sizeof(out) - 1, olen);
-	out[olen++] = '\n';
+	l_olen = $MIN(sizeof(l_out) - 1, l_olen);
+	l_out[l_olen++] = '\n';
 
 	if ( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen );
+		p_cb_log_f(l_out, l_olen);
+	else	write (g_logoutput, l_out, l_olen );
 
-	memset(out, ' ', UTILS$SZ_HEXWIDTH);
+	memset(l_out, ' ', UTILS$SZ_HEXWIDTH);
 
 	/*
 	** Format variable part of string line
 	*/
-	for (i = 0; i < ((srclen / 16));  i++)
+	for (i = 0; i < ((a_srclen / 16));  i++)
 		{
-		olen = snprintf(out, UTILS$SZ_HEXWIDTH, "\t+%04x:  ", i * 16);
-		olen = $MIN(UTILS$SZ_HEXWIDTH - 1, olen);
+		l_olen = snprintf(l_out, UTILS$SZ_HEXWIDTH, "\t+%04x:  ", i * 16);
+		l_olen = $MIN(UTILS$SZ_HEXWIDTH - 1, l_olen);
 
-		memset(out + olen, ' ', UTILS$SZ_HEXWIDTH - olen);
+		memset(l_out + l_olen, ' ', UTILS$SZ_HEXWIDTH - l_olen);
 
-		for (j = 0; j < 16; j++, srcp++)
+		for (j = 0; j < 16; j++, l_src++)
 			{
-			high = (*srcp) >> 4;
-			low = (*srcp) & 0x0f;
+			l_high = (*l_src) >> 4;
+			l_low = (*l_src) & 0x0f;
 
-			out[olen + j * 3] = high + ((high < 10) ? '0' : 'a' - 10);
-			out[olen + j * 3 + 1] = low + ((low < 10) ? '0' : 'a' - 10);
+			l_out[l_olen + j * 3] = l_high + ((l_high < 10) ? '0' : 'a' - 10);
+			l_out[l_olen + j * 3 + 1] = l_low + ((l_low < 10) ? '0' : 'a' - 10);
 
-			out[olen + 16*3 + 2 + j] = isprint(*srcp) ? *srcp : '.';
+			l_out[l_olen + 16*3 + 2 + j] = isprint(*l_src) ? *l_src : '.';
 			}
 
 		/* Add <LF> at end of record*/
-		out[UTILS$SZ_HEXWIDTH - 1] = '\n';
+		l_out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
 		if ( p_cb_log_f )
-			p_cb_log_f(out, UTILS$SZ_HEXWIDTH);
-		else	write (g_logoutput, out, UTILS$SZ_HEXWIDTH );
+			p_cb_log_f(l_out, UTILS$SZ_HEXWIDTH);
+		else	write (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
 		}
 
-	if ( srclen % 16 )
+	if ( a_srclen % 16 )
 		{
-		olen = snprintf(out, UTILS$SZ_HEXWIDTH, "\t+%04x:  ", i * 16);
-		olen = $MIN(UTILS$SZ_HEXWIDTH - 1, olen);
+		l_olen = snprintf(l_out, UTILS$SZ_HEXWIDTH, "\t+%04x:  ", i * 16);
+		l_olen = $MIN(UTILS$SZ_HEXWIDTH - 1, l_olen);
 
-		memset(out + olen, ' ', UTILS$SZ_HEXWIDTH - olen);
+		memset(l_out + l_olen, ' ', UTILS$SZ_HEXWIDTH - l_olen);
 
-		for (j = 0; j < srclen % 16; j++, srcp++)
+		for (j = 0; j < a_srclen % 16; j++, l_src++)
 			{
-			high = (*srcp) >> 4;
-			low = (*srcp) & 0x0f;
+			l_high = (*l_src) >> 4;
+			l_low = (*l_src) & 0x0f;
 
-			out[olen + j * 3] = high + ((high < 10) ? '0' : 'a' - 10);
-			out[olen + j * 3 + 1] = low + ((low < 10) ? '0' : 'a' - 10);
+			l_out[l_olen + j * 3] = l_high + ((l_high < 10) ? '0' : 'a' - 10);
+			l_out[l_olen + j * 3 + 1] = l_low + ((l_low < 10) ? '0' : 'a' - 10);
 
-			out[olen + 16*3 + 2 + j] = isprint(*srcp) ? *srcp : '.';
+			l_out[l_olen + 16*3 + 2 + j] = isprint(*l_src) ? *l_src : '.';
 			}
 
 		/* Add <LF> at end of record*/
-		out[UTILS$SZ_HEXWIDTH - 1] = '\n';
+		l_out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
 		if ( p_cb_log_f )
-			p_cb_log_f(out, UTILS$SZ_HEXWIDTH);
-		else	write (g_logoutput, out, UTILS$SZ_HEXWIDTH );
+			p_cb_log_f(l_out, UTILS$SZ_HEXWIDTH);
+		else	write (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
 		}
 }
 
@@ -1161,33 +1162,36 @@ struct timespec now;
  *--
  */
 int	__util$faohex	(
-		void *	src,
-		unsigned short	srclen,
-		char *	out,
-		unsigned short	outsz
+	const void *	a_src,
+	unsigned short	a_srclen,
+		char *	a_out,
+	unsigned short	a_outsz,
+	unsigned short	*a_outlen
 			)
 {
-unsigned char *srcp = (unsigned char *) src, low, high;
+unsigned char *l_src = (unsigned char *) a_src, low, high;
 unsigned j;
 
-	memset(out, ' ', outsz);
-	srclen = $MIN(16, srclen);
+	memset(a_out, ' ', a_outsz);
+	a_srclen = $MIN(16, a_srclen);
 
-	for (j = 0; j < 16; j++, srcp++)
+	for (j = 0; j < 16; j++, l_src++)
 		{
-		high = (*srcp) >> 4;
-		low = (*srcp) & 0x0f;
+		high = (*l_src) >> 4;
+		low = (*l_src) & 0x0f;
 
-		out[j * 3] = high + ((high < 10) ? '0' : 'a' - 10);
-		out[j * 3 + 1] = low + ((low < 10) ? '0' : 'a' - 10);
+		a_out[j * 3] = high + ((high < 10) ? '0' : 'a' - 10);
+		a_out[j * 3 + 1] = low + ((low < 10) ? '0' : 'a' - 10);
 
-		out[16*3 + 2 + j] = isprint(*srcp) ? *srcp : '.';
+		a_out[16*3 + 2 + j] = isprint(*l_src) ? *l_src : '.';
+
 		}
 
-	out[16*3 + 2 + j] = '\0';
+	a_out[16*3 + 2 + j] = '\0';
 
-	return	16*3 + 2 + j;
+	return (*a_outlen = (16*3 + 2 + j));
 }
+
 
 
 
@@ -1240,7 +1244,7 @@ struct timespec now;
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]" prefix
 	*/
-	____time(&now);
+	s___time(&now);
 
 #ifdef	WIN32
 	localtime_s(&_tm, (time_t *)&now);
@@ -1326,7 +1330,7 @@ struct timespec now;
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]<FAC>-E:" prefix
 	*/
-	____time(&now);
+	s___time(&now);
 
 #ifdef	WIN32
 	localtime_s(&_tm, (time_t *)&now);
@@ -1408,7 +1412,7 @@ struct timespec now;
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]<FAC>-E:" prefix
 	*/
-	____time(&now);
+	s___time(&now);
 
 #ifdef	WIN32
 	localtime_s(&_tm, (time_t *)&now);
@@ -2113,7 +2117,7 @@ struct tm l_tm;
 struct timespec l_now;
 
 	if ( !a_now )
-		____time(&l_now);
+		s___time(&l_now);
 	else	l_now = *a_now;
 
 #ifdef	WIN32

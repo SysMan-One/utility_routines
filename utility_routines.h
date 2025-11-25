@@ -243,7 +243,7 @@ struct _timeb timebuffer;
 
 #else
 
-inline static int	____time(struct timespec *tv)
+inline static int	s___time(struct timespec *tv)
 {
 	clock_gettime(CLOCK_REALTIME_COARSE, tv);
 
@@ -1377,7 +1377,7 @@ typedef	struct _asc
  *   DESCRIPTION: Convert 32-x bits unsigned interegr ot the decimal text string.
  *
  *   INPUT:
- *	a_src:		Source value to be converted, unsigned long
+ *	a_src:		Source value to be converted, unsigned int
  *	a_dst:		An address of the destination buffer
  *	a_dstsz:	A size of the destination buffer
  *
@@ -1421,15 +1421,17 @@ char	*l_dstp;
 /* Copying ASCIIZ string to ASCIC container */
 inline static int	__util$str2asc
 			(
-	const char *	src,
-		ASC *	dst
+	const char *	a_src,
+		void *	a_dst
 			)
 {
-	$ASCLEN(dst) = (unsigned char) strnlen(src, ASC$K_SZ);
-	memcpy($ASCPTR(dst), src, $ASCLEN(dst) );
-	dst->sts[dst->len] = '\0';
+ASC	*l_dst = (ASC *) a_dst;;
 
-	return	$ASCLEN(dst);
+	$ASCLEN(a_dst) = (unsigned char) strnlen(a_src, ASC$K_SZ);
+	memcpy($ASCPTR(a_dst), a_src, $ASCLEN(a_dst) );
+	l_dst->sts[l_dst->len] = '\0';
+
+	return	$ASCLEN(a_dst);
 }
 
 
@@ -1450,7 +1452,53 @@ inline static int	__util$asc2str
 
 
 
-/* Comparing two ASCIC */
+/**
+ *  @brief:	Retreive a substring with a given index
+ */
+inline static int	__util$strelem
+			(
+	const ASC	*a_src,
+		int	a_separator,
+		int	a_idx,
+		ASC 	*a_dst
+			)
+{
+char	*l_cp_begin, *l_cp_end;
+int	l_i, l_len;
+
+	l_len = $ASCLEN(a_src);
+	l_cp_begin = $ASCPTR(a_src);
+	if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
+		l_cp_end = l_cp_begin + $ASCLEN(a_src);
+
+	l_len -= l_cp_end - l_cp_begin;						/* Adjust length of rest buffer to has been processed part */
+
+
+	for ( l_i = 0; l_len && (l_i < a_idx); l_i++ )
+		{
+		l_cp_begin = l_cp_end + 1;
+		if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
+			l_cp_end = l_cp_begin + $ASCLEN(a_src);
+
+		l_len -= l_cp_end - l_cp_begin;					/* Adjust length of rest buffer to has been processed part */
+		}
+
+	if ( l_i != a_idx )
+		return	0;
+
+
+	$ASCLEN(a_dst) = l_cp_end - l_cp_begin;
+	memcpy ( $ASCPTR(a_dst), l_cp_begin, $ASCLEN(a_dst));
+
+	return	$ASCLEN(a_dst);
+}
+
+
+
+
+/**
+ *  @brief: Comparing two ASCIC
+*/
 inline static int	__util$cmpasc
 			(
 		ASC *	s1,
@@ -1467,11 +1515,13 @@ int	status;
 
 
 
-/* Comparing two ASCIC */
+/**
+ * @brief: Comparing two ASCIC
+*/
 inline static int	__util$cmpasc_blind
 			(
-		ASC *	s1,
-		ASC *	s2
+		const ASC *	s1,
+		const ASC *	s2
 			)
 {
 int	status;
@@ -1494,8 +1544,8 @@ int	status;
 /* Copy ASCIC */
 inline static int	__util$cpyasc
 			(
-		ASC *	a_src,
-		ASC *	a_dst
+		const ASC *	a_src,
+		const ASC *	a_dst
 			)
 {
 
@@ -1624,28 +1674,28 @@ unsigned	__util$crc32c	(unsigned int crc, const void *buf, size_t buflen);
  *		It's expected that output buffer have enough space to accept
  *		 <(source_length + 1) / 2> octets.
  *
- * @param srchex	-	An address of source data buffer to convert from
- * @param dstbin	-	An address of the output buffer to accept converted octets
- * @param srchexlen	-	A length of the source data
+ * @param a_srchex	-	An address of source data buffer to convert from
+ * @param a_\dstbin	-	An address of the output buffer to accept converted octets
+ * @param a_srchexlen	-	A length of the source data
  *
  * @return	-	A length of the data in the output buffer
  *
  */
 inline	static int __util$hex2bin
 		(
-		void *	srchex,
-		void *	dstbin,
-	unsigned short  srchexlen
+	const void *	a_srchex,
+		void *	a_dstbin,
+	unsigned short  a_srchexlen
 		)
 {
-unsigned char	c, l = 0, h = 0, *__srchex = (unsigned char *) srchex, *__dstbin = (unsigned char *) dstbin;
-int	retlen = (srchexlen + 1) / 2, i;
+unsigned char	c, l = 0, h = 0, *__srchex = (unsigned char *) a_srchex, *__dstbin = (unsigned char *) a_dstbin;
+int	retlen = (a_srchexlen + 1) / 2, i;
 
 	/* We will converting from tail to head */
-	__srchex += (srchexlen - 1);
+	__srchex += (a_srchexlen - 1);
 	__dstbin += (retlen - 1);
 
-	for( i = (srchexlen / 2); i; i--, __dstbin--, __srchex--)
+	for( i = (a_srchexlen / 2); i; i--, __dstbin--, __srchex--)
 		{
 		c = tolower(*__srchex);
 		l = ((c) <= '9') ? (c) - '0' : (c) - 'a' + 10;
@@ -1659,7 +1709,7 @@ int	retlen = (srchexlen + 1) / 2, i;
 		*__dstbin    = c = l | (h << 4);
 		}
 
-	if ( srchexlen % 2)
+	if ( a_srchexlen % 2)
 		{
 		c = tolower(*__srchex);
 		l = ((c) <= '9') ? (c) - '0' : (c) - 'a' + 10;
@@ -1677,26 +1727,26 @@ int	retlen = (srchexlen + 1) / 2, i;
  *		to a hexadecimal string. It's expected that output buffer have
  *		enough space to accept <source_length * 2> characters.
  *
- * @param srcbin	-	An address of source data buffer to convert from
- * @param dsthex	-	An address of the output buffer to accept hex-string
- * @param srcbinlen	-	A length of the source data
+ * @param a_srcbin	-	An address of source data buffer to convert from
+ * @param a_dsthex	-	An address of the output buffer to accept hex-string
+ * @param a_srcbinlen	-	A length of the source data
  *
  * @return	-	A length of the data in the output buffer
  *
  */
 inline	static int __util$bin2hex
 		(
-		void *	srcbin,
-		void *	dsthex,
-	unsigned short  srcbinlen
+	const void *	a_srcbin,
+		void *	a_dsthex,
+	unsigned short  a_srcbinlen
 		)
 {
-unsigned char    l = 0, h = 0, *__srcbin = (unsigned char *) srcbin, *__dsthex = (unsigned char *) dsthex; ;
-int	retlen = srcbinlen * 2;
+unsigned char    l = 0, h = 0, *__srcbin = (unsigned char *) a_srcbin, *__dsthex = (unsigned char *) a_dsthex; ;
+int	retlen = a_srcbinlen * 2;
 
 	__dsthex[retlen] = '\0';
 
-	for( ; srcbinlen; srcbinlen--, __dsthex += 2, __srcbin++)
+	for( ; a_srcbinlen; a_srcbinlen--, __dsthex += 2, __srcbin++)
 		{
 		h       = (*__srcbin) >> 4;
 		h	&= 0x0F;
