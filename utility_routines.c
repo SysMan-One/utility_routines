@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-04ECO1"
-#define	__REV__		"1.04.1"
+#define	__IDENT__	"V.01-05"
+#define	__REV__		"1.05.0"
 
 
 /*
@@ -87,6 +87,9 @@
 **	14-FEB-2023	RRL	V.01-04 : Added SYS_FAOL from Dave Jonse OSU WEB with some cosmetic changes for more readability
 **
 **	24-MAY-2024	RRL	V.01-04ECO1 : Fixed possible buffer overrun in the  __util$dumphex()
+**
+**	24-APR-2026	RRL	V.01-05 : Added support for parsing CLI option started with "--",
+**				--trace --logfile ...
 **
 */
 
@@ -919,6 +922,10 @@ OPTS	*optp;
 			$LOG(STS$K_ERROR, "%d: Option must be started with '-' or '/', skip : '%s'", i, argv[i]);
 			continue;
 			}
+
+		if ( *(argp + 1) == '-' )
+			argp++;
+
 
 		if ( (valp = strchr(++argp, '=')) )
 			{
@@ -2842,6 +2849,30 @@ char	buf[1024];
 
 
 
-#ifndef	WIN32
-	//#pragma GCC diagnostic pop
-#endif
+#ifdef	__MAIN_FOR_DEBUG__
+
+int	main (int argc, char *argv[])
+{
+ASC	l_logfspec = {0}, l_confspec = {0}, l_settings = {0};
+int	l_trace, l_logsize;
+
+
+const OPTS l_optstbl [] =					/* General CLI options		*/
+	{
+		{$ASCINI("config"),	&l_confspec, ASC$K_SZ,		OPTS$K_CONF},
+		{$ASCINI("trace"),	&l_trace, 0,			OPTS$K_OPT},
+		{$ASCINI("logfile"),	&l_logfspec, ASC$K_SZ,		OPTS$K_STR},
+		{$ASCINI("logsize"),	&l_logsize, 0,			OPTS$K_INT},
+		{$ASCINI("settings"),	&l_settings,  ASC$K_SZ,		OPTS$K_STR},
+
+		OPTS_NULL
+	};
+
+
+
+	__util$getparams(argc, argv, l_optstbl);
+	__util$showparams(l_optstbl);
+}
+#endif	/* __MAIN_FOR_DEBUG__ */
+
+

@@ -7,7 +7,10 @@
 #
 #       MODIFICATION HISTORY:
 #
+#		24-MAR-2026	RRL	Added "__MAIN_FOR_DEBUG__" for debug and developing purpose;
+#					usage: $ cmake ... -D__MAIN_FOR_DEBUG__=1
 #---
+
 
 cmake_policy(SET CMP0048 NEW)
 include(CMakePrintHelpers)
@@ -31,6 +34,11 @@ set( CPACK_PACKAGE_VERSION_PATCH 0)
 
 add_definitions( -D__ARCH__NAME__="${CMAKE_HOST_SYSTEM_PROCESSOR}" )
 
+
+if (__MAIN_FOR_DEBUG__)
+	add_definitions( -D__MAIN_FOR_DEBUG__=1)
+endif()
+
 if (CMAKE_BUILD_TYPE)
 	string(TOLOWER ${CMAKE_BUILD_TYPE} build_type)                                  # Additional definitions for DEBUG builds
 endif()
@@ -46,13 +54,17 @@ include_directories (
 		./
 )
 
+set (SRC_LIST
+	avproto.c
+	avproto.h
+	cli_routines.c
+	cli_routines.h
+	utility_routines.c
+	utility_routines.h
+)
+
 add_library (starlet STATIC
-		avproto.c
-		avproto.h
-		cli_routines.c
-		cli_routines.h
-		utility_routines.c
-		utility_routines.h
+		${SRC_LIST}
 )
 
 target_compile_options(starlet PRIVATE -Wno-format)
@@ -60,3 +72,7 @@ target_compile_options(starlet PRIVATE -Wno-pointer-sign )
 target_compile_options(starlet PRIVATE -Wno-deprecated-non-prototype)
 target_compile_options(starlet PRIVATE -Wno-unused-result)
 set_target_properties(starlet PROPERTIES PUBLIC_HEADER utility_routines.h avproto.h cli_routines.h)
+
+if (__MAIN_FOR_DEBUG__)
+	add_executable ( starlet.exe ${SRC_LIST})
+endif()
