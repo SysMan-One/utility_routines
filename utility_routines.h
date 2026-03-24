@@ -1992,55 +1992,55 @@ typedef	struct _kwdent
 } KWDENT;
 
 inline	static	int	__util$lookup_key	(
-		const	char	*src,
-			int	srclen,
+		const	char	*a_src,
+			int	a_srclen,
 
-		KWDENT *	ktbl,
-			int	ktblsz,
+		KWDENT *	a_ktbl,
+			int	a_ktblsz,
 
-		KWDENT	**	kwd,
+		KWDENT	**	a_kwd,
 
-			int	flags
+			int	a_flags
 			)
 {
-int	status = STS$K_ERROR, len;
-KWDENT *	k = ktbl;
+int	l_status = STS$K_ERROR, l_len;
+KWDENT *	l_ktbl = a_ktbl;
 
-	for ( k = ktbl, len = 0; ktblsz; ktblsz--, k++)
+	for ( l_ktbl = a_ktbl, l_len = 0; a_ktblsz; a_ktblsz--, l_ktbl++)
 		{
 		/* Exact comparing or abbreviated ? */
-		if ( !(flags & UTIL$K_LOOKUP_ABBREV) )
-			if ( srclen != k->kwd.len )
+		if ( !(a_flags & UTIL$K_LOOKUP_ABBREV) )
+			if ( a_srclen != l_ktbl->kwd.len )
 				continue;
 
 		/*
 		* We performs a comparing only in case when a compare length is
 		* more then at previous step.
 		*/
-		if ( len <= $MIN(srclen, k->kwd.len) )
-			len = $MIN(srclen, k->kwd.len);
+		if ( l_len <= $MIN(a_srclen, l_ktbl->kwd.len) )
+			l_len = $MIN(a_srclen, l_ktbl->kwd.len);
 		else	continue;
 
 
 		/* Comparing ... */
-		status = (flags & UTIL$K_LOOKUP_NCASE) ?
+		l_status = (a_flags & UTIL$K_LOOKUP_NCASE) ?
 #ifdef	WIN32
 
 			_strnicmp
 #else
 			strncasecmp
 #endif
-			(src, k->kwd.sts, len) : memcmp(src, k->kwd.sts, len);
+			(a_src, l_ktbl->kwd.sts, l_len) : memcmp(a_src, l_ktbl->kwd.sts, l_len);
 
-		if ( !status &&  !(flags & UTIL$K_LOOKUP_ABBREV) )
+		if ( !l_status &&  !(a_flags & UTIL$K_LOOKUP_ABBREV) )
 			break;
 		}
 
 	/* No matching ... */
-	if ( status )
+	if ( l_status )
 		return	STS$K_ERROR;
 
-	*kwd = k;
+	*a_kwd = l_ktbl;
 
 	return	STS$K_SUCCESS;
 }
@@ -2124,7 +2124,7 @@ char *	_dst = (char *) dst;
  * @param srcsz	- a lenth of the source data
  * @param dst	- a buffer to accept XOR-ed data
  * @param dstsz	- a size of the output buffer
- * @param ctx	- an internal context , can be NULL is is not used
+ * @param ctx	- an internal context , can be NULL if it is not used
  * @return
  */
 static inline	int	__util$strxor	(
