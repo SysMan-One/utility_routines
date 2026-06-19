@@ -1624,49 +1624,49 @@ int	status;
 
 
 int	__util$pattern_match	(
-		char	*	str$,        /* A LITERAL string to match */
-		char	*	pattern$     /* Pattern, with potential wildcards (*,%) to * match the string.*/
+		const char	*	a_str$,        /* A LITERAL string to match */
+		const char	*	a_pattern$     /* Pattern, with potential wildcards (*,%) to * match the string.*/
 				)
 {
 int done = FALSE, matched_to_eos = FALSE;
 
-	while( (*pattern$ != '\0') && (!done) && ( ((*str$=='\0') && ( (*pattern$==WILD_STAR)) ) || (*str$!='\0')) )
+	while( (*a_pattern$ != '\0') && (!done) && ( ((*a_str$=='\0') && ( (*a_pattern$==WILD_STAR)) ) || (*a_str$!='\0')) )
 		{
-		switch (*pattern$)
+		switch (*a_pattern$)
 			{
 			case WILD_STAR:
-				pattern$++;
+				a_pattern$++;
 				matched_to_eos = FALSE;
-				while ( (*str$ != '\0') && (! ( matched_to_eos = __util$pattern_match( str$++, pattern$))));
+				while ( (*a_str$ != '\0') && (! ( matched_to_eos = __util$pattern_match( a_str$++, a_pattern$))));
 
 				if ( matched_to_eos )
 					{
-					while (*str$ != '\0') str$++;
-					while (*pattern$ != '\0') pattern$++;
+					while (*a_str$ != '\0') a_str$++;
+					while (*a_pattern$ != '\0') a_pattern$++;
 					}
 				break;
 
 			case WILD_PERCENT:
-				pattern$++;
-				str$++;
+				a_pattern$++;
+				a_str$++;
 				break;
 
 			/* case '\\':*/
 			/* pattern$++;*/
 
 			default:
-				if (*str$ == *pattern$)
+				if (*a_str$ == *a_pattern$)
 					{
-					str$++;
-					pattern$++;
+					a_str$++;
+					a_pattern$++;
 					}
 				else done = TRUE;
 			}
 		}
 
-	while (*pattern$ == WILD_STAR) pattern$++;
+	while (*a_pattern$ == WILD_STAR) a_pattern$++;
 
-	return ( (*str$ == '\0') && (*pattern$ == '\0') );
+	return ( (*a_str$ == '\0') && (*a_pattern$ == '\0') );
 
 
 }
@@ -1847,7 +1847,7 @@ size_t	p1len = s1len, cmplen = s2len - 1;
 
 unsigned	__util$out
 			(
-		char *	fmt,
+	const char *	fmt,
 			...
 			)
 
@@ -1859,6 +1859,9 @@ int	olen = 0;
 	va_start (arglist, fmt);
 	olen += vsnprintf(out, sizeof(out) - 1, fmt, arglist);
 	va_end (arglist);
+
+	olen = $MIN(sizeof(out) - 1, olen);
+
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
