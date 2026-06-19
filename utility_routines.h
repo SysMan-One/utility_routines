@@ -450,7 +450,7 @@ unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$logd	(const char *fac, unsigned severity, const char *fmt, const char *mod, const char *__func, unsigned __line, ...);
 unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
-unsigned	__util$out	(char *fmt, ...);
+unsigned	__util$out	(const char *fmt, ...);
 
 #ifndef	NDEBUG
 	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
@@ -1663,7 +1663,7 @@ int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);
 int	__util$rewindlogfile	(size_t);
-int	__util$pattern_match	(char * str$, char * pattern$);
+int	__util$pattern_match	(const char *a_str$, const char *a_pattern$);
 
 char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
 
