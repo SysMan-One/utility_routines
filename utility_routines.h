@@ -50,6 +50,9 @@
 **
 **	10-OCT-2024	RRL	Fix $IFTRACE() in Release compilation
 **
+**	 7-JUL-2026	RRL	Removed bzero() - memset() will be fastes;
+**				corrected iszero() by using fastets CPU-optimized alternative.
+**
 */
 
 #if _WIN32
@@ -79,6 +82,7 @@ extern "C" {
 #include	<limits.h>
 #include	<stdarg.h>
 #include	<string.h>
+#include	<stdint.h>
 
 
 
@@ -1193,134 +1197,37 @@ int	left = $MIN(__min__, __max__) , right = $MAX(__min__, __max__);
 /* Return value bound to left or right border eg. x = [min; max]	*/
 #define	$RANGE(x, __min__, __max__)	__util$range(x, __min__, __max__)
 
-
-
 /*
- *
- *  Description: check buffer for consecutive zero octets
- *
- *  Input:
- *
- *	bufp:	buffer to check, address
- *	bufsz:	a length of data in the buffer
- *
- *
- *  Return:
- *	SS$_NORMAL	- the buffer is zero filled
- *	STS$K_WARN	- the buffer is not zero filled
- */
-/**
- * @brief __util$iszero	- check buffer for consecutive zero octets
- * @param bufp	:	buffer to check, address
- * @param bufsz	:	a length of data in the buffer
- * @return -
- * *	SS$_NORMAL	- the buffer is zero filled
- *	STS$K_WARN	- the buffer is not zero filled
- */
-inline static int __util$iszero	(
-		void *	bufp,
-		int	bufsz
+**++
+**  ROUTINE NAME:	__util$iszero
+**
+**  FUNCTIONAL DESCRIPTION:
+**	Checks that a memory area of a given length contains zeroes only.
+**	Scanning is performed in chunks of 8/4/2/1 octets in descending
+**	order; returns on a first non-zero octet found.
+**
+**  FORMAL PARAMETERS:
+**	a_bufp	- an address of the buffer to be checked (by reference)
+**	a_bufsz	- a size of the buffer in octets (by value)
+**
+**  IMPLICIT INPUTS:	NONE
+**  IMPLICIT OUTPUTS:	NONE
+**
+**  COMPLETION CODES:
+**	STS$K_SUCCESS	- the buffer contains zeroes only
+**	STS$K_WARN	- a non-zero octet has been detected
+**
+**  SIDE EFFECTS:	NONE
+**--
+*/
+inline static int	__util$iszero	(
+	const unsigned char  *a_bufp,
+		size_t	a_bufsz
 			)
 {
-int	i;
-unsigned char *__bufp = (unsigned char *) bufp;
-
-#if ( (defined ULLONG_MAX && (ULLONG_MAX > UINT_MAX)) || (defined ULONG_LONG_MAX && (ULONG_LONG_MAX > UINT_MAX)) )
-
-//#pragma message	("%CC-I-ULLONG64, unsigned long long - 64 bits")
-
-	/* Step by 8 octets ... */
-	for (i = bufsz/sizeof(unsigned long long); i; i--, __bufp += sizeof(unsigned long long) )
-		{
-		if ( *((unsigned long long *) __bufp ) )
-			return	STS$K_WARN;
-		}
-#endif // (sizeof(unsigned long long)) > sizeof(unsigned int long) )
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned int long);
-
-	/* Step by 4 octets ... */
-	for (i = bufsz/sizeof(unsigned int); i; i--, __bufp += sizeof(unsigned int) )
-		{
-		if ( *((unsigned int *) __bufp ) )
-			return	STS$K_WARN;
-		}
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned int);
-
-	/* Step by 2 octets ... */
-	for (i = bufsz/sizeof(unsigned short); i; i--, __bufp += sizeof(unsigned short) )
-		{
-		if ( *((unsigned short *) __bufp ) )
-			return	STS$K_WARN;
-		}
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned short);
-
-	if ( bufsz && *__bufp )
-		return	STS$K_WARN;
-
-	return	STS$K_SUCCESS;
+	return	( *a_bufp || memcmp(a_bufp, a_bufp + 1, a_bufsz - 1) )
+			? STS$K_WARN : STS$K_SUCCESS;
 }
-
-
-/**
- * @brief __util$bzero	- zeroing memory block
- * @param bufp	:	buffer to check, address
- * @param bufsz	:	a length of data in the buffer
- * @return -
- * 	SS$_NORMAL	- the buffer is zero filled
- *
- */
-inline static int __util$bzero	(
-		void *	bufp,
-		size_t	bufsz
-			)
-{
-size_t	i;
-unsigned char *__bufp = (unsigned char *) bufp;
-
-	/*
-	 * There is a place for optimization : align a memory address at head
-	 * of the memory block
-	 */
-
-#if ( (defined ULLONG_MAX && (ULLONG_MAX > UINT_MAX)) || (defined ULONG_LONG_MAX && (ULONG_LONG_MAX > UINT_MAX)) )
-
-//#pragma message	("%CC-I-ULLONG64, unsigned long long - 64 bits")
-
-	/* Step by 8 octets ... */
-	for (i = bufsz/sizeof(unsigned long long); i; i--, __bufp += sizeof(unsigned long long) )
-		*((unsigned long long *) __bufp ) = 0;
-#endif // (sizeof(unsigned long long)) > sizeof(unsigned int) )
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned long long);
-
-	/* Step by 4 octets ... */
-	for (i = bufsz/sizeof(unsigned int); i; i--, __bufp += sizeof(unsigned int) )
-		*((unsigned int *) __bufp ) = 0;
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned int);
-
-	/* Step by 2 octets ... */
-	for (i = bufsz/sizeof(unsigned short); i; i--, __bufp += sizeof(unsigned short) )
-		if ( *((unsigned short *) __bufp ) )
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned short);
-
-	if ( bufsz )
-		__bufp = (unsigned char *)'\0';
-
-	return	STS$K_SUCCESS;
-}
-
-
 
 
 
