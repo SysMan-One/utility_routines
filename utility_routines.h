@@ -1572,7 +1572,7 @@ int	__util$deflog		(const char *, const char *);
 int	__util$rewindlogfile	(size_t);
 int	__util$pattern_match	(const char *a_str$, const char *a_pattern$);
 
-char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
+char *	__util$strstr		(const char *s1, size_t s1len, const char *s2, size_t s2len);
 
 unsigned	__util$crc32c	(unsigned int crc, const void *buf, size_t buflen);
 

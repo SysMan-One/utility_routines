@@ -152,13 +152,6 @@
 #include	"utility_routines.h"
 
 
-#ifndef	WIN32
-	#pragma	GCC diagnostic push
-
-	#pragma GCC diagnostic ignored  "-Wformat"
-	#pragma GCC diagnostic ignored  "-Wunused-result"
-	#pragma GCC diagnostic ignored  "-Wunused-value"
-#endif
 
 #ifdef _WIN32
 
@@ -346,6 +339,8 @@ EMSG_RECORD *msgrec;
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
 		(unsigned) __gettid());
 
+	olen = $MIN(UTIL$SZ_OUTBUF, olen);
+
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
 		{
 		va_start (arglist, sts);				/* Format text message */
@@ -358,6 +353,7 @@ EMSG_RECORD *msgrec;
 			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
 		}
 
+	olen = $MIN(UTIL$SZ_OUTBUF, olen);
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
@@ -507,7 +503,7 @@ struct timespec now = {0};
 
 #ifdef	__SYSLOG__
 #ifndef	WIN32
-	va_start (arglist, __li);
+	va_start (arglist, __line);
 	olen = vsnprintf(out, UTIL$SZ_OUTBUF, fmt, arglist);
 	va_end (arglist);
 
@@ -820,7 +816,9 @@ OPTS	*optp, *optp2;
 		switch ( optp->type )
 			{
 			case	OPTS$K_PORT:
-				* ((unsigned short  *) optp->ptr) = (unsigned short) atoi(valp);
+				char *endptr = NULL;
+
+				* ((unsigned short  *) optp->ptr) = (unsigned short) strtoul(valp, &endptr, 0);
 				break;
 
 			case	OPTS$K_IP4:
@@ -982,8 +980,10 @@ OPTS	*optp;
 				break;
 
 			case	OPTS$K_PORT:
-				* ((unsigned short  *) optp->ptr) = (unsigned short) atoi(valp);
-				break;
+				char *endptr = NULL;
+
+				*((unsigned short  *) optp->ptr) = (unsigned short) strtoul(valp, &endptr, 0);
+
 
 			case	OPTS$K_IP4:
 #ifdef WIN32
@@ -1436,7 +1436,7 @@ struct timespec now;
 	*outlen += vsnprintf(__outbuf + *outlen, outsz - *outlen, fmt, arglist);
 	va_end (arglist);
 
-	*outlen = $MIN(*outlen, outsz);
+	*outlen = $MIN(*outlen, outsz - 1);
 
 	/* Add NIL at end of record*/
 	__outbuf[*outlen] = '\0';
@@ -1792,14 +1792,14 @@ const unsigned char  *p = (unsigned char *) buf;
 */
 char *	__util$strstr
 			(
-		char	* s1,
+		const char	* s1,
 		size_t	s1len,
-		char	* s2,
+		const char	* s2,
 		size_t	s2len
 			)
 {
 char	*p1 = s1, *p2 = s2 + 1;
-size_t	p1len = s1len, cmplen = s2len - 1;
+size_t	p1len = s1len, cmplen;
 
 	/*
 	 * Sanity check ...
@@ -1813,7 +1813,8 @@ size_t	p1len = s1len, cmplen = s2len - 1;
 	/*
 	 * Special check for single-byte substring
 	 */
-	if ( !cmplen )
+
+	if ( !(cmplen = (s2len - 1)) )
 		return	memchr(s1, *s2, s1len);
 
 	/*
@@ -1857,10 +1858,10 @@ char	out[1024] = {0};
 int	olen = 0;
 
 	va_start (arglist, fmt);
-	olen += vsnprintf(out, sizeof(out) - 1, fmt, arglist);
+	olen += vsnprintf(out, sizeof(out) - 2, fmt, arglist);
 	va_end (arglist);
 
-	olen = $MIN(sizeof(out) - 1, olen);
+	olen = $MIN(sizeof(out) - 2, olen);
 
 
 	/* Add <LF> at end of record*/
