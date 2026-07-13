@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-05"
-#define	__REV__		"1.05.0"
+#define	__IDENT__	"V.01-06"
+#define	__REV__		"1.06.0"
 
 
 /*
@@ -305,8 +305,8 @@ EMSG_RECORD *msgrec;
  *	<sts>
  */
 
-const char severity[STS$K_MAX]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
-const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: %#x/%d, sev: %#x/%d, msgno: %#x/%d]"};
+static const char s_severity[STS$K_MAX]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
+static const char s_defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: %#x/%d, sev: %#x/%d, msgno: %#x/%d]"};
 
 unsigned	__util$putmsg
 			(
@@ -349,7 +349,7 @@ EMSG_RECORD *msgrec;
 		}
 	else	{							/* Format text message with the default FAO */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, defmsgfao, severity[sev], sts,
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
 			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
 		}
 
@@ -383,7 +383,7 @@ va_list arglist;
 const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "[%s:%u] "},
 	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] "};
 char	out[UTIL$SZ_OUTBUF + 8];
-size_t olen, sev;
+int olen, sev;
 struct tm _tm;
 struct timespec now;
 EMSG_RECORD *msgrec;
@@ -417,7 +417,7 @@ EMSG_RECORD *msgrec;
 		}
 	else	{							/* Format text message with the default FAO */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, defmsgfao, severity[sev], sts,
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
 			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
 		}
 
@@ -481,7 +481,7 @@ struct timespec now = {0};
 
 	olen = snprintf (out, UTIL$SZ_OUTBUF, __fmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __mod, __func, __line, fac, severity[_sev]);
+			(unsigned) __gettid(), __mod, __func, __line, fac, s_severity[_sev]);
 
 	va_start (arglist, __line);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
@@ -732,11 +732,11 @@ OPTS	*optp, *optp2;
 	/*
 	 * Is the configuration file has been specified ?
 	 */
-	if ( fconf && (*fconf) )
-		{
-		if ( !(finp = fopen(fconf, "r")) )
+	if ( !fconf || *fconf )
+		return	$LOG(STS$K_ERROR, "No configuration file is provided, check input");
+
+	if ( !(finp = fopen(fconf, "r")) )
 			return	$LOG(STS$K_ERROR, "Error open file '%s', errno = %d", fconf, errno);
-		}
 
 	/*
 	* We expect to see opts in form: -<options_name>=<options_value>
@@ -984,6 +984,7 @@ OPTS	*optp;
 
 				*((unsigned short  *) optp->ptr) = (unsigned short) strtoul(valp, &endptr, 0);
 
+				break;
 
 			case	OPTS$K_IP4:
 #ifdef WIN32
@@ -1348,7 +1349,7 @@ struct timespec now;
 	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(), fac, severity[_sev]);
+		(unsigned) __gettid(), fac, s_severity[_sev]);
 
 	va_start (arglist, fmt);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
@@ -1430,7 +1431,7 @@ struct timespec now;
 	*outlen = snprintf (__outbuf, outsz, lfmt,
 		_tm.tm_mday, _tm.tm_mon + 1, 1900+_tm.tm_year,
 		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(), fac, severity[sev]);
+		(unsigned) __gettid(), fac, s_severity[sev]);
 
 	va_start (arglist, fmt);
 	*outlen += vsnprintf(__outbuf + *outlen, outsz - *outlen, fmt, arglist);
@@ -1484,7 +1485,7 @@ int	fd = -1;
 	if ( !*logfile)
 		return	STS$K_SUCCESS;
 
-	if ( 0 > (fd = open(logfile, O_RDWR | O_CREAT | O_APPEND, mode)) )
+	if ( 0 > (fd = open(logfile, O_RDWR | O_CREAT | O_APPEND |  O_CLOEXEC, mode)) )
 		return	$LOG(STS$K_ERROR, "Error opening log file '%s', errno = %d.", logfile, errno);
 
 	lseek(fd, 0L, SEEK_END);
@@ -1700,12 +1701,6 @@ char **	strings;
 
 #endif
 #endif
-
-
-#ifndef	WIN32
-#pragma GCC diagnostic pop
-#endif
-
 
 
 
@@ -2077,8 +2072,6 @@ int l_result;
  * Revised:	3-JAN-1995		Fix bug in NUMTIM emulation (month #).
  * Revised:	15-FEB-2024	RRL	Reorganizing code to be more readable, removed SYS_NUMTIM.
  */
-
-
 
 #ifndef VMS
 typedef struct tm tm_t;
