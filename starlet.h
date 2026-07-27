@@ -7,15 +7,19 @@
 **
 **  ABSTRACT:	Public definitions and prototypes of the STARLET module:
 **		portable implementations of OpenVMS system services.
-**		Currently: UTIL$FAO, UTIL$FAOL (SYS$FAO/SYS$FAOL) and
-**		UTIL$BINTIM (SYS$BINTIM); further analogues are to be
-**		accumulated here.
+**		Currently: UTIL$FAO, UTIL$FAOL, UTIL$BINTIM, UTIL$GETTIM,
+**		UTIL$ASCTIM, UTIL$ADD_TIMES, UTIL$SUB_TIMES; further
+**		analogues are to be accumulated here.
 **
 **  AUTHOR:	Claude (Anthropic) for D.Novikov
 **
 **  CREATION DATE:  24-JUL-2026
 **
 **  MODIFICATION HISTORY:
+**
+**	X.01-03		24-JUL-2026	CLAUDE
+**		Prototypes of UTIL$GETTIM, UTIL$ASCTIM, UTIL$ADD_TIMES,
+**		UTIL$SUB_TIMES added; FAO$K_NEGTIM added.
 **
 **	X.01-02		24-JUL-2026	CLAUDE
 **		Module renamed fao.h -> starlet.h (facility STARLET).
@@ -61,6 +65,7 @@ extern "C" {
 #define	FAO$K_BUFOVF	5	/* Output buffer overflow, result truncated */
 #define	FAO$K_BADDIR	6	/* Unknown or malformed FAO directive */
 #define	FAO$K_IVTIME	7	/* Invalid time string (UTIL$BINTIM)	*/
+#define	FAO$K_NEGTIM	8	/* Negative time result (LIB$_NEGTIM)	*/
 
 /*
 **  Limits
@@ -121,6 +126,17 @@ int	util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 			const fao_prm_t *a_prmlst, int a_prmcnt);
 
 int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr);
+
+int	util$gettim	(fao_time_t *a_timadr);
+
+int	util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
+			const fao_time_t *a_timadr, int a_cvtflg);
+
+int	util$add_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
+			fao_time_t *a_result);
+
+int	util$sub_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
+			fao_time_t *a_result);
 
 #ifdef	__cplusplus
 }

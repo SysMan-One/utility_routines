@@ -14,6 +14,14 @@
 **			Formatted ASCII Output
 **		  UTIL$BINTIM          - SYS$BINTIM,
 **			ASCII time string to binary time
+**		  UTIL$GETTIM          - SYS$GETTIM,
+**			current binary time
+**		  UTIL$ASCTIM          - SYS$ASCTIM,
+**			binary time to ASCII string
+**		  UTIL$ADD_TIMES       - LIB$ADD_TIMES,
+**			sum of two binary times
+**		  UTIL$SUB_TIMES       - LIB$SUB_TIMES,
+**			difference of two binary times
 **
 **		Supported FAO directives:
 **
@@ -80,6 +88,16 @@
 **
 **  MODIFICATION HISTORY:
 **
+**	X.01-05		27-JUL-2026	CLAUDE
+**		Static routines renamed with the s_ prefix
+**		(fao$$name -> s_fao$name), per the coding standard.
+**		No functional changes.
+**
+**	X.01-04		24-JUL-2026	CLAUDE
+**		UTIL$GETTIM, UTIL$ASCTIM (SYS$GETTIM/SYS$ASCTIM) and
+**		UTIL$ADD_TIMES, UTIL$SUB_TIMES (LIB$ADD_TIMES/
+**		LIB$SUB_TIMES) added; FAO$K_NEGTIM status added.
+**
 **	X.01-03		24-JUL-2026	CLAUDE
 **		Module renamed fao.c -> starlet.c (facility STARLET),
 **		to accumulate further portable OpenVMS system service
@@ -89,7 +107,7 @@
 **		Routine prefix changed sys$ -> util$; UTIL$BINTIM added
 **		(portable SYS$BINTIM: absolute/delta ASCII time to
 **		binary); calendar conversions factored out into
-**		FAO$$DAYS_TO_CIVIL / FAO$$DAYS_FROM_CIVIL.
+**		S_FAO$DAYS_TO_CIVIL / S_FAO$DAYS_FROM_CIVIL.
 **
 **	X.01-01		24-JUL-2026	CLAUDE
 **		Remove CRTL dependencies (stdio/string/ctype/localtime),
@@ -104,8 +122,8 @@
 */
 
 #define	__MODULE__	"STARLET"
-#define	__IDENT__	"X.01-03"
-#define	__REV__		"1.03"
+#define	__IDENT__	"X.01-05"
+#define	__REV__		"1.05"
 
 #include	<stdarg.h>
 #include	<stdint.h>
@@ -169,7 +187,7 @@ static	const char	s_months [12][4] =
 
 /*
 **++
-**  FAO$$COPY - private byte copy (memcpy replacement, non-overlapping).
+**  S_FAO$COPY - private byte copy (memcpy replacement, non-overlapping).
 **
 **  INPUT:
 **	a_dst	- destination address
@@ -183,7 +201,7 @@ static	const char	s_months [12][4] =
 **	NONE
 **--
 */
-static	inline	void	fao$$copy (char * restrict a_dst,
+static	inline	void	s_fao$copy (char * restrict a_dst,
 				const char * restrict a_src, size_t a_len)
 {
 	while ( a_len-- )
@@ -192,7 +210,7 @@ static	inline	void	fao$$copy (char * restrict a_dst,
 
 /*
 **++
-**  FAO$$STRLEN - private string length (strlen replacement).
+**  S_FAO$STRLEN - private string length (strlen replacement).
 **
 **  INPUT:
 **	a_str	- address of the zero-terminated string
@@ -204,7 +222,7 @@ static	inline	void	fao$$copy (char * restrict a_dst,
 **	Length in bytes, terminator excluded
 **--
 */
-static	inline	size_t	fao$$strlen (const char *a_str)
+static	inline	size_t	s_fao$strlen (const char *a_str)
 {
 	const char *l_ptr = a_str;
 
@@ -248,7 +266,7 @@ typedef	struct	__fao_ctx
 
 /*
 **++
-**  FAO$$GET_PRM - fetch the next parameter from the list.
+**  S_FAO$GET_PRM - fetch the next parameter from the list.
 **
 **	For $FAOL the parameter is taken from the explicit array; out of
 **	range access yields 0.  For $FAO the parameters are consumed from
@@ -265,7 +283,7 @@ typedef	struct	__fao_ctx
 **	Value of the parameter (machine word)
 **--
 */
-static	fao_prm_t	fao$$get_prm	(fao_prmstate_t *a_prm)
+static	fao_prm_t	s_fao$get_prm	(fao_prmstate_t *a_prm)
 {
 	fao_prm_t l_val = 0;
 
@@ -295,7 +313,7 @@ static	fao_prm_t	fao$$get_prm	(fao_prmstate_t *a_prm)
 
 /*
 **++
-**  FAO$$PUT_CHR - emit a single byte into the output buffer.
+**  S_FAO$PUT_CHR - emit a single byte into the output buffer.
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
@@ -309,7 +327,7 @@ static	fao_prm_t	fao$$get_prm	(fao_prmstate_t *a_prm)
 **	set to FAO$K_BUFOVF and the byte is discarded.
 **--
 */
-static	inline	void	fao$$put_chr	(fao_ctx_t *a_ctx, char a_chr)
+static	inline	void	s_fao$put_chr	(fao_ctx_t *a_ctx, char a_chr)
 {
 	if ( a_ctx->optr < a_ctx->oend )
 		*a_ctx->optr++ = a_chr;
@@ -318,7 +336,7 @@ static	inline	void	fao$$put_chr	(fao_ctx_t *a_ctx, char a_chr)
 
 /*
 **++
-**  FAO$$PUT_FILL - emit a run of identical bytes.
+**  S_FAO$PUT_FILL - emit a run of identical bytes.
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
@@ -332,7 +350,7 @@ static	inline	void	fao$$put_chr	(fao_ctx_t *a_ctx, char a_chr)
 **	NONE
 **--
 */
-static	void	fao$$put_fill	(fao_ctx_t *a_ctx, char a_chr, size_t a_cnt)
+static	void	s_fao$put_fill	(fao_ctx_t *a_ctx, char a_chr, size_t a_cnt)
 {
 	size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
 
@@ -348,7 +366,7 @@ static	void	fao$$put_fill	(fao_ctx_t *a_ctx, char a_chr, size_t a_cnt)
 
 /*
 **++
-**  FAO$$PUT_RAW - emit a byte string in bulk (single bounds check).
+**  S_FAO$PUT_RAW - emit a byte string in bulk (single bounds check).
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
@@ -362,7 +380,7 @@ static	void	fao$$put_fill	(fao_ctx_t *a_ctx, char a_chr, size_t a_cnt)
 **	NONE
 **--
 */
-static	inline	void	fao$$put_raw	(fao_ctx_t *a_ctx,
+static	inline	void	s_fao$put_raw	(fao_ctx_t *a_ctx,
 				const char *a_str, size_t a_len)
 {
 	size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
@@ -373,13 +391,13 @@ static	inline	void	fao$$put_raw	(fao_ctx_t *a_ctx,
 		a_len = l_room;
 		}
 
-	fao$$copy (a_ctx->optr, a_str, a_len);
+	s_fao$copy (a_ctx->optr, a_str, a_len);
 	a_ctx->optr += a_len;
 }
 
 /*
 **++
-**  FAO$$PUT_STR - emit a byte string honouring the field width.
+**  S_FAO$PUT_STR - emit a byte string honouring the field width.
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
@@ -397,7 +415,7 @@ static	inline	void	fao$$put_raw	(fao_ctx_t *a_ctx,
 **	NONE
 **--
 */
-static	void	fao$$put_str	(fao_ctx_t *a_ctx, const char *a_str,
+static	void	s_fao$put_str	(fao_ctx_t *a_ctx, const char *a_str,
 				size_t a_len, int a_width, int a_dots)
 {
 	size_t	l_len = a_len, l_i;
@@ -406,19 +424,19 @@ static	void	fao$$put_str	(fao_ctx_t *a_ctx, const char *a_str,
 		l_len = (size_t) a_width;
 
 	if ( ! a_dots )
-		fao$$put_raw (a_ctx, a_str, l_len);	/* Fast path	*/
+		s_fao$put_raw (a_ctx, a_str, l_len);	/* Fast path	*/
 	else
 		for ( l_i = 0; l_i < l_len; l_i++ )
-			fao$$put_chr (a_ctx, $FAO_ISPRINT (a_str [l_i])
+			s_fao$put_chr (a_ctx, $FAO_ISPRINT (a_str [l_i])
 				? a_str [l_i] : '.');
 
 	if ( (a_width != FAO$K_WIDTHAUTO) && ((size_t) a_width > l_len) )
-		fao$$put_fill (a_ctx, ' ', (size_t) a_width - l_len);
+		s_fao$put_fill (a_ctx, ' ', (size_t) a_width - l_len);
 }
 
 /*
 **++
-**  FAO$$CVT_DEC - convert an unsigned value to decimal digits,
+**  S_FAO$CVT_DEC - convert an unsigned value to decimal digits,
 **  filling the scratch buffer backwards, two digits per division.
 **
 **  INPUT:
@@ -432,7 +450,7 @@ static	void	fao$$put_str	(fao_ctx_t *a_ctx, const char *a_str,
 **	Address of the first (most significant) digit
 **--
 */
-static	inline	char	*fao$$cvt_dec	(uint64_t a_val, char *a_end)
+static	inline	char	*s_fao$cvt_dec	(uint64_t a_val, char *a_end)
 {
 	char	*l_ptr = a_end;
 
@@ -455,7 +473,7 @@ static	inline	char	*fao$$cvt_dec	(uint64_t a_val, char *a_end)
 
 /*
 **++
-**  FAO$$PUT_NUM - convert a number and emit it into the output buffer.
+**  S_FAO$PUT_NUM - convert a number and emit it into the output buffer.
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
@@ -476,7 +494,7 @@ static	inline	char	*fao$$cvt_dec	(uint64_t a_val, char *a_end)
 **	(OpenVMS semantics).
 **--
 */
-static	void	fao$$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
+static	void	s_fao$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 				int a_base, int a_signed,
 				int a_width, int a_defdig)
 {
@@ -495,7 +513,7 @@ static	void	fao$$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 		}
 
 	if ( a_base == 10 )
-		l_ptr = fao$$cvt_dec (l_val, l_end);
+		l_ptr = s_fao$cvt_dec (l_val, l_end);
 	else if ( a_base == 16 )
 		{
 		l_ptr = l_end;
@@ -533,7 +551,7 @@ static	void	fao$$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 		{
 		if ( a_base == 10 )
 			{			/* Decimal: asterisk fill */
-			fao$$put_fill (a_ctx, '*', (size_t) l_field);
+			s_fao$put_fill (a_ctx, '*', (size_t) l_field);
 			return;
 			}
 
@@ -542,16 +560,16 @@ static	void	fao$$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 		}
 
 	if ( l_len < l_field )			/* Left padding		*/
-		fao$$put_fill (a_ctx,
+		s_fao$put_fill (a_ctx,
 			(a_defdig && (a_width == FAO$K_WIDTHAUTO)) ? '0' : ' ',
 			(size_t) (l_field - l_len));
 
-	fao$$put_raw (a_ctx, l_ptr, (size_t) l_len);
+	s_fao$put_raw (a_ctx, l_ptr, (size_t) l_len);
 }
 
 /*
 **++
-**  FAO$$PUT_2D - emit exactly two decimal digits (00..99).
+**  S_FAO$PUT_2D - emit exactly two decimal digits (00..99).
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
@@ -566,7 +584,7 @@ static	void	fao$$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 */
 /*
 **++
-**  FAO$$DAYS_TO_CIVIL - break a UNIX epoch day count into a civil date
+**  S_FAO$DAYS_TO_CIVIL - break a UNIX epoch day count into a civil date
 **  (proleptic Gregorian calendar, inverse of days-from-civil).
 **
 **  INPUT:
@@ -581,7 +599,7 @@ static	void	fao$$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 **	NONE
 **--
 */
-static	void	fao$$days_to_civil (int64_t a_days, int64_t *a_year,
+static	void	s_fao$days_to_civil (int64_t a_days, int64_t *a_year,
 				unsigned *a_mon, unsigned *a_day)
 {
 	int64_t	l_z = a_days + 719468;
@@ -601,7 +619,7 @@ static	void	fao$$days_to_civil (int64_t a_days, int64_t *a_year,
 
 /*
 **++
-**  FAO$$DAYS_FROM_CIVIL - convert a civil date to a UNIX epoch day
+**  S_FAO$DAYS_FROM_CIVIL - convert a civil date to a UNIX epoch day
 **  count (proleptic Gregorian calendar).
 **
 **  INPUT:
@@ -616,7 +634,7 @@ static	void	fao$$days_to_civil (int64_t a_days, int64_t *a_year,
 **	Days since 01-JAN-1970 (may be negative)
 **--
 */
-static	int64_t	fao$$days_from_civil (int64_t a_year, unsigned a_mon,
+static	int64_t	s_fao$days_from_civil (int64_t a_year, unsigned a_mon,
 				unsigned a_day)
 {
 	int64_t	l_year = a_year - (a_mon <= 2);
@@ -629,14 +647,14 @@ static	int64_t	fao$$days_from_civil (int64_t a_year, unsigned a_mon,
 	return	l_era * 146097 + (int64_t) l_doe - 719468;
 }
 
-static	inline	void	fao$$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
+static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 {
-	fao$$put_raw (a_ctx, &s_dig2 [a_val * 2], 2);
+	s_fao$put_raw (a_ctx, &s_dig2 [a_val * 2], 2);
 }
 
 /*
 **++
-**  FAO$$PUT_TIME - emit time (!%T) or date+time (!%D).
+**  S_FAO$PUT_TIME - emit time (!%T) or date+time (!%D).
 **
 **	The civil date is derived from the UNIX epoch count by the
 **	module itself (proleptic Gregorian calendar, inverse of the
@@ -656,7 +674,7 @@ static	inline	void	fao$$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 **	NONE
 **--
 */
-static	void	fao$$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
+static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 {
 	int64_t	l_now, l_days, l_secs;
 	unsigned l_hh, l_mm, l_ss;
@@ -685,32 +703,32 @@ static	void	fao$$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 		int64_t	l_year;
 		unsigned l_mon, l_day;
 
-		fao$$days_to_civil (l_days, &l_year, &l_mon, &l_day);
+		s_fao$days_to_civil (l_days, &l_year, &l_mon, &l_day);
 
 		if ( l_day < 10 )
-			fao$$put_chr (a_ctx, ' ');
-		else	fao$$put_chr (a_ctx, (char)('0' + l_day / 10));
+			s_fao$put_chr (a_ctx, ' ');
+		else	s_fao$put_chr (a_ctx, (char)('0' + l_day / 10));
 
-		fao$$put_chr (a_ctx, (char)('0' + l_day % 10));
-		fao$$put_chr (a_ctx, '-');
-		fao$$put_raw (a_ctx, s_months [l_mon - 1], 3);
-		fao$$put_chr (a_ctx, '-');
-		fao$$put_2d  (a_ctx, (unsigned) (l_year / 100));
-		fao$$put_2d  (a_ctx, (unsigned) (l_year % 100));
-		fao$$put_chr (a_ctx, ' ');
+		s_fao$put_chr (a_ctx, (char)('0' + l_day % 10));
+		s_fao$put_chr (a_ctx, '-');
+		s_fao$put_raw (a_ctx, s_months [l_mon - 1], 3);
+		s_fao$put_chr (a_ctx, '-');
+		s_fao$put_2d  (a_ctx, (unsigned) (l_year / 100));
+		s_fao$put_2d  (a_ctx, (unsigned) (l_year % 100));
+		s_fao$put_chr (a_ctx, ' ');
 		}
 
-	fao$$put_2d  (a_ctx, l_hh);
-	fao$$put_chr (a_ctx, ':');
-	fao$$put_2d  (a_ctx, l_mm);
-	fao$$put_chr (a_ctx, ':');
-	fao$$put_2d  (a_ctx, l_ss);
-	fao$$put_raw (a_ctx, ".00", 3);
+	s_fao$put_2d  (a_ctx, l_hh);
+	s_fao$put_chr (a_ctx, ':');
+	s_fao$put_2d  (a_ctx, l_mm);
+	s_fao$put_chr (a_ctx, ':');
+	s_fao$put_2d  (a_ctx, l_ss);
+	s_fao$put_raw (a_ctx, ".00", 3);
 }
 
 /*
 **++
-**  FAO$$GET_NUMPRM - fetch a numeric operand of the given size.
+**  S_FAO$GET_NUMPRM - fetch a numeric operand of the given size.
 **
 **	B/W/L operands are passed by value in the parameter list and
 **	are masked/sign-extended to the requested size.  A quadword (Q)
@@ -729,10 +747,10 @@ static	void	fao$$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 **	64-bit value of the operand
 **--
 */
-static	uint64_t fao$$get_numprm (fao_prmstate_t *a_prm, char a_size,
+static	uint64_t s_fao$get_numprm (fao_prmstate_t *a_prm, char a_size,
 				int a_signed)
 {
-	fao_prm_t l_prm = fao$$get_prm (a_prm);
+	fao_prm_t l_prm = s_fao$get_prm (a_prm);
 
 	switch ( a_size )
 		{
@@ -756,7 +774,7 @@ static	uint64_t fao$$get_numprm (fao_prmstate_t *a_prm, char a_size,
 
 /*
 **++
-**  FAO$$FIND_GROUP_END - find the terminator of a !n(...) or !n<...!>
+**  S_FAO$FIND_GROUP_END - find the terminator of a !n(...) or !n<...!>
 **  group, honouring nesting of the same kind.
 **
 **  INPUT:
@@ -772,7 +790,7 @@ static	uint64_t fao$$get_numprm (fao_prmstate_t *a_prm, char a_size,
 **	if the terminator has not been found.
 **--
 */
-static	const char *fao$$find_group_end (const char *a_ctl,
+static	const char *s_fao$find_group_end (const char *a_ctl,
 				char a_open, char a_close)
 {
 	int	l_depth = 1;
@@ -807,7 +825,7 @@ static	const char *fao$$find_group_end (const char *a_ctl,
 
 /*
 **++
-**  FAO$$PROCESS - the FAO engine: scan the control string fragment and
+**  S_FAO$PROCESS - the FAO engine: scan the control string fragment and
 **  emit the formatted output into the context buffer.
 **
 **	Literal runs between directives are located first and emitted
@@ -829,7 +847,7 @@ static	const char *fao$$find_group_end (const char *a_ctl,
 **	processing continues from the next byte.
 **--
 */
-static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
+static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
 				const char *a_end, int a_depth)
 {
 	const char *l_ptr = a_ctl;
@@ -850,7 +868,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 			do	l_ptr++;
 			while ( $FAO_MORE () && (*l_ptr != '!') );
 
-			fao$$put_raw (a_ctx, l_run, (size_t)(l_ptr - l_run));
+			s_fao$put_raw (a_ctx, l_run, (size_t)(l_ptr - l_run));
 			continue;
 			}
 
@@ -860,7 +878,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 		/* Optional width/count: decimal digits or '#' */
 		if ( *l_ptr == '#' )
 			{
-			l_width = (int) (uint32_t) fao$$get_prm (l_prm);
+			l_width = (int) (uint32_t) s_fao$get_prm (l_prm);
 			l_ptr++;
 			}
 		else if ( $FAO_ISDIGIT (*l_ptr) )
@@ -876,19 +894,19 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 		switch ( l_dir )
 			{
 			case '!':		/* Literal '!'		*/
-				fao$$put_chr (a_ctx, '!');
+				s_fao$put_chr (a_ctx, '!');
 				break;
 
 			case '/':		/* CR+LF		*/
-				fao$$put_raw (a_ctx, "\r\n", 2);
+				s_fao$put_raw (a_ctx, "\r\n", 2);
 				break;
 
 			case '_':		/* Horizontal tab	*/
-				fao$$put_chr (a_ctx, '\t');
+				s_fao$put_chr (a_ctx, '\t');
 				break;
 
 			case '^':		/* Form feed		*/
-				fao$$put_chr (a_ctx, '\f');
+				s_fao$put_chr (a_ctx, '\f');
 				break;
 
 			case '-':		/* Reuse last n params	*/
@@ -905,7 +923,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 					? 1 : l_width;
 
 				while ( l_rpt-- > 0 )
-					(void) fao$$get_prm (l_prm);
+					(void) s_fao$get_prm (l_prm);
 				break;
 
 			case '%':		/* !%S !%T !%D		*/
@@ -913,17 +931,17 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 					{
 					case 'S':
 						if ( l_prm->lastnum != 1 )
-							fao$$put_chr (a_ctx, 's');
+							s_fao$put_chr (a_ctx, 's');
 						break;
 
 					case 'T':
-						fao$$put_time (a_ctx,
-							fao$$get_prm (l_prm), 0);
+						s_fao$put_time (a_ctx,
+							s_fao$get_prm (l_prm), 0);
 						break;
 
 					case 'D':
-						fao$$put_time (a_ctx,
-							fao$$get_prm (l_prm), 1);
+						s_fao$put_time (a_ctx,
+							s_fao$get_prm (l_prm), 1);
 						break;
 
 					default:
@@ -936,7 +954,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 				break;
 
 			case '*':		/* !n*c - repeat char	*/
-				fao$$put_fill (a_ctx, *l_ptr++,
+				s_fao$put_fill (a_ctx, *l_ptr++,
 					(l_width == FAO$K_WIDTHAUTO)
 						? 1 : (size_t) l_width);
 				break;
@@ -944,7 +962,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 			case '(':		/* !n(...) - repeat group */
 				{
 				const char *l_grpend =
-					fao$$find_group_end (l_ptr, '(', ')');
+					s_fao$find_group_end (l_ptr, '(', ')');
 
 				if ( (l_grpend == NULL)
 					|| (a_depth >= FAO$K_MAXDEPTH) )
@@ -959,7 +977,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 					? 1 : l_width;
 
 				while ( l_rpt-- > 0 )
-					(void) fao$$process (a_ctx, l_ptr,
+					(void) s_fao$process (a_ctx, l_ptr,
 						l_grpend, a_depth + 1);
 
 				l_ptr = l_grpend + 2;	/* Past "!)"	*/
@@ -969,7 +987,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 			case '<':		/* !n<...!> - fixed field */
 				{
 				const char *l_grpend =
-					fao$$find_group_end (l_ptr, '<', '>');
+					s_fao$find_group_end (l_ptr, '<', '>');
 				fao_ctx_t l_sub;
 				char	l_fldbuf [FAO$K_FLDBUF];
 				size_t	l_sublen;
@@ -994,7 +1012,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 				l_sub.prm	= l_prm;
 				l_sub.sts	= STS$K_SUCCESS;
 
-				(void) fao$$process (&l_sub, l_ptr,
+				(void) s_fao$process (&l_sub, l_ptr,
 						l_grpend, a_depth + 1);
 
 				if ( l_sub.sts == FAO$K_BADDIR )
@@ -1002,7 +1020,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 
 				l_sublen = (size_t)(l_sub.optr - l_fldbuf);
 
-				fao$$put_str (a_ctx, l_fldbuf, l_sublen,
+				s_fao$put_str (a_ctx, l_fldbuf, l_sublen,
 					(l_width == FAO$K_WIDTHAUTO)
 						? (int) l_sublen : l_width,
 					0);
@@ -1021,32 +1039,32 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 				switch ( *l_ptr++ )
 					{
 					case 'S':	/* By descriptor */
-						l_arg = fao$$get_prm (l_prm);
+						l_arg = s_fao$get_prm (l_prm);
 						l_dsc = (const fao_desc_t *) l_arg;
 
 						if ( l_dsc )
-							fao$$put_str (a_ctx,
+							s_fao$put_str (a_ctx,
 								l_dsc->dsc$a_pointer,
 								l_dsc->dsc$w_length,
 								l_width, 0);
 						break;
 
 					case 'Z':	/* Zero-terminated */
-						l_arg = fao$$get_prm (l_prm);
+						l_arg = s_fao$get_prm (l_prm);
 						l_str = (const char *) l_arg;
 
 						if ( l_str )
-							fao$$put_str (a_ctx, l_str,
-								fao$$strlen (l_str),
+							s_fao$put_str (a_ctx, l_str,
+								s_fao$strlen (l_str),
 								l_width, 0);
 						break;
 
 					case 'C':	/* Counted string */
-						l_arg = fao$$get_prm (l_prm);
+						l_arg = s_fao$get_prm (l_prm);
 						l_str = (const char *) l_arg;
 
 						if ( l_str )
-							fao$$put_str (a_ctx,
+							s_fao$put_str (a_ctx,
 								l_str + 1,
 								(unsigned char) l_str [0],
 								l_width, 0);
@@ -1055,12 +1073,12 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 					case 'D':	/* Length, address */
 					case 'F':
 						l_len = (size_t)(uint32_t)
-							fao$$get_prm (l_prm);
+							s_fao$get_prm (l_prm);
 						l_str = (const char *)
-							fao$$get_prm (l_prm);
+							s_fao$get_prm (l_prm);
 
 						if ( l_str )
-							fao$$put_str (a_ctx, l_str,
+							s_fao$put_str (a_ctx, l_str,
 								l_len, l_width,
 								(l_ptr [-1] == 'F'));
 						break;
@@ -1103,7 +1121,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 						continue;
 					}
 
-				l_val = fao$$get_numprm (l_prm, l_size, l_signed);
+				l_val = s_fao$get_numprm (l_prm, l_size, l_signed);
 
 				if ( l_dir == 'X' )
 					{
@@ -1119,7 +1137,7 @@ static	const char *fao$$process (fao_ctx_t *a_ctx, const char *a_ctl,
 					l_defdig = (l_width == FAO$K_WIDTHAUTO)
 						? 0 : l_width;
 
-				fao$$put_num (a_ctx, l_val, l_base, l_signed,
+				s_fao$put_num (a_ctx, l_val, l_base, l_signed,
 					l_width, l_defdig);
 				break;
 				}
@@ -1193,7 +1211,7 @@ int	util$fao		(const char *a_ctlstr, unsigned short *a_outlen,
 	l_ctx.prm	= &l_prm;
 	l_ctx.sts	= STS$K_SUCCESS;
 
-	(void) fao$$process (&l_ctx, a_ctlstr, NULL, 0);
+	(void) s_fao$process (&l_ctx, a_ctlstr, NULL, 0);
 
 	va_end (l_ap);
 
@@ -1250,7 +1268,7 @@ int	util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 	l_ctx.prm	= &l_prm;
 	l_ctx.sts	= STS$K_SUCCESS;
 
-	(void) fao$$process (&l_ctx, a_ctlstr, NULL, 0);
+	(void) s_fao$process (&l_ctx, a_ctlstr, NULL, 0);
 
 	if ( a_outlen != NULL )
 		*a_outlen = (unsigned short) (l_ctx.optr - l_ctx.obase);
@@ -1260,7 +1278,7 @@ int	util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 
 /*
 **++
-**  FAO$$TIM_NUM - parse an unsigned decimal number of the time string.
+**  S_FAO$TIM_NUM - parse an unsigned decimal number of the time string.
 **
 **  INPUT:
 **	a_ptr	- address of the scan pointer, advanced past the digits
@@ -1272,7 +1290,7 @@ int	util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 **	Number of digits consumed (0 - field omitted)
 **--
 */
-static	int	fao$$tim_num	(const char **a_ptr, unsigned *a_val)
+static	int	s_fao$tim_num	(const char **a_ptr, unsigned *a_val)
 {
 	const char *l_ptr = *a_ptr;
 	unsigned l_val = 0;
@@ -1293,7 +1311,7 @@ static	int	fao$$tim_num	(const char **a_ptr, unsigned *a_val)
 
 /*
 **++
-**  FAO$$TIM_HMS - parse the time-of-day part "hh:mm[:ss[.cc]]" with
+**  S_FAO$TIM_HMS - parse the time-of-day part "hh:mm[:ss[.cc]]" with
 **  optionally omitted fields ("::10", "12:", ...), OpenVMS style.
 **
 **  INPUT:
@@ -1306,27 +1324,27 @@ static	int	fao$$tim_num	(const char **a_ptr, unsigned *a_val)
 **	STS$K_SUCCESS or FAO$K_IVTIME on a range violation
 **--
 */
-static	int	fao$$tim_hms	(const char **a_ptr, unsigned *a_secs)
+static	int	s_fao$tim_hms	(const char **a_ptr, unsigned *a_secs)
 {
 	const char *l_ptr = *a_ptr;
 	unsigned l_hh = 0, l_mm = 0, l_ss = 0, l_cc = 0;
 
-	(void) fao$$tim_num (&l_ptr, &l_hh);
+	(void) s_fao$tim_num (&l_ptr, &l_hh);
 
 	if ( *l_ptr == ':' )
 		{
 		l_ptr++;
-		(void) fao$$tim_num (&l_ptr, &l_mm);
+		(void) s_fao$tim_num (&l_ptr, &l_mm);
 
 		if ( *l_ptr == ':' )
 			{
 			l_ptr++;
-			(void) fao$$tim_num (&l_ptr, &l_ss);
+			(void) s_fao$tim_num (&l_ptr, &l_ss);
 
 			if ( *l_ptr == '.' )
 				{
 				l_ptr++;
-				(void) fao$$tim_num (&l_ptr, &l_cc);
+				(void) s_fao$tim_num (&l_ptr, &l_cc);
 				}
 			}
 		}
@@ -1341,7 +1359,7 @@ static	int	fao$$tim_hms	(const char **a_ptr, unsigned *a_secs)
 
 /*
 **++
-**  FAO$$TIM_MONTH - match a case-insensitive three-letter month name.
+**  S_FAO$TIM_MONTH - match a case-insensitive three-letter month name.
 **
 **  INPUT:
 **	a_ptr	- address of the scan pointer, advanced past the name
@@ -1353,7 +1371,7 @@ static	int	fao$$tim_hms	(const char **a_ptr, unsigned *a_secs)
 **	STS$K_SUCCESS or FAO$K_IVTIME when the name is not recognized
 **--
 */
-static	int	fao$$tim_month	(const char **a_ptr, unsigned *a_mon)
+static	int	s_fao$tim_month	(const char **a_ptr, unsigned *a_mon)
 {
 	const char *l_ptr = *a_ptr;
 	char	l_name [3];
@@ -1442,7 +1460,7 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 	while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
 		l_ptr++;
 
-	l_numdig = fao$$tim_num (&l_ptr, &l_num);
+	l_numdig = s_fao$tim_num (&l_ptr, &l_num);
 
 	/*
 	** Delta time: "dddd hh:mm:ss" / "dddd-hh:mm:ss" - a day count
@@ -1457,7 +1475,7 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 		while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
 			l_ptr++;
 
-		if ( (l_sts = fao$$tim_hms (&l_ptr, &l_secs)) != STS$K_SUCCESS )
+		if ( (l_sts = s_fao$tim_hms (&l_ptr, &l_secs)) != STS$K_SUCCESS )
 			return	l_sts;
 
 		while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
@@ -1473,7 +1491,7 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 
 	/* Current date: default source for the omitted absolute fields */
 	l_now = (int64_t) FAO$GETTIME () + FAO$K_TZOFFSET;
-	fao$$days_to_civil (l_now / 86400 - (l_now % 86400 < 0),
+	s_fao$days_to_civil (l_now / 86400 - (l_now % 86400 < 0),
 		&l_cyear, &l_cmon, &l_cday);
 
 	l_day	= l_cday;
@@ -1488,20 +1506,20 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 
 		l_ptr++;
 
-		if ( (l_sts = fao$$tim_month (&l_ptr, &l_mon)) != STS$K_SUCCESS )
+		if ( (l_sts = s_fao$tim_month (&l_ptr, &l_mon)) != STS$K_SUCCESS )
 			return	l_sts;
 
 		if ( *l_ptr++ != '-' )
 			return	FAO$K_IVTIME;
 
-		if ( fao$$tim_num (&l_ptr, &l_num) )
+		if ( s_fao$tim_num (&l_ptr, &l_num) )
 			l_year = (int64_t) l_num;
 
 		while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
 			l_ptr++;
 
 		if ( *l_ptr )
-			if ( (l_sts = fao$$tim_hms (&l_ptr, &l_secs))
+			if ( (l_sts = s_fao$tim_hms (&l_ptr, &l_secs))
 				!= STS$K_SUCCESS )
 				return	l_sts;
 		}
@@ -1513,7 +1531,7 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 		while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
 			l_ptr++;
 
-		if ( (l_sts = fao$$tim_hms (&l_ptr, &l_secs)) != STS$K_SUCCESS )
+		if ( (l_sts = s_fao$tim_hms (&l_ptr, &l_secs)) != STS$K_SUCCESS )
 			return	l_sts;
 		}
 	else	return	FAO$K_IVTIME;
@@ -1539,8 +1557,248 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 	}
 
 	*a_timadr = (fao_time_t)
-		( fao$$days_from_civil (l_year, l_mon, l_day) * 86400
+		( s_fao$days_from_civil (l_year, l_mon, l_day) * 86400
 		+ (int64_t) l_secs - FAO$K_TZOFFSET );
 
+	return	STS$K_SUCCESS;
+}
+
+/*
+**++
+**  UTIL$GETTIM - portable variant of the OpenVMS SYS$GETTIM system
+**  service: return the current binary time.
+**
+**  INPUT:
+**	a_timadr - address of the fao_time_t to receive the result
+**
+**  OUTPUT:
+**	*a_timadr - current time, seconds of the UNIX epoch (UTC)
+**
+**  RETURN:
+**	Condition value:
+**	  STS$K_SUCCESS - always, unless a_timadr is NULL
+**	  STS$K_ERROR   - bad routine arguments
+**--
+*/
+int	util$gettim	(fao_time_t *a_timadr)
+{
+	if ( a_timadr == NULL )
+		return	STS$K_ERROR;
+
+	*a_timadr = (fao_time_t) FAO$GETTIME ();
+
+	return	STS$K_SUCCESS;
+}
+
+/*
+**++
+**  UTIL$ASCTIM - portable variant of the OpenVMS SYS$ASCTIM system
+**  service: convert binary time to an ASCII string.
+**
+**	Output formats (exact mirror of the !%D/!%T directives, so
+**	UTIL$BINTIM accepts the result back - round-trip consistent):
+**
+**	  Absolute (value >= 0), a_cvtflg = 0:
+**		"dd-MMM-yyyy hh:mm:ss.00"  (day blank-padded to 2)
+**	  Absolute, a_cvtflg = 1:
+**		"hh:mm:ss.00"
+**	  Delta (value < 0, OpenVMS convention), a_cvtflg = 0:
+**		"dddd hh:mm:ss.00"
+**	  Delta, a_cvtflg = 1:
+**		"hh:mm:ss.00"  (the day count is discarded)
+**
+**	The absolute value is rendered in the FAO$K_TZOFFSET timezone.
+**
+**  INPUT:
+**	a_outlen - optional address of a word to receive the length of
+**		   the resulting string, may be NULL
+**	a_outbuf - address of the output buffer descriptor (fao_desc_t)
+**	a_timadr - address of the binary time; NULL - the current time
+**		   is used, as on OpenVMS
+**	a_cvtflg - conversion flag: 0 - full, 1 - time-of-day only
+**
+**  OUTPUT:
+**	Buffer described by a_outbuf - the resulting string (not
+**	zero-terminated); *a_outlen - its length
+**
+**  RETURN:
+**	Condition value:
+**	  STS$K_SUCCESS - conversion complete
+**	  FAO$K_BUFOVF  - output truncated to the buffer capacity
+**	  STS$K_ERROR   - bad routine arguments
+**--
+*/
+int	util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
+			const fao_time_t *a_timadr, int a_cvtflg)
+{
+	fao_ctx_t l_ctx;
+	fao_prmstate_t l_prm = {0};
+	fao_time_t l_tim;
+	int64_t	l_val;
+
+	if ( (a_outbuf == NULL) || (a_outbuf->dsc$a_pointer == NULL) )
+		return	STS$K_ERROR;
+
+	if ( a_timadr != NULL )
+		l_tim = *a_timadr;
+	else	l_tim = (fao_time_t) FAO$GETTIME ();
+
+	l_val = (int64_t) l_tim;
+
+	l_ctx.obase	= a_outbuf->dsc$a_pointer;
+	l_ctx.optr	= l_ctx.obase;
+	l_ctx.oend	= l_ctx.obase + a_outbuf->dsc$w_length;
+	l_ctx.prm	= &l_prm;
+	l_ctx.sts	= STS$K_SUCCESS;
+
+	if ( l_val >= 0 )			/* Absolute time	*/
+		s_fao$put_time (&l_ctx, (fao_prm_t) &l_tim, ! a_cvtflg);
+	else	{				/* Delta time		*/
+		int64_t	l_mag = - l_val;
+		int64_t	l_secs = l_mag % 86400;
+
+		if ( ! a_cvtflg )
+			{
+			char	l_buf [FAO$K_NUMBUF];
+			char	*l_dig = s_fao$cvt_dec (
+					(uint64_t)(l_mag / 86400),
+					l_buf + FAO$K_NUMBUF);
+
+			s_fao$put_raw (&l_ctx, l_dig,
+				(size_t)(l_buf + FAO$K_NUMBUF - l_dig));
+			s_fao$put_chr (&l_ctx, ' ');
+			}
+
+		s_fao$put_2d  (&l_ctx, (unsigned) (l_secs / 3600));
+		s_fao$put_chr (&l_ctx, ':');
+		s_fao$put_2d  (&l_ctx, (unsigned) ((l_secs / 60) % 60));
+		s_fao$put_chr (&l_ctx, ':');
+		s_fao$put_2d  (&l_ctx, (unsigned) (l_secs % 60));
+		s_fao$put_raw (&l_ctx, ".00", 3);
+		}
+
+	if ( a_outlen != NULL )
+		*a_outlen = (unsigned short) (l_ctx.optr - l_ctx.obase);
+
+	return	l_ctx.sts;
+}
+
+/*
+**++
+**  UTIL$ADD_TIMES - portable variant of the OpenVMS LIB$ADD_TIMES
+**  routine: add two binary times.
+**
+**	OpenVMS combination rules (delta times are negative):
+**	  delta + delta    -> delta
+**	  absolute + delta -> absolute (delta magnitude is added)
+**	  absolute + absolute -> error, at least one delta is required
+**
+**  INPUT:
+**	a_tim1	- address of the first operand
+**	a_tim2	- address of the second operand
+**
+**  OUTPUT:
+**	*a_result - the sum; unchanged on error
+**
+**  RETURN:
+**	Condition value:
+**	  STS$K_SUCCESS - operation complete
+**	  FAO$K_IVTIME  - both operands are absolute times
+**	  STS$K_ERROR   - bad routine arguments
+**--
+*/
+int	util$add_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
+			fao_time_t *a_result)
+{
+	int64_t	l_t1, l_t2;
+
+	if ( (a_tim1 == NULL) || (a_tim2 == NULL) || (a_result == NULL) )
+		return	STS$K_ERROR;
+
+	l_t1 = (int64_t) *a_tim1;
+	l_t2 = (int64_t) *a_tim2;
+
+	if ( (l_t1 >= 0) && (l_t2 >= 0) )	/* Two absolute times	*/
+		return	FAO$K_IVTIME;
+
+	if ( (l_t1 < 0) && (l_t2 < 0) )		/* Two delta times	*/
+		{
+		*a_result = (fao_time_t) (l_t1 + l_t2);
+		return	STS$K_SUCCESS;
+		}
+
+	/* Absolute + delta: the delta magnitude advances the time */
+	if ( l_t1 >= 0 )
+		*a_result = (fao_time_t) (l_t1 - l_t2);
+	else	*a_result = (fao_time_t) (l_t2 - l_t1);
+
+	return	STS$K_SUCCESS;
+}
+
+/*
+**++
+**  UTIL$SUB_TIMES - portable variant of the OpenVMS LIB$SUB_TIMES
+**  routine: subtract the second binary time from the first.
+**
+**	OpenVMS combination rules (delta times are negative):
+**	  absolute - absolute -> delta; tim1 must not precede tim2
+**	  absolute - delta    -> absolute (delta magnitude subtracted);
+**		the result must not become negative
+**	  delta - delta       -> delta; |tim1| must not be less than
+**		|tim2|
+**	  delta - absolute    -> error
+**
+**  INPUT:
+**	a_tim1	- address of the minuend
+**	a_tim2	- address of the subtrahend
+**
+**  OUTPUT:
+**	*a_result - the difference; unchanged on error
+**
+**  RETURN:
+**	Condition value:
+**	  STS$K_SUCCESS - operation complete
+**	  FAO$K_NEGTIM  - the result would be negative (LIB$_NEGTIM)
+**	  FAO$K_IVTIME  - delta minus absolute is requested
+**	  STS$K_ERROR   - bad routine arguments
+**--
+*/
+int	util$sub_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
+			fao_time_t *a_result)
+{
+	int64_t	l_t1, l_t2;
+
+	if ( (a_tim1 == NULL) || (a_tim2 == NULL) || (a_result == NULL) )
+		return	STS$K_ERROR;
+
+	l_t1 = (int64_t) *a_tim1;
+	l_t2 = (int64_t) *a_tim2;
+
+	if ( l_t1 >= 0 )
+		{
+		if ( l_t2 >= 0 )		/* Absolute - absolute	*/
+			{
+			if ( l_t1 < l_t2 )
+				return	FAO$K_NEGTIM;
+
+			*a_result = (fao_time_t) ( - (l_t1 - l_t2) );
+			return	STS$K_SUCCESS;
+			}
+
+		/* Absolute - delta: the delta magnitude rolls time back */
+		if ( l_t1 + l_t2 < 0 )
+			return	FAO$K_NEGTIM;
+
+		*a_result = (fao_time_t) (l_t1 + l_t2);
+		return	STS$K_SUCCESS;
+		}
+
+	if ( l_t2 >= 0 )			/* Delta - absolute	*/
+		return	FAO$K_IVTIME;
+
+	if ( l_t1 > l_t2 )			/* |tim1| < |tim2|	*/
+		return	FAO$K_NEGTIM;
+
+	*a_result = (fao_time_t) (l_t1 - l_t2);
 	return	STS$K_SUCCESS;
 }

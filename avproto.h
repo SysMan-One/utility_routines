@@ -69,6 +69,7 @@
 **--
 */
 
+#include	<string.h>
 #include	<endian.h>
 
 
@@ -175,9 +176,10 @@ unsigned short tag = 0;
 }
 
 
-int	avproto_put  (void *pdu, unsigned short pdusz, unsigned v_tag, unsigned v_type, void *val, unsigned valsz);
-int	avproto_get  (void *pdu, int *context, unsigned v_tag, unsigned *v_type, void *val, unsigned *valsz);
-void	avproto_dump (void *pdu);
+int	avproto_put    (void *pdu, unsigned short pdusz, unsigned v_tag, unsigned v_type, void *val, unsigned valsz);
+int	avproto_get    (void *pdu, unsigned pdusz, int *context, unsigned v_tag, unsigned *v_type, void *val, unsigned *valsz);
+int	avproto_lookup (void *pdu, unsigned pdusz, int *context, unsigned v_tag, unsigned *v_type, void **val, unsigned *valsz);
+void	avproto_dump   (void *pdu, unsigned pdusz);
 
 
 /*
@@ -205,8 +207,10 @@ inline static int	avproto_hset	(
 {
 AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
+	size_t	l_siglen = strnlen((const char *) sig, sizeof(pdu->r_hdr.magic));
+
 	memset(&pdu->r_hdr, 0, sizeof(AVPROTO_HDR));
-	strncpy(pdu->r_hdr.magic, sig, sizeof(pdu->r_hdr.magic));
+	memcpy(pdu->r_hdr.magic, sig, l_siglen);		/* rest stays zero-padded by memset above */
 
 	pdu->r_hdr.u_csr = htobe32(u_csr);
 	pdu->r_hdr.u_seq = htobe32(u_seq);
@@ -243,10 +247,10 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
 	*u_csr = STS$K_ERROR;
 
-	if ( (len = strlen(sig)) > (sizeof (pdu->r_hdr.magic)) )
+	if ( (len = strnlen((const char *) sig, sizeof(pdu->r_hdr.magic) + 1)) > sizeof(pdu->r_hdr.magic) )
 		return	STS$K_ERROR;
 
-	if ( strncmp(pdu->r_hdr.magic, sig, sizeof (pdu->r_hdr.magic)) )
+	if ( memcmp(pdu->r_hdr.magic, sig, sizeof (pdu->r_hdr.magic)) )
 		return	STS$K_ERROR;
 
 	*u_len = be32toh(pdu->r_hdr.u_len);

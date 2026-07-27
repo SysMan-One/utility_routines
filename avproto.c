@@ -1,5 +1,5 @@
 #define	__MODULE__	"AVPROTO"
-#define	__IDENT__	"X.94-07"
+#define	__IDENT__	"X.94-08"
 
 
 /*
@@ -75,6 +75,17 @@
 **
 **	29-JUL-2019	RRL	X.94-07 : Redeclared avproto_dump();
 **
+**	27-JUL-2026	DN	X.94-08 : Security/robustness fixes:
+**				- avproto_get()/avproto_lookup()/avproto_dump() take real PDU area
+**				  size <pdusz> and validate every TLV against it (no OOB on a
+**				  malformed/hostile PDU with a lying u_len/w_len);
+**				- fixed 'next TLV' pointer computation in avproto_lookup() (was
+**				  based on <pdu> instead of <ptlv>), set returned value length;
+**				- avproto_get(): require <valsz> for variable-length tags, clamp
+**				  UUID copy to the destination buffer;
+**				- avproto_put(): fixed unsigned-short underflow of the free-space
+**				  computation.
+**
 **
 **
 **--
@@ -123,19 +134,27 @@ AVPROTO_TLV *ptlv;
 char	*pchar;
 AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
-	pdusz -= sizeof(AVPROTO_HDR);
+unsigned l_used, l_free;
 
-	/* Get current PDU's payload  size from the header */
-	len = be32toh(pdu->r_hdr.u_len);
+	/* The PDU area must hold at least the fixed header */
+	if ( pdusz < sizeof(AVPROTO_HDR) )
+		return	$LOG(STS$K_ERROR, "PDU area too small: %u octets", (unsigned) pdusz);
+
+	/* Get current PDU's payload size from the header */
+	l_used = be32toh(pdu->r_hdr.u_len);
+
+	/* A declared payload can not be larger than the given PDU area (no unsigned underflow) */
+	if ( l_used > (unsigned) (pdusz - sizeof(AVPROTO_HDR)) )
+		return	$LOG(STS$K_ERROR, "Corrupted PDU: payload=%u > area=%u", l_used, (unsigned) (pdusz - sizeof(AVPROTO_HDR)));
+
+	/* Free space left in the PDU's payload area */
+	l_free = (unsigned) (pdusz - sizeof(AVPROTO_HDR)) - l_used;
 
 	/* Compute pointer to "first free byte" of the PDU's area */
-	pchar = (char *) pdu->r_tlv;
-	pchar += len;
-
-	len = pdusz - len;
+	pchar = (char *) pdu->r_tlv + l_used;
 
 	/* Check for free space in the PDU's area */
-	if ( (sizeof (AVPROTO_TLV) + valsz) > len )
+	if ( (sizeof (AVPROTO_TLV) + valsz) > l_free )
 		return	$LOG(STS$K_ERROR, "No free space for tag=%d, type=%d, len=%d", v_tag, v_type, valsz);
 
 	/* Set TLV pointer to end of the current PDU  */
@@ -149,11 +168,11 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 		{
 		case	TAG$K_WORD:	/* 16 bits */
 			{
-			uint16_t *vptr = (unsigned short *) ptlv->b_val;
+			uint16_t l_v = 0;				/* unaligned-safe: b_val may sit at an odd offset */
 
-			*vptr = 0;
-			memcpy(vptr, val, valsz ? valsz : sizeof( uint16_t));
-			*(vptr) = htobe16(*vptr);
+			memcpy(&l_v, val, valsz ? $MIN(valsz, sizeof(l_v)) : sizeof(l_v));
+			l_v = htobe16(l_v);
+			memcpy(ptlv->b_val, &l_v, sizeof(l_v));
 
 			ptlv->w_len = htobe16( len = sizeof(uint16_t) );
 
@@ -162,11 +181,11 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
 		case	TAG$K_LONGWORD:	/* 32 bits */
 			{
-			uint32_t *vptr = (uint32_t *) ptlv->b_val;
+			uint32_t l_v = 0;
 
-			*vptr = 0UL;
-			memcpy(vptr, val, valsz ? valsz : sizeof( uint32_t));
-			*(vptr) = htobe32(*vptr);
+			memcpy(&l_v, val, valsz ? $MIN(valsz, sizeof(l_v)) : sizeof(l_v));
+			l_v = htobe32(l_v);
+			memcpy(ptlv->b_val, &l_v, sizeof(l_v));
 
 			ptlv->w_len = htobe16( len = sizeof(uint32_t) );
 
@@ -175,11 +194,11 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
 		case	TAG$K_QWORD:	/* 64 bits */
 			{
-			uint64_t *vptr = (uint64_t *) ptlv->b_val;
+			uint64_t l_v = 0;
 
-			*vptr = 0ULL;
-			memcpy(vptr, val, valsz ? valsz : sizeof( uint64_t));
-			*(vptr) = htobe64(*vptr);
+			memcpy(&l_v, val, valsz ? $MIN(valsz, sizeof(l_v)) : sizeof(l_v));
+			l_v = htobe64(l_v);
+			memcpy(ptlv->b_val, &l_v, sizeof(l_v));
 
 			ptlv->w_len = htobe16( len = sizeof(uint64_t) );
 
@@ -227,6 +246,7 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
  */
 int	avproto_get (
 		void	*pdup,
+	unsigned	pdusz,		/* Real size of the PDU area (received octets) */
 	int	*	context,
 	unsigned	v_tag,
 	unsigned	*v_type,
@@ -234,13 +254,19 @@ int	avproto_get (
 	unsigned *	valsz
 		)
 {
-int status, pdusz = 0, len = 0, pos = 0;
+int	status, pos = 0;
+unsigned	len = 0, l_limit;
 AVPROTO_TLV *ptlv;
-unsigned short w_len, l_tag = 0, l_type = 0;
+unsigned short w_len = 0, l_tag = 0, l_type = 0;
 AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
-	/* Get size of the PDU's payload part*/
-	pdusz = be32toh(pdu->r_hdr.u_len);
+	/* The PDU area must hold at least the fixed header */
+	if ( pdusz < sizeof(AVPROTO_HDR) )
+		return	$LOG(STS$K_ERROR, "PDU area too small: %u octets", pdusz);
+
+	/* Effective payload limit = min(declared by header, really available) - do not trust a lying header */
+	l_limit = be32toh(pdu->r_hdr.u_len);
+	l_limit = $MIN(l_limit, (unsigned) (pdusz - sizeof(AVPROTO_HDR)));
 
 	/* Compute a pointer to first unprocessed TLV */
 	if ( context && (*context != -1) )
@@ -250,11 +276,19 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 		pos = 0;
 		}
 
-	/* Find TLVs with a given Tag Id */
-	for ( status = STS$K_WARN; pos < pdusz; )
+	/* Find TLV with a given Tag Id */
+	for ( status = STS$K_WARN; (unsigned) pos < l_limit; )
 		{
+		/* The fixed TLV header itself must fit into the remaining area */
+		if ( ((unsigned) pos + sizeof(AVPROTO_TLV)) > l_limit )
+			break;
+
 		avproto_decode_tag (ptlv->w_tag, &l_type, &l_tag);
 		w_len = be16toh(ptlv->w_len);
+
+		/* The whole TLV (header + value) must fit too */
+		if ( ((unsigned) pos + sizeof(AVPROTO_TLV) + w_len) > l_limit )
+			break;
 
 		/* Adjust context */
 		pos += sizeof(AVPROTO_TLV) + w_len;
@@ -274,38 +308,74 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 	if ( !(1 & status) )
 		return	status;
 
-	/* Check that size of destination buffer is enough */
-	if ( valsz && (*valsz) < w_len )
-		return	STS$K_ERROR;
+	/*
+	 * Destination buffer size check. For variable-length values (UUID, octet block, unknown)
+	 * the caller MUST provide <valsz>, otherwise a buffer overrun can not be excluded.
+	 */
+	switch ( l_type )
+		{
+		case	TAG$K_WORD:
+		case	TAG$K_LONGWORD:
+		case	TAG$K_QWORD:
+			if ( valsz && (*valsz) < w_len )
+				return	STS$K_ERROR;
+			break;
+
+		default:
+			if ( !valsz )
+				return	$LOG(STS$K_ERROR, "valsz is required for variable-length tag type=%d", l_type);
+
+			if ( (*valsz) < w_len )
+				return	STS$K_ERROR;
+		}
 
 	/* Convert and extract value according the type */
 	*v_type = l_type;
 
 
-	switch ( *v_type )
+	switch ( l_type )
 		{
 		case	TAG$K_WORD:	/* 16 bits */
-			*((uint16_t *) val) = be16toh(ptlv->w_val[0]);
-			len  = sizeof(uint16_t);
+			{
+			uint16_t l_v;				/* unaligned-safe read from a packed TLV */
 
+			memcpy(&l_v, ptlv->b_val, sizeof(l_v));
+			l_v = be16toh(l_v);
+			memcpy(val, &l_v, sizeof(l_v));
+			len  = sizeof(uint16_t);
+			}
 			break;
 
 		case	TAG$K_LONGWORD:	/* 32 bits */
-			*((uint32_t  *) val) = be32toh(ptlv->u_val[0]);
-			len  = sizeof(uint32_t);
+			{
+			uint32_t l_v;
 
+			memcpy(&l_v, ptlv->b_val, sizeof(l_v));
+			l_v = be32toh(l_v);
+			memcpy(val, &l_v, sizeof(l_v));
+			len  = sizeof(uint32_t);
+			}
 			break;
 
 		case	TAG$K_QWORD:	/* 64 bits */
-			*((uint64_t *) val) = be64toh(ptlv->q_val[0]);
-			len  = sizeof(uint64_t);
+			{
+			uint64_t l_v;
 
+			memcpy(&l_v, ptlv->b_val, sizeof(l_v));
+			l_v = be64toh(l_v);
+			memcpy(val, &l_v, sizeof(l_v));
+			len  = sizeof(uint64_t);
+			}
 			break;
 
 		case	TAG$K_UUID:	/* 16 octets  */
-			len = 16;
-			w_len = $MIN(w_len, 16);
-			__util$movc5 (&w_len, ptlv->b_val,  0, (unsigned short *)  &len, val);
+			{
+			unsigned short l_dstlen = (unsigned short) $MIN(*valsz, 16);
+			unsigned short l_srclen = $MIN(w_len, l_dstlen);
+
+			__util$movc5 (&l_srclen, (char *) ptlv->b_val, 0, &l_dstlen, val);
+			len = l_dstlen;
+			}
 
 			break;
 		default:
@@ -341,7 +411,8 @@ AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
  *	condition code
  */
 int	avproto_lookup (
-	AVPROTO_PDU	*pdu,
+		void	*pdup,
+	unsigned	pdusz,		/* Real size of the PDU area (received octets) */
 	int	*	context,
 	unsigned	v_tag,
 	unsigned	*v_type,
@@ -349,12 +420,19 @@ int	avproto_lookup (
 	unsigned *	valsz
 		)
 {
-int status, pdusz = 0, len = 0, pos = 0;
+int	status, pos = 0;
+unsigned	len = 0, l_limit;
 AVPROTO_TLV *ptlv;
-unsigned short w_len, l_tag = 0, l_type = 0;
+unsigned short w_len = 0, l_tag = 0, l_type = 0;
+AVPROTO_PDU	*pdu = (AVPROTO_PDU *) pdup;
 
-	/* Get size of the PDU's payload part*/
-	pdusz = be32toh(pdu->r_hdr.u_len);
+	/* The PDU area must hold at least the fixed header */
+	if ( pdusz < sizeof(AVPROTO_HDR) )
+		return	$LOG(STS$K_ERROR, "PDU area too small: %u octets", pdusz);
+
+	/* Effective payload limit = min(declared by header, really available) */
+	l_limit = be32toh(pdu->r_hdr.u_len);
+	l_limit = $MIN(l_limit, (unsigned) (pdusz - sizeof(AVPROTO_HDR)));
 
 	/* Compute a pointer to first unprocessed TLV */
 	if ( context && (*context != -1) )
@@ -364,11 +442,19 @@ unsigned short w_len, l_tag = 0, l_type = 0;
 		pos = 0;
 		}
 
-	/* Find TLVs with a given Tag Id */
-	for ( status = STS$K_WARN; pos < pdusz; )
+	/* Find TLV with a given Tag Id */
+	for ( status = STS$K_WARN; (unsigned) pos < l_limit; )
 		{
+		/* The fixed TLV header itself must fit into the remaining area */
+		if ( ((unsigned) pos + sizeof(AVPROTO_TLV)) > l_limit )
+			break;
+
 		avproto_decode_tag (ptlv->w_tag, &l_type, &l_tag);
 		w_len = be16toh(ptlv->w_len);
+
+		/* The whole TLV (header + value) must fit too */
+		if ( ((unsigned) pos + sizeof(AVPROTO_TLV) + w_len) > l_limit )
+			break;
 
 		/* Adjust context */
 		pos += sizeof(AVPROTO_TLV) + w_len;
@@ -376,8 +462,8 @@ unsigned short w_len, l_tag = 0, l_type = 0;
 		if ( status = (v_tag == l_tag) )
 			break;
 
-		/* Jump to next TLV */
-		ptlv = (AVPROTO_TLV *) (((char *) pdu) + sizeof(AVPROTO_TLV) + w_len);
+		/* Jump to next TLV - relative to the CURRENT TLV, not to the PDU base ! */
+		ptlv = (AVPROTO_TLV *) (((char *) ptlv) + sizeof(AVPROTO_TLV) + w_len);
 		}
 
 	if ( context )
@@ -387,9 +473,13 @@ unsigned short w_len, l_tag = 0, l_type = 0;
 	if ( !(1 & status) )
 		return	status;
 
+	len = w_len;			/* Length of the found TLV's value block */
+
 	*v_type = l_type;
 	*val = ptlv->b_val;
-	*valsz = len;
+
+	if ( valsz )
+		*valsz = len;
 
 
 	return	STS$K_SUCCESS;
@@ -408,35 +498,54 @@ unsigned short w_len, l_tag = 0, l_type = 0;
  *	condition code
  */
 void	avproto_dump	(
-		void	*_pdu
+		void	*_pdu,
+		unsigned pdusz		/* Real size of the PDU area (received octets) */
 			)
 {
 AVPROTO_TLV *ptlv;
 AVPROTO_PDU	*pdu = (AVPROTO_PDU *) _pdu;
 char	hexbuf1[512], hexbuf2[512];
-void	*pchar = (char *) pdu->r_tlv, *pend;
-unsigned pdusz, count;
+char	*pchar;
+unsigned l_limit, count, pos;
 unsigned short w_len, w_tag, v_type, v_tag;
 
 
-	/* Get size of the PDU's area */
-	pdusz = be32toh(pdu->r_hdr.u_len);
-	pend  = pchar + pdusz;
+	if ( pdusz < sizeof(AVPROTO_HDR) )
+		{
+		$LOG(STS$K_ERROR, "PDU area too small: %u octets", pdusz);
+		return;
+		}
+
+	/* Effective payload limit = min(declared by header, really available) */
+	l_limit = be32toh(pdu->r_hdr.u_len);
+	l_limit = $MIN(l_limit, (unsigned) (pdusz - sizeof(AVPROTO_HDR)));
 
 	$LOG(STS$K_INFO, "PDU [len=%d, csr=%#x, seq=%d]", be32toh(pdu->r_hdr.u_len), be32toh(pdu->r_hdr.u_csr), be32toh(pdu->r_hdr.u_seq));
 
-	for ( pchar = ptlv = pdu->r_tlv, count = 0; pchar < pend ; count++ )
+	for ( pchar = (char *) pdu->r_tlv, pos = count = 0; pos < l_limit; count++ )
 		{
+		/* The fixed TLV header must fit */
+		if ( (pos + sizeof(AVPROTO_TLV)) > l_limit )
+			break;
+
+		ptlv  = (AVPROTO_TLV *) pchar;
 		w_len = be16toh(ptlv->w_len);
 		w_tag = avproto_decode_tag (ptlv->w_tag, &v_type, &v_tag);
+
+		/* The whole TLV must fit */
+		if ( (pos + sizeof(AVPROTO_TLV) + w_len) > l_limit )
+			{
+			$LOG(STS$K_ERROR, "[%04.4d] truncated TLV [tag=%04x, len=%u] at offset %u", count, w_tag, w_len, pos);
+			break;
+			}
 
 		__util$bin2hex (ptlv, hexbuf1, sizeof(AVPROTO_TLV));
 		__util$bin2hex (ptlv->b_val, hexbuf2, $MIN(w_len, sizeof(hexbuf2)/2) );
 		$LOG(STS$K_INFO, "[%04.4d] TLV [tag=%04x(id=%04x, type=%04x), len=%02d] 0x%s:0x%s",
 		     count, w_tag, v_tag, v_type, w_len, hexbuf1, hexbuf2);
 
-		pchar	+= sizeof(AVPROTO_TLV) + w_len;
-		ptlv	 = (AVPROTO_TLV *) pchar;
+		pos   += sizeof(AVPROTO_TLV) + w_len;
+		pchar += sizeof(AVPROTO_TLV) + w_len;
 		}
 }
 
@@ -523,20 +632,20 @@ char	welcome [] = "This is an asnwer to request: cmd/seq=%u/%u",
 
 	/* Retreive attributes from the request */
 	ulen = sizeof(uname);
-	avproto_get (pdu, &context, VCLOUD$K_TAG_UNAME, &v_type, uname, &ulen);
+	avproto_get (pdu, sizeof(pdubuf), &context, VCLOUD$K_TAG_UNAME, &v_type, uname, &ulen);
 	$TRACE("uname=[0:%d]='%.*s'", ulen , ulen, uname);
 
 	plen = sizeof(pass);
-	avproto_get (pdu, &context, VCLOUD$K_TAG_PASS, &v_type, pass, &plen);
+	avproto_get (pdu, sizeof(pdubuf), &context, VCLOUD$K_TAG_PASS, &v_type, pass, &plen);
 	$TRACE("pass=[0:%d]='%.*s'", plen , plen, pass);
 
-	avproto_get (pdu, &context, /* Is used as Tag Id */ TAG$K_WORD, &v_type, &w_val, 0 );
+	avproto_get (pdu, sizeof(pdubuf), &context, /* Is used as Tag Id */ TAG$K_WORD, &v_type, &w_val, 0 );
 	$TRACE("w_val=%d/%#x", w_val, w_val);
 
-	avproto_get (pdu, &context, /* Is used as Tag Id */ TAG$K_LONGWORD, &v_type, &u_val, 0 );
+	avproto_get (pdu, sizeof(pdubuf), &context, /* Is used as Tag Id */ TAG$K_LONGWORD, &v_type, &u_val, 0 );
 	$TRACE("u_val=%d/%#x", u_val, u_val);
 
-	avproto_get (pdu, &context, /* Is used as Tag Id */ TAG$K_QWORD, &v_type, &q_val, 0 );
+	avproto_get (pdu, sizeof(pdubuf), &context, /* Is used as Tag Id */ TAG$K_QWORD, &v_type, &q_val, 0 );
 	$TRACE("q_val=%llu/%#llx", q_val, q_val);
 
 	/* Prepare answer to the request */
