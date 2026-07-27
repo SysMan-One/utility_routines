@@ -61,16 +61,15 @@ set (SRC_LIST
 	cli_routines.h
 	utility_routines.c
 	utility_routines.h
+	starlet.c
+	starlet.h
 )
 
 add_library (starlet STATIC
 		${SRC_LIST}
 )
 
-target_compile_options(starlet PRIVATE -Wno-format)
-target_compile_options(starlet PRIVATE -Wno-pointer-sign )
-target_compile_options(starlet PRIVATE -Wno-deprecated-non-prototype)
-target_compile_options(starlet PRIVATE -Wno-unused-result)
+
 set_target_properties(starlet PROPERTIES PUBLIC_HEADER utility_routines.h avproto.h cli_routines.h)
 
 if (__MAIN_FOR_DEBUG__)
