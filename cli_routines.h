@@ -69,7 +69,7 @@ extern "C" {
 #define	CLI$M_LIST	2
 #define	CLI$M_PRESENT	4
 
-#define	CLI$SSZ_MAXVERB	32	/* Maximum verb's length	*/
+#define	CLI$SZ_MAXVERB	32	/* Maximum verb's length	*/
 
 #ifndef	__ASC_TYPE__
 typedef	struct __asc__	{

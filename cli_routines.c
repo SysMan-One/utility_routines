@@ -592,7 +592,7 @@ char		*pverb;
 	/*
 	 * First at all we need to match  argv[1] in the verbs list
 	 */
-	len = strnlen(pverb, CLI$S_MAXVERBL);
+	len = strnlen(pverb, CLI$SZ_MAXVERB);
 
 	$IFTRACE(qlog, "argv[1]='%s'->[0:%d]='%.*s'", pverb, len, len, pverb);
 
