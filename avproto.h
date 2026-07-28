@@ -1,11 +1,6 @@
 #ifndef	__AVPROTO$DEF__
 #define	__AVPROTO$DEF__	1
 
-#ifdef	__GNUC__
-	#pragma GCC diagnostic ignored  "-Wparentheses"
-	#pragma	GCC diagnostic ignored	"-Wdate-time"
-	#pragma	GCC diagnostic ignored	"-Wunused-variable"
-#endif
 
 
 #ifdef _WIN32

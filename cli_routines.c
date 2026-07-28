@@ -1,23 +1,6 @@
 #define	__MODULE__	"CLI_ROUTINES"
-#define	__IDENT__	"X.00-01"
-
-#ifdef	__GNUC__
-	#ident			__IDENT__
-
-	#pragma GCC diagnostic ignored  "-Wparentheses"
-	#pragma	GCC diagnostic ignored	"-Wdate-time"
-	#pragma	GCC diagnostic ignored	"-Wunused-variable"
-	#pragma GCC diagnostic ignored	"-Wmissing-braces"
-#endif
-
-#ifdef __cplusplus
-    extern "C" {
-#define __unknown_params ...
-#define __optional_params ...
-#else
-#define __unknown_params
-#define __optional_params ...
-#endif
+#define	__IDENT__	"X.00-02"
+#define	__REV__		"0.02.0"
 
 /*
 **++
@@ -51,6 +34,35 @@
 **
 **--
 */
+
+/*
+**  Abstract: DCL-style command line (CLI$) parser - verb / parameter / qualifier matching
+**	against a command definition table, value type checking and action dispatch.
+**
+**  Modification history:
+**
+**	27-JUL-2026	DN	X.00-02 : Audit fixes.
+**				- cli$parse() now propagates the parse status instead of always
+**				  returning SUCCESS, and releases the half-built context on error;
+**				- rewrote and wired up cli$val_check(): correct UUID check (canonical
+**				  8-4-4-4-12 validated via %n length), snprintf() for the device path,
+**				  errno reset and trailing-garbage check for numbers, values are taken
+**				  as NUL-terminated strings;
+**				- wired up cli$check_keyword() (CLI$K_KWD) and initialised its 'ksel';
+**				- checked the cli$add_item2ctx() status in the qualifier path;
+**				- fixed the sub-verb recursion argument (argv + 1), the argc<1 message,
+**				  added a NULL guard to cli$cleanup(); header/example cleanup.
+*/
+
+
+#ifdef __cplusplus
+    extern "C" {
+#define __unknown_params ...
+#define __optional_params ...
+#else
+#define __unknown_params
+#define __optional_params ...
+#endif
 
 #include	<string.h>
 #include	<stdio.h>
@@ -112,81 +124,104 @@ static	char *cli$val_type	(
  *	SS$_NORMAL, condition status
  *
  */
+static	int	cli$check_keyword (char *sts, int len, int opts, CLI_KEYWORD *klist, CLI_KEYWORD **kwd);
+
+
 static	int	cli$val_check	(
 		CLI_CTX		*clictx,
 		CLI_PQDESC	*pqdesc,
-			ASC	*val
+		const char	*a_val
 				)
 {
-unsigned long long int	status = -1;
 char	buf[NAME_MAX], *cp;
 
 	switch (pqdesc->type)
 		{
 		case	CLI$K_IPV4:
 		case	CLI$K_IPV6:
-			if ( 1 !=  inet_pton(pqdesc->type == CLI$K_IPV4 ? AF_INET : AF_INET6, $ASCPTR(val), buf) )
+			if ( 1 != inet_pton(pqdesc->type == CLI$K_IPV4 ? AF_INET : AF_INET6, a_val, buf) )
 				return	(clictx->opts & CLI$M_OPSIGNAL)
-					? $LOG(STS$K_ERROR, "Value '%.*s' cannot be converted, errno=%d", $ASC(val), errno)
+					? $LOG(STS$K_ERROR, "Value '%s' cannot be converted, errno=%d", a_val, errno)
 					: STS$K_ERROR;
 			break;
 
 		case	CLI$K_NUM:
-			strtoull($ASCPTR(val), &cp, 0);
+			{
+			char	*l_end = NULL;
 
-			if (errno == ERANGE )
+			errno = 0;
+			strtoull(a_val, &l_end, 0);
+
+			if ( (errno == ERANGE) || (l_end == a_val) || (l_end && *l_end) )
 				return	(clictx->opts & CLI$M_OPSIGNAL)
-					? $LOG(STS$K_ERROR, "Value '%.*s' cannot be converted, errno=%d", $ASC(val), errno)
+					? $LOG(STS$K_ERROR, "Value '%s' is not a valid number", a_val)
 					: STS$K_ERROR;
-
+			}
 			break;
 
 		case	CLI$K_DATE:
 			{
-			struct tm _tm = {0};
+			struct tm	l_tm = {0};
+			char		l_sep;
 
-			if ( 3 > (status = sscanf ($ASCPTR(val), "%2d-%2d-%4d%c%2d:%2d:%2d",
-					&_tm.tm_mday, &_tm.tm_mon, &_tm.tm_year,
-					(char *) &status,
-					&_tm.tm_hour, &_tm.tm_min, &_tm.tm_sec)) )
+			if ( 3 > sscanf(a_val, "%2d-%2d-%4d%c%2d:%2d:%2d",
+					&l_tm.tm_mday, &l_tm.tm_mon, &l_tm.tm_year,
+					&l_sep,
+					&l_tm.tm_hour, &l_tm.tm_min, &l_tm.tm_sec) )
 				return	(clictx->opts & CLI$M_OPSIGNAL)
-					? $LOG(STS$K_ERROR, "Illformed date/time value '%.*s'",  $ASC(val))
+					? $LOG(STS$K_ERROR, "Illformed date/time value '%s'", a_val)
 					: STS$K_ERROR;
-			break;
 			}
+			break;
 
 		case	CLI$K_DEVICE:
 			{
-			struct stat st = {0};
+			struct stat	l_st = {0};
 
-			if ( !(cp = strstr($ASCPTR(val), "dev/")) )
-				sprintf(cp  = buf, "/dev/%.*s", $ASC(val));
-			else	cp = $ASCPTR(val);
+			/* Accept an absolute "/dev/xxx" as-is, otherwise prefix a bare name */
+			if ( a_val == strstr(a_val, "/dev/") )
+				cp = (char *) a_val;
+			else	snprintf(cp = buf, sizeof(buf), "/dev/%s", a_val);
 
-			if ( stat(cp, &st) )
+			if ( stat(cp, &l_st) )
 				return	(clictx->opts & CLI$M_OPSIGNAL)
 					? $LOG(STS$K_ERROR, "stat(%s), errno=%d", cp, errno)
 					: STS$K_ERROR;
-			break;
 			}
+			break;
 
 		case	CLI$K_UUID:
 			{
-			if ( 6 != (status = sscanf ($ASCPTR(val), "%08x-%04x-%04x-%04x-%012x",
-						   &status, &status, &status, &status, &status)) )
-				return	(clictx->opts & CLI$M_OPSIGNAL)
-					? $LOG(STS$K_ERROR, "Illformat UUID value '%.*s'", $ASC(val))
-					: STS$K_ERROR;
+			unsigned int	l_u[6];
+			int		l_n = -1;
 
+			/* Canonical 8-4-4-4-12 form; the 12-hex node is read as 4 + 8 hex digits.
+			 * %n captures the count of consumed characters: a well-formed UUID yields
+			 * exactly 6 conversions over exactly 36 characters with nothing trailing.
+			 */
+			if ( (6 != sscanf(a_val, "%8x-%4x-%4x-%4x-%4x%8x%n",
+					&l_u[0], &l_u[1], &l_u[2], &l_u[3], &l_u[4], &l_u[5], &l_n))
+				|| (l_n != 36) || (a_val[36] != '\0') )
+				return	(clictx->opts & CLI$M_OPSIGNAL)
+					? $LOG(STS$K_ERROR, "Illformed UUID value '%s'", a_val)
+					: STS$K_ERROR;
+			}
 			break;
+
+		case	CLI$K_KWD:
+			{
+			CLI_KEYWORD	*l_kwd;
+
+			if ( !pqdesc->kwd )
+				break;			/* no keyword list - nothing to check against */
+
+			return	cli$check_keyword((char *) a_val, (int) strlen(a_val),
+						clictx->opts, pqdesc->kwd, &l_kwd);
 			}
 
 		default:
-			return	(clictx->opts & CLI$M_OPSIGNAL)
-				? $LOG(STS$K_ERROR, "Unknown  type of value '%.*s'", $ASC(val))
-				: STS$K_ERROR;
-
-
+			/* Types without a specific check (FILE, OPT, QSTRING) are accepted as-is */
+			break;
 		}
 
 
@@ -229,9 +264,7 @@ CLI_ITEM	*avp, *avp2;
 		return	STS$K_SUCCESS;
 		}
 
-	if ( CLI$K_QUAL == type )
-		avp->pqdesc = item;
-	else	avp->pqdesc =  item;
+	avp->pqdesc = item;
 
 	/* Run over list down to last item */
 	for ( avp2 = clictx->avlist; avp2 && avp2->next; avp2 = avp2->next);
@@ -347,7 +380,7 @@ static	int	cli$check_keyword	(
 		CLI_KEYWORD **	kwd
 		)
 {
-CLI_KEYWORD	*krun, *ksel;
+CLI_KEYWORD	*krun, *ksel = NULL;
 int	qlog = opts & CLI$M_OPTRACE;
 
 	*kwd = NULL;
@@ -446,7 +479,13 @@ char		*aptr, *vptr;
 				vptr	+= (vptr != NULL);
 				$IFTRACE(qlog, "%.*s='%s'", $ASC(&qrun->name), vptr);
 
-				status = cli$add_item2ctx(clictx, CLI$K_QUAL, qrun, vptr);
+				/* Validate the value against the qualifier's declared type */
+				if ( vptr && *vptr )
+					if ( !(1 & (status = cli$val_check(clictx, qrun, vptr))) )
+						return	status;
+
+				if ( !(1 & (status = cli$add_item2ctx(clictx, CLI$K_QUAL, qrun, vptr))) )
+					return	status;
 
 				qsel = qrun;
 				}
@@ -487,6 +526,11 @@ int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
 	for ( pi = 0, param = verb->params; param && (pi < argc) && param->pn; param++, pi++ )
 		{
 		$IFTRACE(qlog, "P%d(%.*s)='%s'", param->pn, $ASC(&param->name), argv[pi] );
+
+		/* Validate the value against the parameter's declared type */
+		if ( argv[pi] && *argv[pi] )
+			if ( !(1 & (status = cli$val_check(clictx, param, argv[pi]))) )
+				return	status;
 
 		/* Put parameter's value into the CLI context */
 		if ( !(1 & (status = cli$add_item2ctx (clictx, param->pn, param, argv[pi]))) )
@@ -540,7 +584,7 @@ char		*pverb;
 	 * Sanity check for input arguments ...
 	 */
 	if ( argc < 1 )
-		return	(clictx->opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Too many arguments") : STS$K_FATAL;
+		return	(clictx->opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Too few arguments") : STS$K_FATAL;
 
 
 	pverb = argv[0];
@@ -598,7 +642,7 @@ char		*pverb;
 
 	/* Is there a next subverb ? */
 	if ( vsel->next )
-		status = _cli$parse_verb	(clictx, vsel, argc - 1, argv++);
+		status = _cli$parse_verb	(clictx, vsel, argc - 1, argv + 1);
 	else	{
 		if ( ( !vsel->params) && (!vsel->quals) )
 			return	STS$K_SUCCESS;
@@ -645,7 +689,7 @@ CLI_CTX	*ctx;
 	 * Sanity check for input arguments ...
 	 */
 	if ( argc < 1 )
-		return	(opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Too many arguments") : STS$K_FATAL;
+		return	(opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Too few arguments") : STS$K_FATAL;
 
 	/* Create CLI-context area */
 	if ( !(*clictx = calloc(1, sizeof(CLI_CTX))) )
@@ -656,7 +700,14 @@ CLI_CTX	*ctx;
 
 	status = _cli$parse_verb(*clictx, verbs, argc, argv);
 
-	return	STS$K_SUCCESS;
+	/* Propagate a parsing error to the caller and release the half-built context */
+	if ( !(1 & status) )
+		{
+		cli$cleanup(ctx);
+		*clictx = NULL;
+		}
+
+	return	status;
 }
 
 /*
@@ -729,6 +780,9 @@ int	cli$cleanup	(
 
 CLI_ITEM	*avp, *avp2;
 
+	if ( !clictx )
+		return	STS$K_SUCCESS;
+
 	/* Run over verb's items list and free has been alocated memory ...*/
 	for (avp = clictx->vlist; avp; )
 		{
@@ -792,6 +846,10 @@ CLI_VERB	*verb;
 
 
 #ifdef	__CLI_DEBUG__
+
+/* Forward declarations for the objects referenced before their definition below */
+CLI_KEYWORD	diff_log_opts [];
+int		sort_action	(CLI_CTX *clictx, void *arg);
 
 #include	<stdio.h>
 #include	<errno.h>
@@ -971,6 +1029,16 @@ ASC	fl1, fl2;
 
 
 	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "Action routine has been completed!");
+
+	return	STS$K_SUCCESS;
+}
+
+int	sort_action	(
+		CLI_CTX		*clictx,
+			void	*arg
+			)
+{
+	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "sort action routine called");
 
 	return	STS$K_SUCCESS;
 }

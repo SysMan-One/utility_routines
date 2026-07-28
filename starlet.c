@@ -88,6 +88,13 @@
 **
 **  MODIFICATION HISTORY:
 **
+**	X.01-06		27-JUL-2026	CLAUDE
+**		avproto declaration style: routine locals declared at
+**		the first position (no indent), nested block
+**		declarations hoisted to the routine top; lookup tables
+**		s_hexdef/s_octdef/s_mdays moved to module scope.
+**		No functional changes.
+**
 **	X.01-05		27-JUL-2026	CLAUDE
 **		Static routines renamed with the s_ prefix
 **		(fao$$name -> s_fao$name), per the coding standard.
@@ -122,8 +129,8 @@
 */
 
 #define	__MODULE__	"STARLET"
-#define	__IDENT__	"X.01-05"
-#define	__REV__		"1.05"
+#define	__IDENT__	"X.01-06"
+#define	__REV__		"1.06"
 
 #include	<stdarg.h>
 #include	<stdint.h>
@@ -179,6 +186,12 @@ static	const char	s_dig2 [200]	=
 	"60616263646566676869" "70717273747576777879"
 	"80818283848586878889" "90919293949596979899";
 
+static	const int8_t	s_hexdef [4]	= { 2, 4,  8, 16 };
+static	const int8_t	s_octdef [4]	= { 3, 6, 11, 22 };
+
+static	const unsigned char s_mdays [12] =
+	{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+
 static	const char	s_months [12][4] =
 	{
 	"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
@@ -224,7 +237,7 @@ static	inline	void	s_fao$copy (char * restrict a_dst,
 */
 static	inline	size_t	s_fao$strlen (const char *a_str)
 {
-	const char *l_ptr = a_str;
+const char *l_ptr = a_str;
 
 	while ( *l_ptr )
 		l_ptr++;
@@ -285,7 +298,7 @@ typedef	struct	__fao_ctx
 */
 static	fao_prm_t	s_fao$get_prm	(fao_prmstate_t *a_prm)
 {
-	fao_prm_t l_val = 0;
+fao_prm_t l_val = 0;
 
 	if ( a_prm->prmlst != NULL )
 		{
@@ -352,7 +365,7 @@ static	inline	void	s_fao$put_chr	(fao_ctx_t *a_ctx, char a_chr)
 */
 static	void	s_fao$put_fill	(fao_ctx_t *a_ctx, char a_chr, size_t a_cnt)
 {
-	size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
+size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
 
 	if ( a_cnt > l_room )
 		{
@@ -383,7 +396,7 @@ static	void	s_fao$put_fill	(fao_ctx_t *a_ctx, char a_chr, size_t a_cnt)
 static	inline	void	s_fao$put_raw	(fao_ctx_t *a_ctx,
 				const char *a_str, size_t a_len)
 {
-	size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
+size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
 
 	if ( a_len > l_room )
 		{
@@ -418,7 +431,7 @@ static	inline	void	s_fao$put_raw	(fao_ctx_t *a_ctx,
 static	void	s_fao$put_str	(fao_ctx_t *a_ctx, const char *a_str,
 				size_t a_len, int a_width, int a_dots)
 {
-	size_t	l_len = a_len, l_i;
+size_t	l_len = a_len, l_i;
 
 	if ( (a_width != FAO$K_WIDTHAUTO) && ((size_t) a_width < l_len) )
 		l_len = (size_t) a_width;
@@ -452,7 +465,7 @@ static	void	s_fao$put_str	(fao_ctx_t *a_ctx, const char *a_str,
 */
 static	inline	char	*s_fao$cvt_dec	(uint64_t a_val, char *a_end)
 {
-	char	*l_ptr = a_end;
+char	*l_ptr = a_end;
 
 	while ( a_val >= 100 )
 		{
@@ -498,11 +511,11 @@ static	void	s_fao$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 				int a_base, int a_signed,
 				int a_width, int a_defdig)
 {
-	char	l_buf [FAO$K_NUMBUF];
-	char	*l_end = l_buf + FAO$K_NUMBUF, *l_ptr;
-	int	l_len, l_field;
-	uint64_t l_val = a_val;
-	int	l_neg = 0;
+char	l_buf [FAO$K_NUMBUF];
+char	*l_end = l_buf + FAO$K_NUMBUF, *l_ptr;
+int	l_len, l_field;
+uint64_t l_val = a_val;
+int	l_neg = 0;
 
 	a_ctx->prm->lastnum = (int64_t) a_val;
 
@@ -602,15 +615,15 @@ static	void	s_fao$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
 static	void	s_fao$days_to_civil (int64_t a_days, int64_t *a_year,
 				unsigned *a_mon, unsigned *a_day)
 {
-	int64_t	l_z = a_days + 719468;
-	int64_t	l_era = (l_z >= 0 ? l_z : l_z - 146096) / 146097;
-	unsigned l_doe = (unsigned) (l_z - l_era * 146097);
-	unsigned l_yoe = (l_doe - l_doe/1460 + l_doe/36524 - l_doe/146096) / 365;
-	int64_t	l_year = (int64_t) l_yoe + l_era * 400;
-	unsigned l_doy = l_doe - (365*l_yoe + l_yoe/4 - l_yoe/100);
-	unsigned l_mp = (5*l_doy + 2) / 153;
-	unsigned l_day = l_doy - (153*l_mp + 2)/5 + 1;
-	unsigned l_mon = l_mp < 10 ? l_mp + 3 : l_mp - 9;
+int64_t	l_z = a_days + 719468;
+int64_t	l_era = (l_z >= 0 ? l_z : l_z - 146096) / 146097;
+unsigned l_doe = (unsigned) (l_z - l_era * 146097);
+unsigned l_yoe = (l_doe - l_doe/1460 + l_doe/36524 - l_doe/146096) / 365;
+int64_t	l_year = (int64_t) l_yoe + l_era * 400;
+unsigned l_doy = l_doe - (365*l_yoe + l_yoe/4 - l_yoe/100);
+unsigned l_mp = (5*l_doy + 2) / 153;
+unsigned l_day = l_doy - (153*l_mp + 2)/5 + 1;
+unsigned l_mon = l_mp < 10 ? l_mp + 3 : l_mp - 9;
 
 	*a_year	= l_year + (l_mon <= 2);
 	*a_mon	= l_mon;
@@ -637,10 +650,10 @@ static	void	s_fao$days_to_civil (int64_t a_days, int64_t *a_year,
 static	int64_t	s_fao$days_from_civil (int64_t a_year, unsigned a_mon,
 				unsigned a_day)
 {
-	int64_t	l_year = a_year - (a_mon <= 2);
-	int64_t	l_era = (l_year >= 0 ? l_year : l_year - 399) / 400;
-	unsigned l_yoe = (unsigned) (l_year - l_era * 400);
-	unsigned l_doy = (153 * (a_mon + (a_mon > 2 ? (unsigned)-3 : 9)) + 2) / 5
+int64_t	l_year = a_year - (a_mon <= 2);
+int64_t	l_era = (l_year >= 0 ? l_year : l_year - 399) / 400;
+unsigned l_yoe = (unsigned) (l_year - l_era * 400);
+unsigned l_doy = (153 * (a_mon + (a_mon > 2 ? (unsigned)-3 : 9)) + 2) / 5
 			+ a_day - 1;
 	unsigned l_doe = l_yoe * 365 + l_yoe/4 - l_yoe/100 + l_doy;
 
@@ -676,8 +689,8 @@ static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 */
 static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 {
-	int64_t	l_now, l_days, l_secs;
-	unsigned l_hh, l_mm, l_ss;
+int64_t	l_now, l_days, l_secs, l_year;
+unsigned l_hh, l_mm, l_ss, l_mon, l_day;
 
 	if ( a_prm )
 		l_now = (int64_t) * (const fao_time_t *) a_prm;
@@ -700,9 +713,6 @@ static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 
 	if ( a_date )
 		{
-		int64_t	l_year;
-		unsigned l_mon, l_day;
-
 		s_fao$days_to_civil (l_days, &l_year, &l_mon, &l_day);
 
 		if ( l_day < 10 )
@@ -750,7 +760,7 @@ static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 static	uint64_t s_fao$get_numprm (fao_prmstate_t *a_prm, char a_size,
 				int a_signed)
 {
-	fao_prm_t l_prm = s_fao$get_prm (a_prm);
+fao_prm_t l_prm = s_fao$get_prm (a_prm);
 
 	switch ( a_size )
 		{
@@ -793,8 +803,8 @@ static	uint64_t s_fao$get_numprm (fao_prmstate_t *a_prm, char a_size,
 static	const char *s_fao$find_group_end (const char *a_ctl,
 				char a_open, char a_close)
 {
-	int	l_depth = 1;
-	const char *l_ptr = a_ctl;
+int	l_depth = 1;
+const char *l_ptr = a_ctl;
 
 	while ( *l_ptr )
 		{
@@ -850,20 +860,25 @@ static	const char *s_fao$find_group_end (const char *a_ctl,
 static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
 				const char *a_end, int a_depth)
 {
-	const char *l_ptr = a_ctl;
-	fao_prmstate_t *l_prm = a_ctx->prm;
+const char *l_ptr = a_ctl, *l_run, *l_grpend, *l_str;
+fao_prmstate_t *l_prm = a_ctx->prm;
+const fao_desc_t *l_dsc;
+fao_prm_t l_arg;
+fao_ctx_t l_sub;
+uint64_t l_val;
+size_t	l_len, l_sublen;
+int	l_width, l_rpt, l_signed, l_base, l_defdig, l_szidx;
+char	l_dir, l_size;
+char	l_fldbuf [FAO$K_FLDBUF];
 
 #define	$FAO_MORE()	( (a_end == NULL) ? (*l_ptr != 0) : (l_ptr < a_end) )
 
 	while ( $FAO_MORE () )
 		{
-		int	l_width, l_rpt;
-		char	l_dir;
-
 		/* Bulk copy of the literal run up to the next '!' */
 		if ( *l_ptr != '!' )
 			{
-			const char *l_run = l_ptr;
+			l_run = l_ptr;
 
 			do	l_ptr++;
 			while ( $FAO_MORE () && (*l_ptr != '!') );
@@ -961,8 +976,7 @@ static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
 
 			case '(':		/* !n(...) - repeat group */
 				{
-				const char *l_grpend =
-					s_fao$find_group_end (l_ptr, '(', ')');
+				l_grpend = s_fao$find_group_end (l_ptr, '(', ')');
 
 				if ( (l_grpend == NULL)
 					|| (a_depth >= FAO$K_MAXDEPTH) )
@@ -986,11 +1000,7 @@ static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
 
 			case '<':		/* !n<...!> - fixed field */
 				{
-				const char *l_grpend =
-					s_fao$find_group_end (l_ptr, '<', '>');
-				fao_ctx_t l_sub;
-				char	l_fldbuf [FAO$K_FLDBUF];
-				size_t	l_sublen;
+				l_grpend = s_fao$find_group_end (l_ptr, '<', '>');
 
 				if ( (l_grpend == NULL)
 					|| (a_depth >= FAO$K_MAXDEPTH) )
@@ -1031,11 +1041,6 @@ static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
 
 			case 'A':		/* String directives	*/
 				{
-				fao_prm_t l_arg;
-				const fao_desc_t *l_dsc;
-				const char *l_str;
-				size_t	l_len;
-
 				switch ( *l_ptr++ )
 					{
 					case 'S':	/* By descriptor */
@@ -1099,13 +1104,10 @@ static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
 			case 'X':		/* Hexadecimal		*/
 			case 'O':		/* Octal		*/
 				{
-				char	l_size = *l_ptr++;
-				int	l_signed = (l_dir == 'S');
-				int	l_base = 10, l_defdig = 0;
-				uint64_t l_val;
-				static	const int8_t s_hexdef [4] = { 2, 4,  8, 16 };
-				static	const int8_t s_octdef [4] = { 3, 6, 11, 22 };
-				int	l_szidx;
+				l_size	= *l_ptr++;
+				l_signed = (l_dir == 'S');
+				l_base	= 10;
+				l_defdig = 0;
 
 				switch ( l_size )
 					{
@@ -1188,9 +1190,9 @@ static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
 int	util$fao		(const char *a_ctlstr, unsigned short *a_outlen,
 			fao_desc_t *a_outbuf, ...)
 {
-	fao_prmstate_t l_prm;
-	fao_ctx_t l_ctx;
-	va_list	l_ap;
+fao_prmstate_t l_prm;
+fao_ctx_t l_ctx;
+va_list	l_ap;
 
 	if ( (a_ctlstr == NULL) || (a_outbuf == NULL)
 		|| (a_outbuf->dsc$a_pointer == NULL) )
@@ -1247,9 +1249,9 @@ int	util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 			fao_desc_t *a_outbuf,
 			const fao_prm_t *a_prmlst, int a_prmcnt)
 {
-	fao_prmstate_t l_prm;
-	fao_ctx_t l_ctx;
-	static	const fao_prm_t s_empty [1] = { 0 };
+fao_prmstate_t l_prm;
+fao_ctx_t l_ctx;
+static	const fao_prm_t s_empty [1] = { 0 };
 
 	if ( (a_ctlstr == NULL) || (a_outbuf == NULL)
 		|| (a_outbuf->dsc$a_pointer == NULL) )
@@ -1292,9 +1294,9 @@ int	util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 */
 static	int	s_fao$tim_num	(const char **a_ptr, unsigned *a_val)
 {
-	const char *l_ptr = *a_ptr;
-	unsigned l_val = 0;
-	int	l_cnt = 0;
+const char *l_ptr = *a_ptr;
+unsigned l_val = 0;
+int	l_cnt = 0;
 
 	while ( $FAO_ISDIGIT (*l_ptr) && (l_cnt < 9) )
 		{
@@ -1326,8 +1328,8 @@ static	int	s_fao$tim_num	(const char **a_ptr, unsigned *a_val)
 */
 static	int	s_fao$tim_hms	(const char **a_ptr, unsigned *a_secs)
 {
-	const char *l_ptr = *a_ptr;
-	unsigned l_hh = 0, l_mm = 0, l_ss = 0, l_cc = 0;
+const char *l_ptr = *a_ptr;
+unsigned l_hh = 0, l_mm = 0, l_ss = 0, l_cc = 0;
 
 	(void) s_fao$tim_num (&l_ptr, &l_hh);
 
@@ -1373,9 +1375,9 @@ static	int	s_fao$tim_hms	(const char **a_ptr, unsigned *a_secs)
 */
 static	int	s_fao$tim_month	(const char **a_ptr, unsigned *a_mon)
 {
-	const char *l_ptr = *a_ptr;
-	char	l_name [3];
-	unsigned l_i;
+const char *l_ptr = *a_ptr;
+char	l_name [3];
+unsigned l_i;
 
 	for ( l_i = 0; l_i < 3; l_i++ )
 		{
@@ -1448,11 +1450,11 @@ static	int	s_fao$tim_month	(const char **a_ptr, unsigned *a_mon)
 */
 int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 {
-	const char *l_ptr = a_timstr;
-	unsigned l_num = 0, l_mon, l_secs = 0;
-	unsigned l_day, l_cmon, l_cday;
-	int64_t	l_year, l_cyear, l_now;
-	int	l_numdig, l_sts;
+const char *l_ptr = a_timstr;
+unsigned l_num = 0, l_mon, l_secs = 0;
+unsigned l_day, l_cmon, l_cday, l_max;
+int64_t	l_year, l_cyear, l_now;
+int	l_numdig, l_sts;
 
 	if ( (a_timstr == NULL) || (a_timadr == NULL) )
 		return	STS$K_ERROR;
@@ -1543,10 +1545,7 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 		return	FAO$K_IVTIME;
 
 	/* Validate the day against the month length (leap-aware) */
-	{
-	static	const unsigned char s_mdays [12] =
-		{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-	unsigned l_max = s_mdays [l_mon - 1];
+	l_max = s_mdays [l_mon - 1];
 
 	if ( (l_mon == 2) && ( ((l_year % 4 == 0) && (l_year % 100 != 0))
 				|| (l_year % 400 == 0) ) )
@@ -1554,7 +1553,6 @@ int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 
 	if ( (l_day < 1) || (l_day > l_max) )
 		return	FAO$K_IVTIME;
-	}
 
 	*a_timadr = (fao_time_t)
 		( s_fao$days_from_civil (l_year, l_mon, l_day) * 86400
@@ -1631,10 +1629,12 @@ int	util$gettim	(fao_time_t *a_timadr)
 int	util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
 			const fao_time_t *a_timadr, int a_cvtflg)
 {
-	fao_ctx_t l_ctx;
-	fao_prmstate_t l_prm = {0};
-	fao_time_t l_tim;
-	int64_t	l_val;
+fao_ctx_t l_ctx;
+fao_prmstate_t l_prm = {0};
+fao_time_t l_tim;
+int64_t	l_val, l_mag, l_secs;
+char	l_buf [FAO$K_NUMBUF];
+char	*l_dig;
 
 	if ( (a_outbuf == NULL) || (a_outbuf->dsc$a_pointer == NULL) )
 		return	STS$K_ERROR;
@@ -1654,14 +1654,12 @@ int	util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
 	if ( l_val >= 0 )			/* Absolute time	*/
 		s_fao$put_time (&l_ctx, (fao_prm_t) &l_tim, ! a_cvtflg);
 	else	{				/* Delta time		*/
-		int64_t	l_mag = - l_val;
-		int64_t	l_secs = l_mag % 86400;
+		l_mag	= - l_val;
+		l_secs	= l_mag % 86400;
 
 		if ( ! a_cvtflg )
 			{
-			char	l_buf [FAO$K_NUMBUF];
-			char	*l_dig = s_fao$cvt_dec (
-					(uint64_t)(l_mag / 86400),
+			l_dig = s_fao$cvt_dec ((uint64_t)(l_mag / 86400),
 					l_buf + FAO$K_NUMBUF);
 
 			s_fao$put_raw (&l_ctx, l_dig,
@@ -1710,7 +1708,7 @@ int	util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
 int	util$add_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
 			fao_time_t *a_result)
 {
-	int64_t	l_t1, l_t2;
+int64_t	l_t1, l_t2;
 
 	if ( (a_tim1 == NULL) || (a_tim2 == NULL) || (a_result == NULL) )
 		return	STS$K_ERROR;
@@ -1766,7 +1764,7 @@ int	util$add_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
 int	util$sub_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
 			fao_time_t *a_result)
 {
-	int64_t	l_t1, l_t2;
+int64_t	l_t1, l_t2;
 
 	if ( (a_tim1 == NULL) || (a_tim2 == NULL) || (a_result == NULL) )
 		return	STS$K_ERROR;

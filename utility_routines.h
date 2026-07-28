@@ -50,11 +50,6 @@
 **
 **	10-OCT-2024	RRL	Fix $IFTRACE() in Release compilation
 **
-**	 7-JUL-2026	RRL	Removed bzero() - memset() will be fastes;
-**				corrected iszero() by using fastets CPU-optimized alternative.
-**
-**	 9-JUL-2026	RRL	Some fixes from AI.
-**
 */
 
 #if _WIN32
@@ -84,7 +79,6 @@ extern "C" {
 #include	<limits.h>
 #include	<stdarg.h>
 #include	<string.h>
-#include	<stdint.h>
 
 
 
@@ -405,7 +399,7 @@ enum	{
 #define	STS$C__UNDEF	"?"
 
 
-#define $STS_ERROR(code) 	( ((code) & STS$K_ERROR ) || ((code) & STS$K_ERROR) )
+#define	$STS_ERROR(code)	( ($SEV(code) == STS$K_ERROR) || ($SEV(code) == STS$K_FATAL) )
 
 /*
  * +---------------------+--------------------------+-------------------+
@@ -418,7 +412,7 @@ enum	{
 
 
 #define	$DEFFAC(code)		((code) << 16)
-#define	$DEFMSG(code)		(0xFFff0000UL & ((code) << 3)))
+#define	$DEFMSG(code)		( ((code) << 3) & 0x0000FFF8UL )		/* message number -> bits 3..15 */
 #define	$DEFSEV(code)		((code) & 0x7)
 
 
@@ -456,7 +450,7 @@ unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$logd	(const char *fac, unsigned severity, const char *fmt, const char *mod, const char *__func, unsigned __line, ...);
 unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
-unsigned	__util$out	(const char *fmt, ...);
+unsigned	__util$out	(char *fmt, ...);
 
 #ifndef	NDEBUG
 	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
@@ -770,155 +764,150 @@ ENTRY *	_ent = (ENTRY *) ent, *_entleft;
  * Description: Remove an entry from the tail of the queue
  *
  * Input:
- *	a_que:	A pointer to __QUEUE structure
+ *	que:	A pointer to __QUEUE structure
  *
  * Output:
  *	ent:	A removed entry
- *	a_count:	A a_count of entries in the __QUEUE before inserting
+ *	count:	A count of entries in the __QUEUE before inserting
  *
  * Return:
  *	condition code
  */
-inline static int __util$remqtail (void * a_que, void **a_ent, unsigned * a_count)
+inline static int __util$remqtail (void * que, void **ent, unsigned * count)
 {
-__QUEUE * l_que = (__QUEUE *) a_que;
-ENTRY *	l_entleft, * l_entright = NULL;
+__QUEUE * _que = (__QUEUE *) que;
+ENTRY *	_entleft, * _entright = NULL;
 
 	/*
 	 * Sanity check
 	 */
-	if ( !l_que || !a_ent || !a_count )
+	if ( !_que || !ent || !count )
 		return	STS$K_ERROR;
-
-	*a_ent = NULL;							/* Predefine output for the empty-queue case */
 
 	/*
 	 * Acquire lock
 	 */
-	if ( !(1 & __util$lockspin( &l_que->lock)) )
+	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(*a_count = l_que->count) )
+	if ( !(*count = _que->count) )
 		{
-		__util$unlockspin(&l_que->lock);
+		__util$unlockspin(&_que->lock);
 		return STS$K_SUCCESS;
 		}
 
 	/*
 	** Main work ...
 	*/
-	if ( (l_entright = l_que->tail) )
+	if ( (_entright = _que->tail) )
 		{
-		if ( (l_entleft = l_entright->left) )
-			l_entleft->right = NULL;
+		if ( (_entleft = _entright->left) )
+			_entleft->right = NULL;
 
-		l_que->tail = l_entleft;
+		_que->tail = _entleft;
 		}
 
-	*a_ent	= l_entright;
-	l_entright->left = l_entright->right = NULL;
-	l_entright->queue = NULL;
+	*ent	= _entright;
+	_entright->left = _entright->right = NULL;
+	_entright->queue = NULL;
 
 	/*
 	 * Reset head & tail if queue is empty
 	 */
-	if ( !(--l_que->count) )
-		l_que->head = l_que->tail = NULL;
+	if ( !(--_que->count) )
+		_que->head = _que->tail = NULL;
 
 	/*
 	 * Release the spinlock
 	 */
-	__util$unlockspin(&l_que->lock);
+	__util$unlockspin(&_que->lock);
 
 #ifndef	WIN32
-	assert(l_entright);
+	assert(_entright);
 #endif
 
-	return	l_entright ? STS$K_SUCCESS : STS$K_ERROR;
+	return	_entright ? STS$K_SUCCESS : STS$K_ERROR;
 }
 
 /*
  * Description: Remove an entry from the head of the queue
  *
  * Input:
- *	a_que:	A pointer to __QUEUE structure
+ *	que:	A pointer to __QUEUE structure
  *
  * Output:
- *	a_ent:	A removed entry
+ *	ent:	A removed entry
  *	count:	A count of entries in the __QUEUE before inserting
  *
  * Return:
  *	condition code
  */
-inline static int __util$remqhead (void * a_que, void **a_ent, unsigned * a_count)
+inline static int __util$remqhead (void * que, void **ent, unsigned * count)
 {
-__QUEUE * l__que = (__QUEUE *) a_que;
-ENTRY *	l_entleft = NULL, * l_entright;
+__QUEUE * _que = (__QUEUE *) que;
+ENTRY *	_entleft = NULL, * _entright;
 
 	/*
 	 * Sanity check
 	 */
-	if ( !l__que || !a_ent || !a_count )
+	if ( !_que || !ent || !count )
 		return	STS$K_ERROR;
-
-	*a_ent = NULL;							/* Predefine output for the empty-queue case */
 
 	/*
 	 * Acquire lock
 	 */
-	if ( !(1 & __util$lockspin( &l__que->lock)) )
+	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(*a_count = l__que->count) )
+	if ( !(*count = _que->count) )
 		{
-		__util$unlockspin(&l__que->lock);
+		__util$unlockspin(&_que->lock);
 		return STS$K_SUCCESS;
 		}
 
 	/*
 	** Main work ...
 	*/
-	if ( (l_entleft = l__que->head) )
+	if ( (_entleft = _que->head) )
 		{
-		if ( (l_entright = l_entleft->right) )
-			l_entright->left = NULL;
+		if ( (_entright = _entleft->right) )
+			_entright->left = NULL;
 
-		l__que->head = l_entright;
+		_que->head = _entright;
 		}
-
 #ifndef	WIN32
-	assert(l_entleft);
+	assert(_entleft);
 #endif
 
-	*a_ent	= l_entleft;
-	l_entleft->left = l_entleft->right = NULL;
-	l_entleft->queue = NULL;
+	*ent	= _entleft;
+	_entleft->left = _entleft->right = NULL;
+	_entleft->queue = NULL;
 
 	/*
 	 * Reset head & tail if queue is empty
 	 */
-	if ( !(--l__que->count) )
-		l__que->head = l__que->tail = NULL;
+	if ( !(--_que->count) )
+		_que->head = _que->tail = NULL;
 
 	/*
 	 * Release the spinlock
 	 */
-	__util$unlockspin(&l__que->lock);
+	__util$unlockspin(&_que->lock);
 
 #ifndef	WIN32
-	assert(l_entleft);
+	assert(_entleft);
 #endif
 
 
-	return	l_entleft ? STS$K_SUCCESS : STS$K_ERROR;
+	return	_entleft ? STS$K_SUCCESS : STS$K_ERROR;
 }
 
 /*
  * Description: Move an existen entry at head of queue.
  *
  * Input:
- *	a_que:	A pointer to __QUEUE structure
- *	a_ent:	A pointer to ENTRY to be moved at head of queue
+ *	que:	A pointer to __QUEUE structure
+ *	ent:	A pointer to ENTRY to be moved at head of queue
  *
  * Output:
  *	NONE
@@ -926,38 +915,36 @@ ENTRY *	l_entleft = NULL, * l_entright;
  * Return:
  *	condition code
  */
-inline static int __util$movqhead (void * a_que, void **a_ent)
+inline static int __util$movqhead (void * que, void **ent)
 {
 unsigned	i;
-__QUEUE * l_que = (__QUEUE *) a_que;
-ENTRY *	l_entp, * l_entleft = NULL, * l_entright = NULL;
+__QUEUE * _que = (__QUEUE *) que;
+ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 
 	/*
 	 * Sanity check
 	 */
-	if ( !l_que || !a_ent )
+	if ( !_que || !ent )
 		return	STS$K_ERROR;
-
-	*a_ent = NULL;							/* Predefine output for the empty-queue case */
 
 	/*
 	 * Acquire lock
 	 */
-	if ( !(1 & __util$lockspin( &l_que->lock)) )
+	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(l_que->count) )
+	if ( !(_que->count) )
 		{
-		__util$unlockspin(&l_que->lock);
+		__util$unlockspin(&_que->lock);
 		return STS$K_SUCCESS;
 		}
 
 	/*
 	 * Lookup in the queue an entry with a given address
 	 */
-	for (i = 0, l_entp = l_que->head; i < l_que->count; i++, l_entp = l_entp->right)
+	for (i = 0, entp = _que->head; i < _que->count; i++, entp = entp->right)
 		{
-		if ( l_entp == (ENTRY *) a_ent )
+		if ( entp == (ENTRY *) ent )
 			break;
 		}
 
@@ -965,41 +952,41 @@ ENTRY *	l_entp, * l_entleft = NULL, * l_entright = NULL;
 	 * Is the entry already on head of the queue?
 	 */
 	if ( !i )
-		return	__util$unlockspin(&l_que->lock);
+		return	__util$unlockspin(&_que->lock);
 
 	/*
 	 * Is the entry with a given address live in the queue?
 	 */
-	if ( !l_entp )
+	if ( !entp )
 		{
-		__util$unlockspin(&l_que->lock);
+		__util$unlockspin(&_que->lock);
 		return	STS$K_ERROR;
 		}
 
 	/*
 	 * Exclude has been found entry from the chain
 	 */
-	if ( (l_entleft = l_entp->left) )
-		l_entleft->right = l_entp->right;
+	if ( (_entleft = entp->left) )
+		_entleft->right = entp->right;
 #ifndef	WIN32
-	else	assert ( l_entp->left );	/* left link can be only on first entry! */
+	else	assert ( entp->left );	/* left link can be only on first entry! */
 #endif
 
 
-	if ( (l_entright= l_entp->right) )
-		l_entright->left = l_entp->left;
+	if ( (_entright= entp->right) )
+		_entright->left = entp->left;
 
 	/*
 	 * Put has been found entry at head of tail
 	 */
-	l_entp->right = l_que->head;
-	l_entp->left = NULL;
-	l_que->head = l_entp;
+	entp->right = _que->head;
+	entp->left = NULL;
+	_que->head = entp;
 
 	/*
 	 * Release the spinlock
 	 */
-	return	__util$unlockspin(&l_que->lock);
+	return	__util$unlockspin(&_que->lock);
 }
 
 /*
@@ -1206,40 +1193,139 @@ int	left = $MIN(__min__, __max__) , right = $MAX(__min__, __max__);
 /* Return value bound to left or right border eg. x = [min; max]	*/
 #define	$RANGE(x, __min__, __max__)	__util$range(x, __min__, __max__)
 
+
+
 /*
-**++
-**  ROUTINE NAME:	__util$iszero	(FIX-09)
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Checks that a memory area of a given length contains zeroes only.
-**	First octet is tested explicitly, the rest of the area is compared
-**	against itself shifted by one octet.
-**
-**  FORMAL PARAMETERS:
-**	a_bufp	- an address of the buffer to be checked (by reference)
-**	a_bufsz	- a size of the buffer in octets (by value)
-**
-**  COMPLETION CODES:
-**	STS$K_SUCCESS	- the buffer contains zeroes only (or is empty)
-**	STS$K_WARN	- a non-zero octet has been detected
-**--
-*/
-inline static int	__util$iszero	(
-	const unsigned char	*a_bufp,
-		size_t		a_bufsz
+ *
+ *  Description: check buffer for consecutive zero octets
+ *
+ *  Input:
+ *
+ *	bufp:	buffer to check, address
+ *	bufsz:	a length of data in the buffer
+ *
+ *
+ *  Return:
+ *	SS$_NORMAL	- the buffer is zero filled
+ *	STS$K_WARN	- the buffer is not zero filled
+ */
+/*
+ *  DESCRIPTION: __util$iszero	- check buffer for consecutive zero octets
+ *
+ *  INPUT:
+ *	bufp:	buffer to check, address
+ *	bufsz:	a length of data in the buffer
+ *
+ *  RETURN:
+ *	condition code
+ */
+inline static int __util$iszero	(
+		void *	bufp,
+		int	bufsz
 			)
 {
-	if ( !a_bufp || !a_bufsz )
-		return	STS$K_SUCCESS;					/* Nothing to check - treat as all-zero */
+int	i;
+unsigned char *__bufp = (unsigned char *) bufp;
 
-	if ( *a_bufp )
+#if ( (defined ULLONG_MAX && (ULLONG_MAX > UINT_MAX)) || (defined ULONG_LONG_MAX && (ULONG_LONG_MAX > UINT_MAX)) )
+
+//#pragma message	("%CC-I-ULLONG64, unsigned long long - 64 bits")
+
+	/* Step by 8 octets ... */
+	for (i = bufsz/sizeof(unsigned long long); i; i--, __bufp += sizeof(unsigned long long) )
+		{
+		if ( *((unsigned long long *) __bufp ) )
+			return	STS$K_WARN;
+		}
+#endif // (sizeof(unsigned long long)) > sizeof(unsigned int long) )
+
+	/* Compute remainder octets in the buffer */
+	bufsz %= sizeof(unsigned int long);
+
+	/* Step by 4 octets ... */
+	for (i = bufsz/sizeof(unsigned int); i; i--, __bufp += sizeof(unsigned int) )
+		{
+		if ( *((unsigned int *) __bufp ) )
+			return	STS$K_WARN;
+		}
+
+	/* Compute remainder octets in the buffer */
+	bufsz %= sizeof(unsigned int);
+
+	/* Step by 2 octets ... */
+	for (i = bufsz/sizeof(unsigned short); i; i--, __bufp += sizeof(unsigned short) )
+		{
+		if ( *((unsigned short *) __bufp ) )
+			return	STS$K_WARN;
+		}
+
+	/* Compute remainder octets in the buffer */
+	bufsz %= sizeof(unsigned short);
+
+	if ( bufsz && *__bufp )
 		return	STS$K_WARN;
 
-	if ( a_bufsz == 1 )
-		return	STS$K_SUCCESS;
-
-	return	memcmp(a_bufp, a_bufp + 1, a_bufsz - 1) ? STS$K_WARN : STS$K_SUCCESS;
+	return	STS$K_SUCCESS;
 }
+
+
+/*
+ *  DESCRIPTION: __util$bzero	- zeroing memory block
+ *
+ *  INPUT:
+ *	bufp:	buffer to check, address
+ *	bufsz:	a length of data in the buffer
+ *
+ *  RETURN:
+ *	condition code
+ */
+inline static int __util$bzero	(
+		void *	bufp,
+		size_t	bufsz
+			)
+{
+size_t	i;
+unsigned char *__bufp = (unsigned char *) bufp;
+
+	/*
+	 * There is a place for optimization : align a memory address at head
+	 * of the memory block
+	 */
+
+#if ( (defined ULLONG_MAX && (ULLONG_MAX > UINT_MAX)) || (defined ULONG_LONG_MAX && (ULONG_LONG_MAX > UINT_MAX)) )
+
+//#pragma message	("%CC-I-ULLONG64, unsigned long long - 64 bits")
+
+	/* Step by 8 octets ... */
+	for (i = bufsz/sizeof(unsigned long long); i; i--, __bufp += sizeof(unsigned long long) )
+		*((unsigned long long *) __bufp ) = 0;
+#endif // (sizeof(unsigned long long)) > sizeof(unsigned int) )
+
+	/* Compute remainder octets in the buffer */
+	bufsz %= sizeof(unsigned long long);
+
+	/* Step by 4 octets ... */
+	for (i = bufsz/sizeof(unsigned int); i; i--, __bufp += sizeof(unsigned int) )
+		*((unsigned int *) __bufp ) = 0;
+
+	/* Compute remainder octets in the buffer */
+	bufsz %= sizeof(unsigned int);
+
+	/* Step by 2 octets ... */
+	for (i = bufsz/sizeof(unsigned short); i; i--, __bufp += sizeof(unsigned short) )
+		if ( *((unsigned short *) __bufp ) )
+
+	/* Compute remainder octets in the buffer */
+	bufsz %= sizeof(unsigned short);
+
+	if ( bufsz )
+		__bufp = (unsigned char *)'\0';
+
+	return	STS$K_SUCCESS;
+}
+
+
+
 
 
 /* Tracing facility	*/
@@ -1269,12 +1355,12 @@ static inline void __util$nope (void) {}
 /* Counted (length-byte-prefixed) ASCII string, see VMS's ASCIC */
 
 
-#define	ASC$K_SZ	254
+#define	ASC$K_SZ	255
 
 typedef	struct _asc
 {
 	unsigned char	len;
-	char	sts[ASC$K_SZ + 1];
+	char	sts[ASC$K_SZ];
 
 	#define	__ASC_TYPE__	1
 } ASC;
@@ -1292,24 +1378,16 @@ typedef	struct _asc
 
 
 /*
-**++
-**  ROUTINE NAME:	__util$uint32_2_dec
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Converts a 32-bit unsigned integer to a decimal ASCIZ text string.
-**	Digits are generated from the tail of the output buffer, then the
-**	resulting string is moved to the beginning of the buffer.
-**
-**  FORMAL PARAMETERS:
-**	a_src	 - source value to be converted (by value)
-**	a_dst	 - an address of the destination buffer (by reference)
-**	a_dstsz	 - a size of the destination buffer, including NIL (by value)
-**	a_retlen - an address to accept the result string length, optional
-**
-**  COMPLETION CODES:
-**	length of the result string (0 - the buffer is too small)
-**--
-*/
+ *   DESCRIPTION: Convert 32-x bits unsigned interegr ot the decimal text string.
+ *
+ *   INPUT:
+ *	a_src:		Source value to be converted, unsigned int
+ *	a_dst:		An address of the destination buffer
+ *	a_dstsz:	A size of the destination buffer
+ *
+ *   OUTPUT:
+ *	[a_retlen]:	A length of the result decimal string, optional
+ */
 inline	static int __util$uint32_2_dec
 		(
 	unsigned int	a_src,
@@ -1318,39 +1396,33 @@ inline	static int __util$uint32_2_dec
 		size_t	*a_retlen
 		)
 {
-size_t	l_retlen;
-char	*l_dstp;
+size_t		l_retlen;
+char		l_tmp[16], *l_p;						/* 10 digits is the max for uint32 - 16 is enough */
 
-	assert(a_dst && (a_dstsz > 1));					/* At least one digit + NIL	*/
+	assert(a_dstsz);								/* Check for non-zero buffer */
 
+	/*
+	 * Build the decimal digits right-to-left into a scratch buffer. A do/while is
+	 * used so that the value 0 is rendered as the single character "0".
+	 */
 	l_retlen = 0;
-	l_dstp = a_dst + (a_dstsz - 1);					/* Last usable octet of the buffer */
+	l_p = l_tmp + sizeof(l_tmp);
 
-	if ( !a_src )							/* Zero is a special case ...	*/
-		{
-		*(l_dstp--) = '0';
-		l_retlen = 1;
+	do	{
+		*(--l_p) = (char) ('0' + (a_src % 10));				/* Remainder of the division is the current digit */
+		a_src /= 10;							/* <a_src> keeps the result of the division */
+		l_retlen++;
 		}
+	while ( a_src );
 
-	for ( ; a_src && (l_retlen < (a_dstsz - 1)); l_dstp--, l_retlen++)
-		{
-		*l_dstp = (char) ('0' + (a_src % 10));			/* Put remainder of division	*/
-		a_src /= 10;						/* <a_src> keeps the quotient	*/
-		}
+	/* Truncate to the destination capacity, always keeping room for the terminating NUL */
+	if ( l_retlen > (a_dstsz - 1) )
+		l_retlen = a_dstsz - 1;
 
-	if ( a_src )							/* Value did not fit the buffer	*/
-		{
-		if ( a_retlen )
-			*a_retlen = 0;
-
-		*a_dst = '\0';
-		return	0;
-		}
-
-	memmove(a_dst, l_dstp + 1, l_retlen);				/* <l_dstp> points BEFORE the first digit */
+	memcpy(a_dst, l_p, l_retlen);						/* Copy the (possibly truncated) result to the caller's buffer */
 	a_dst[l_retlen] = '\0';
 
-	if ( a_retlen )
+	if ( a_retlen )								/* Do we need to return the length of the decimal string ? */
 		*a_retlen = l_retlen;
 
 	return	(int) l_retlen;
@@ -1392,24 +1464,8 @@ inline static int	__util$asc2str
 
 
 /*
-**++
-**  ROUTINE NAME:	__util$strelem
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Retrieves a substring (field) with a given index from a string of
-**	fields delimited by a given separator character. Scanning never
-**	crosses the actual end of the source data.
-**
-**  FORMAL PARAMETERS:
-**	a_src		- source ASCIC string (by reference)
-**	a_separator	- a separator character (by value)
-**	a_idx		- zero-based index of the field to extract (by value)
-**	a_dst		- ASCIC container to accept the field (by reference)
-**
-**  COMPLETION CODES:
-**	length of the extracted field, 0 - no such field
-**--
-*/
+ *  DESCRIPTION: Retrieve a substring with a given index
+ */
 inline static int	__util$strelem
 			(
 	const ASC	*a_src,
@@ -1418,35 +1474,42 @@ inline static int	__util$strelem
 		ASC 	*a_dst
 			)
 {
-const char	*l_cp_begin, *l_cp_end, *l_end;
+char	*l_cp_begin, *l_cp_end;
+int	l_i, l_len;
+
+	l_len = $ASCLEN(a_src);
+	l_cp_begin = $ASCPTR(a_src);
+	if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
+		l_cp_end = l_cp_begin + $ASCLEN(a_src);
+
+	l_len -= l_cp_end - l_cp_begin;						/* Adjust length of rest buffer to has been processed part */
 
 
-	l_cp_begin = (const char *) a_src->sts;
-	l_end = l_cp_begin + a_src->len;				/* First octet PAST the source data */
-
-	for ( int i = 0; i < a_idx; i++ )
+	for ( l_i = 0; l_len && (l_i < a_idx); l_i++ )
 		{
-		if ( !(l_cp_begin = memchr(l_cp_begin, a_separator, l_end - l_cp_begin)) )
-			return	0;					/* Not enough separators in the source */
+		l_cp_begin = l_cp_end + 1;
+		if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
+			l_cp_end = l_cp_begin + $ASCLEN(a_src);
 
-		l_cp_begin++;						/* Step over the separator itself */
+		l_len -= l_cp_end - l_cp_begin;					/* Adjust length of rest buffer to has been processed part */
 		}
 
-	if ( !(l_cp_end = memchr(l_cp_begin, a_separator, l_end - l_cp_begin)) )
-		l_cp_end = l_end;					/* Last field - up to end of data */
+	if ( l_i != a_idx )
+		return	0;
 
-	a_dst->len = (unsigned char) (l_cp_end - l_cp_begin);
-	memcpy(a_dst->sts, l_cp_begin, a_dst->len);
-	a_dst->sts[a_dst->len] = '\0';
 
-	return	a_dst->len;
+	$ASCLEN(a_dst) = l_cp_end - l_cp_begin;
+	memcpy ( $ASCPTR(a_dst), l_cp_begin, $ASCLEN(a_dst));
+
+	return	$ASCLEN(a_dst);
 }
 
 
 
-/**
- *  @brief: Comparing two ASCIC
-*/
+
+/*
+ *  DESCRIPTION: Comparing two ASCIC
+ */
 inline static int	__util$cmpasc
 			(
 		ASC *	s1,
@@ -1463,9 +1526,9 @@ int	status;
 
 
 
-/**
- * @brief: Comparing two ASCIC
-*/
+/*
+ *  DESCRIPTION: Comparing two ASCIC
+ */
 inline static int	__util$cmpasc_blind
 			(
 		const ASC *	s1,
@@ -1530,55 +1593,51 @@ long nsec = time1->tv_nsec + time2->tv_nsec;
 	result_time->tv_nsec = nsec;
 }
 
+
 /*
-**++
-**  ROUTINE NAME:	__util$sub_time
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Performs a subtraction of two times with the nanoseconds borrow
-**	handling; result is normalized (0 <= tv_nsec < 1E9 for time1 >= time2).
-**--
+** @RRL: Perform a subsctration of two times.
 */
-inline static void __util$sub_time (const struct timespec * time1, const struct timespec * time2, struct timespec * result_time)
+
+/*
+struct timespec diff(struct timespec start, struct timespec end)
+{
+    struct timespec temp;
+    if ((end.tv_nsec-start.tv_nsec)<0) {
+	temp.tv_sec = end.tv_sec-start.tv_sec-1;
+	temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+    } else {
+	temp.tv_sec = end.tv_sec-start.tv_sec;
+	temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+    }
+    return temp;
+}
+*/
+
+inline static void __util$sub_time(struct timespec * time1, struct timespec* time2, struct timespec* result_time)
 {
 struct timespec temp;
 
 	temp.tv_sec = time1->tv_sec - time2->tv_sec;
 	temp.tv_nsec = time1->tv_nsec - time2->tv_nsec;
 
-	if ( temp.tv_nsec < 0 )
-		{
-		temp.tv_sec -= 1;
-		temp.tv_nsec += 1000000000L;
-		}
-
 	*result_time = temp;
 }
 
+
+
 /*
-**++
-**  ROUTINE NAME:	__util$cmp_time
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Compares two times; no truncation of the 64-bit time_t difference.
-**
-**  COMPLETION CODES:
-**	 0	- time1 == time2
-**	-1	- time1 <  time2
-**	 1	- time1 >  time2
-**--
-*/
-inline static int __util$cmp_time (const struct timespec * time1, const struct timespec * time2)
+ *   RETURN
+ *	0	- time1 == time2
+ *	0 >	- time1 < time2
+ *	0 <	- time1 > time2
+ */
+inline static int __util$cmp_time(struct timespec * time1, struct timespec* time2)
 {
-	if ( time1->tv_sec != time2->tv_sec )
-		return	(time1->tv_sec > time2->tv_sec) ? 1 : -1;
+	if ( time1->tv_sec - time2->tv_sec )
+		return	(int) (time1->tv_sec - time2->tv_sec);
 
-	if ( time1->tv_nsec != time2->tv_nsec )
-		return	(time1->tv_nsec > time2->tv_nsec) ? 1 : -1;
-
-	return	0;
+	return	(int) (time1->tv_nsec - time2->tv_nsec);
 }
-
 
 /*
  * INCrement , DECrement ...
@@ -1615,23 +1674,25 @@ int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);
 int	__util$rewindlogfile	(size_t);
-int	__util$pattern_match	(const char *a_str$, const char *a_pattern$);
+int	__util$pattern_match	(char * str$, char * pattern$);
 
-char *	__util$strstr		(const char *s1, size_t s1len, const char *s2, size_t s2len);
+char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
 
 unsigned	__util$crc32c	(unsigned int crc, const void *buf, size_t buflen);
 
-/**
- * @brief __util$hex2bin - convert a hexdecimal string in binary representative.
- *		It's expected that output buffer have enough space to accept
- *		 <(source_length + 1) / 2> octets.
+int	__util$fao		(void *fmt, void *buf, size_t bufsz, ...);
+int	__util$faohex		(const void *src, unsigned short srclen, char *out, unsigned short outsz, unsigned short *outlen);
+
+/*
+ *  DESCRIPTION: __util$hex2bin - convert a hexadecimal string in binary representative.
  *
- * @param a_srchex	-	An address of source data buffer to convert from
- * @param a_\dstbin	-	An address of the output buffer to accept converted octets
- * @param a_srchexlen	-	A length of the source data
+ *  INPUT:
+ *	a_srchex:	An address of source data buffer to convert from
+ *	a_dstbin:	An address of the output buffer to accept converted octets
+ *	a_srchexlen:	A length of the source data
  *
- * @return	-	A length of the data in the output buffer
- *
+ *  RETURN:
+ *	A length of the data in the output buffer
  */
 inline	static int __util$hex2bin
 		(
@@ -1674,17 +1735,16 @@ int	retlen = (a_srchexlen + 1) / 2, i;
 	return	retlen;
 }
 
-/**
- * @brief __util$bin2hex - convert a sequence of bytes from binary from
- *		to a hexadecimal string. It's expected that output buffer have
- *		enough space to accept <source_length * 2> characters.
+/*
+ *  DESCRIPTION: __util$bin2hex - convert a sequence of bytes from binary form
  *
- * @param a_srcbin	-	An address of source data buffer to convert from
- * @param a_dsthex	-	An address of the output buffer to accept hex-string
- * @param a_srcbinlen	-	A length of the source data
+ *  INPUT:
+ *	a_srcbin:	An address of source data buffer to convert from
+ *	a_dsthex:	An address of the output buffer to accept hex-string
+ *	a_srcbinlen:	A length of the source data
  *
- * @return	-	A length of the data in the output buffer
- *
+ *  RETURN:
+ *	A length of the data in the output buffer
  */
 inline	static int __util$bin2hex
 		(
@@ -1714,17 +1774,16 @@ int	retlen = a_srcbinlen * 2;
 
 
 
-/**
- * @brief __util$bin2dec - convert a sequence of bytes from binary from
- *		to a hexadecimal string. It's expected that output buffer have
- *		enough space to accept <source_length * 2> characters.
+/*
+ *  DESCRIPTION: __util$bin2dec - convert a sequence of bytes from binary form
  *
- * @param srcbin	-	An address of source data buffer to convert from
- * @param dsthex	-	An address of the output buffer to accept hex-string
- * @param srcbinlen	-	A length of the source data
+ *  INPUT:
+ *	srcbin:	An address of source data buffer to convert from
+ *	dsthex:	An address of the output buffer to accept hex-string
+ *	srcbinlen:	A length of the source data
  *
- * @return	-	A length of the data in the output buffer
- *
+ *  RETURN:
+ *	A length of the data in the output buffer
  */
 
 
@@ -1774,66 +1833,66 @@ char *	cp, *cmnt = NULL;
 	return	srclen;
 }
 
-
 /*
-**++
-**  ROUTINE NAME:	__util$trim
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Removes leading and trailing spaces or tabs (HT, VT, CR, LF) from a
-**	string; <unsigned char> cast avoids UB of isspace() on 8-bit octets
-**	(Cyrillic in UTF-8/CP1251 etc).
-**--
-*/
+ *
+ *  Description: removes leading and trailing spaces or tabs (HT and VT, CR, LF) from string
+ *  Input:
+ *	src:	a pointer to the buffer wit string to process
+ *	srclen:	a length of the source buffer
+ *
+ *  Return:
+ *	a length of the actual data in the source buffer
+ *
+ */
 inline static int	__util$trim	(
-		char	*a_src,
-		int	a_srclen
+		char	*src,
+		int	srclen
 			)
 {
-int	l_count;
-char *	l_cp;
+int	count;
+char *	cp;
 
-	if ( !a_srclen || !a_src )
+	if ( !srclen || !src )
 		return 0;
 
 	/*
-	 * Trim all spaces and tabs at begin of the string ...
+	 * Trim all space and tabs at begin of the string ...
 	 */
-	for (l_count = 0, l_cp = a_src; isspace ((unsigned char) *l_cp) && (l_count < a_srclen); l_count++, l_cp++);
+	for (count = 0, cp = src; isspace (*cp) && (count < srclen); count++, cp++);
 
-	if ( l_count )
+	if ( count )
 		{
-		memmove(a_src, l_cp, a_srclen -= l_count);
-		*(a_src + a_srclen) = '\0';
+		memmove(src, cp, srclen -= count);
+		*(src + srclen) = '\0';
 		}
 
-	if ( !a_srclen )
+	if ( !srclen )
 		return 0;
 
 	/*
 	 * Trim spaces at end of string ...
 	 */
-	for (l_count = 0, l_cp = a_src + a_srclen; isspace ((unsigned char) *(--l_cp)) && (l_count < a_srclen); l_count++);
+	for (count = 0, cp = src + srclen; isspace (*(--cp)) && (count < srclen); count++);
 
-	if ( l_count )
+	if ( count )
 		{
-		* (l_cp + 1) = '\0';
-		a_srclen -= l_count;
+		* (cp + 1) = '\0';
+		srclen -= count;
 		}
 
-	return	a_srclen;
+	return	srclen;
 }
 
-
 /*
-**++
-**  ROUTINE NAME:	__util$collapse
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Removes all spaces or tabs (HT, VT, CR, LF) from a string; safe
-**	ctype usage, see __util$trim.
-**--
-*/
+ *  Description: removes all spaces or tabs (HT and VT, CR, LF) from string
+ *  Input:
+ *	src:	a pointer to the buffer with string to process
+ *	srclen:	a length of the source buffer
+ *
+ *  Return:
+ *	a length of the actual data in the source buffer
+ *
+ */
 inline static int	__util$collapse	(
 		char	*src,
 		int	srclen
@@ -1849,7 +1908,7 @@ char *	cp;
 	 * Remove all spaces or tabs
 	 */
 	for (count = 0, cp = src; srclen; src++, srclen--)
-		if ( !isspace ((unsigned char) *src) )
+		if ( !isspace (*src) )
 			{
 			*(cp++) = *src;
 			count++;
@@ -1860,16 +1919,17 @@ char *	cp;
 	return	count;
 }
 
-
 /*
-**++
-**  ROUTINE NAME:	__util$strcat_rx
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Concatenates a given list of counted strings into a single area,
-**	an octet is always reserved for the NIL terminator.
-**--
-*/
+ *  DESCRIPTION: __UTIL$STRCAT_RX - concatenates given list of strings into the single area.
+ *
+ *  INPUT:
+ *	dst:	a pointer to area to accept concatenation of the strings
+ *	dstsz:	destination area size
+ *	dstlen:	a returned actual data length
+ *
+ *  RETURN:
+ *	STS$K_SUCCESS
+ */
 inline static	int	__util$strcat_rx	(
 	void	*	dst,
 	int	dstsz,
@@ -1881,17 +1941,13 @@ va_list ap;
 char *	srcp, *dstp = (char *) dst;
 int	srclen, status = STS$K_ERROR;
 
-	if ( !dst || (dstsz < 1) || !dstlen )
-		return	STS$K_ERROR;
-
 	/* Initialize the argument list. */
 	va_start (ap, dstlen);
 
-	/* Looping over the arguments list; one octet of the buffer is always reserved for NIL */
-	for ( *dstlen = srclen = 0; ; )
+	/* Looping until destination buffer have a free space */
+	for ( *dstlen = srclen = 0; (dstsz - *dstlen); )
 		{
-		/* NULL is an "end-of-list" marker; it is checked BEFORE the free space check,
-		   so an exactly-full buffer still completes successfully */
+		/* NULL is a "end-of-list" marker */
 		if ( !(srcp = va_arg(ap, char *)) )
 			{
 			status = STS$K_SUCCESS;
@@ -1902,7 +1958,7 @@ int	srclen, status = STS$K_ERROR;
 		if ( !(srclen = va_arg(ap, int)) )
 			continue;
 
-		if ( srclen > ((dstsz - 1) - *dstlen) )
+		if ( srclen > (dstsz - *dstlen) )
 			break;
 
 		memmove(dstp + *dstlen, srcp, srclen);
@@ -1916,31 +1972,25 @@ int	srclen, status = STS$K_ERROR;
 }
 
 
-/**++
-**  ROUTINE NAME:	__util$lookup_key	(FIX-05)
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Translates a given keyword string to its binary representative
-**	against a given keywords table.
-**
-**	In exact mode the first full-length match wins. In abbreviated mode
-**	(UTIL$K_LOOKUP_ABBREV) the source is treated as a prefix; an exact
-**	full-length match always wins, an ambiguous abbreviation (two or
-**	more candidates, none exact) is an error.
-**
-**  FORMAL PARAMETERS:
-**	a_src	 - a keyword string to look up (by reference)
-**	a_srclen - a length of the keyword string (by value)
-**	a_ktbl	 - a keywords table (by reference)
-**	a_ktblsz - a size of the table in elements (by value)
-**	a_kwd	 - accepts an address of the matched entry (by reference)
-**	a_flags	 - UTIL$K_LOOKUP_NCASE, UTIL$K_LOOKUP_ABBREV (by value)
-**
-**  COMPLETION CODES:
-**	STS$K_SUCCESS	- a keyword has been found, result in <*a_kwd>
-**	STS$K_ERROR	- no match, or ambiguous abbreviation
-**--
-*/
+/*
+ *  DESCRIPTION: Do a translation a given keyword string to binary representative against given Keywords table
+ *
+ *  INPUTS:
+ *	src:	a pointer to the buffer with string to process
+ *	srclen:	a length of the source buffer
+ *	kbtl:	A keyword table
+ *	ktblsz:	A size of the keywords table (in elements)
+ *	flags:	A bitfield mask for string comparing/matching flag
+ *
+ *  OUTPUTS:
+ *	kwd:	A has been found keyword's entry
+ *
+ *
+ *  RETURNS:
+ *	SS$-NORMAL	- keywords has been found, result in the <kwd>
+ *	condition code
+ *
+ */
 #define	UTIL$K_LOOKUP_NCASE	(1 << 0)
 #define	UTIL$K_LOOKUP_ABBREV	(1 << 1)
 
@@ -1952,7 +2002,6 @@ typedef	struct _kwdent
 		void *	ptr;
 		};
 } KWDENT;
-
 
 inline	static	int	__util$lookup_key	(
 		const	char	*a_src,
@@ -1966,63 +2015,60 @@ inline	static	int	__util$lookup_key	(
 			int	a_flags
 			)
 {
-int	l_cmp;
-KWDENT	*l_kwdp, *l_best = NULL;
+int	l_status = STS$K_ERROR, l_len;
+KWDENT *	l_ktbl = a_ktbl;
 
-	if ( !a_src || (a_srclen <= 0) || !a_ktbl || !a_kwd )
-		return	STS$K_ERROR;
-
-	for ( l_kwdp = a_ktbl; a_ktblsz; a_ktblsz--, l_kwdp++)
+	for ( l_ktbl = a_ktbl, l_len = 0; a_ktblsz; a_ktblsz--, l_ktbl++)
 		{
-		if ( a_srclen > l_kwdp->kwd.len )			/* Source is longer than the keyword - can never match */
-			continue;
+		/* Exact comparing or abbreviated ? */
+		if ( !(a_flags & UTIL$K_LOOKUP_ABBREV) )
+			if ( a_srclen != l_ktbl->kwd.len )
+				continue;
 
-		if ( !(a_flags & UTIL$K_LOOKUP_ABBREV) && (a_srclen != l_kwdp->kwd.len) )
-			continue;					/* Exact mode requires equal lengths */
+		/*
+		* We performs a comparing only in case when a compare length is
+		* more then at previous step.
+		*/
+		if ( l_len <= $MIN(a_srclen, l_ktbl->kwd.len) )
+			l_len = $MIN(a_srclen, l_ktbl->kwd.len);
+		else	continue;
 
-		/* Comparing <a_srclen> octets - a prefix in ABBREV mode, the whole keyword otherwise */
-		l_cmp = (a_flags & UTIL$K_LOOKUP_NCASE) ?
+
+		/* Comparing ... */
+		l_status = (a_flags & UTIL$K_LOOKUP_NCASE) ?
 #ifdef	WIN32
+
 			_strnicmp
 #else
 			strncasecmp
 #endif
-			(a_src, l_kwdp->kwd.sts, a_srclen) : memcmp(a_src, l_kwdp->kwd.sts, a_srclen);
+			(a_src, l_ktbl->kwd.sts, l_len) : memcmp(a_src, l_ktbl->kwd.sts, l_len);
 
-		if ( l_cmp )
-			continue;
-
-		if ( a_srclen == l_kwdp->kwd.len )			/* Exact full-length match always wins */
-			{
-			*a_kwd = l_kwdp;
-			return	STS$K_SUCCESS;
-			}
-
-		if ( l_best )						/* Second abbreviated candidate	*/
-			return	STS$K_ERROR;				/* Ambiguous abbreviation	*/
-
-		l_best = l_kwdp;
+		if ( !l_status &&  !(a_flags & UTIL$K_LOOKUP_ABBREV) )
+			break;
 		}
 
-	if ( !l_best )
+	/* No matching ... */
+	if ( l_status )
 		return	STS$K_ERROR;
 
-	*a_kwd = l_best;
+	*a_kwd = l_ktbl;
 
 	return	STS$K_SUCCESS;
 }
 
 
 
-/**
- * @brief __UTIL$UUID2STR - convert UUID from binary form to the human readable text string.
- *		implied zero byte (NIL, '\0') at end of the string.
+/*
+ *  DESCRIPTION: __UTIL$UUID2STR - convert UUID from binary form to the human readable text string.
  *
- * @param uuid: UUID to be converted
- * @param buf:	a buffer to accept text string
- * @param bufsz:a size of the output buffer
+ *  INPUT:
+ *	uuid:	UUID to be converted
+ *	buf:	a buffer to accept text string
+ *	bufsz:	a size of the output buffer
  *
- * @return -	length of the data in the output buffer.
+ *  RETURN:
+ *	length of the data in the output buffer.
  */
 inline static int	__util$uuid2str	(
 		void *	uuid,
@@ -2045,15 +2091,19 @@ int	len;
 
 
 
+
 /*
-**++
-**  ROUTINE NAME:	__util$fill
-**
-**  FUNCTIONAL DESCRIPTION:
-**	Fills a destination buffer with a pattern data. Zero-sized pattern
-**	is rejected (used to spin forever).
-**--
-*/
+ *  DESCRIPTION: __UTIL$FILL - Fill destination buffer with a pattern data.
+ *
+ *  INPUT:
+ *	dst:	destination buffer to be filled
+ *	dstsz:	a size of the destination buffer
+ *	src:	a buffer with the pattern data
+ *	srcsz:	a size of the pattern data
+ *
+ *  RETURN:
+ *	condition code
+ */
 static inline	int	__util$fill	(
 		void	*	dst,
 		int		dstsz,
@@ -2061,11 +2111,8 @@ static inline	int	__util$fill	(
 		int		srcsz
 			)
 {
-int	fillen;
+int	fillen = 0;
 char *	_dst = (char *) dst;
-
-	if ( !dst || !src || (srcsz < 1) || (dstsz < 0) )
-		return	STS$K_ERROR;
 
 	while ( dstsz )
 		{
@@ -2074,6 +2121,8 @@ char *	_dst = (char *) dst;
 
 		dstsz	-= fillen;
 		_dst	+= fillen;
+
+
 		}
 
 	return	STS$K_SUCCESS;
@@ -2081,18 +2130,20 @@ char *	_dst = (char *) dst;
 
 
 
-/**
- * @brief __UTIL$STRXOR - XORing octet source string with a given key , result is in destination buffer.
- *	<ctx> - keep context between consecutive calls. Should be set to -1 at first call.
+/*
+ *  DESCRIPTION: __UTIL$STRXOR - XORing octet source string with a given key , result is in destination buffer.
  *
- * @param key	- a buffer with the key
- * @param keysz	- a length of the key
- * @param src	- a buffer with the data to be XOR-ed
- * @param srcsz	- a lenth of the source data
- * @param dst	- a buffer to accept XOR-ed data
- * @param dstsz	- a size of the output buffer
- * @param ctx	- an internal context , can be NULL if it is not used
- * @return
+ *  INPUT:
+ *	key:	a buffer with the key
+ *	keysz:	a length of the key
+ *	src:	a buffer with the data to be XOR-ed
+ *	srcsz:	a length of the source data
+ *	dst:	a buffer to accept XOR-ed data
+ *	dstsz:	a size of the output buffer
+ *	ctx:	an internal context , can be NULL if it is not used
+ *
+ *  RETURN:
+ *	condition code
  */
 static inline	int	__util$strxor	(
 		void	*	key,

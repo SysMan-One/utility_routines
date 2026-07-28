@@ -1,9 +1,3 @@
-#ifndef	__CLI$ROUTINES__
-#define __CLI$ROUTINES__	1
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /*
 **++
@@ -35,6 +29,14 @@ extern "C" {
 */
 
 
+#ifndef	__CLI$ROUTINES__
+#define __CLI$ROUTINES__	1
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /*
  * Parameters (P1 - P8)
  */
@@ -57,7 +59,7 @@ extern "C" {
 #define	CLI$K_IPV6	5
 #define	CLI$K_OPT	7	/* Options - no value		*/
 #define	CLI$K_QSTRING	8	/* Quoted string		*/
-#define	CLI$K_UUID	9	/* Fucken UUID			*/
+#define	CLI$K_UUID	9	/* UUID				*/
 #define	CLI$K_DEVICE	0xa	/* A device in the /dev/	*/
 
 #define	CLI$K_KWD	0xb	/* A predefined keyword		*/
@@ -67,7 +69,7 @@ extern "C" {
 #define	CLI$M_LIST	2
 #define	CLI$M_PRESENT	4
 
-#define	CLI$S_MAXVERBL	32	/* Maximum verb's length	*/
+#define	CLI$SSZ_MAXVERB	32	/* Maximum verb's length	*/
 
 #ifndef	__ASC_TYPE__
 typedef	struct __asc__	{
