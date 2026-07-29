@@ -32,15 +32,6 @@
 **
 **	28-JUL-2021	RRL	Project reanimation.
 **
-**--
-*/
-
-/*
-**  Abstract: DCL-style command line (CLI$) parser - verb / parameter / qualifier matching
-**	against a command definition table, value type checking and action dispatch.
-**
-**  Modification history:
-**
 **	27-JUL-2026	DN	X.00-02 : Audit fixes.
 **				- cli$parse() now propagates the parse status instead of always
 **				  returning SUCCESS, and releases the half-built context on error;
@@ -51,8 +42,11 @@
 **				- wired up cli$check_keyword() (CLI$K_KWD) and initialised its 'ksel';
 **				- checked the cli$add_item2ctx() status in the qualifier path;
 **				- fixed the sub-verb recursion argument (argv + 1), the argc<1 message,
-**				  added a NULL guard to cli$cleanup(); header/example cleanup.
+**				  a NULL guard in cli$cleanup(); removed diagnostic-suppression pragmas
+**				  and the resulting -Wparentheses; unified the verb-length macro name.
+**--
 */
+
 
 
 #ifdef __cplusplus
@@ -63,6 +57,7 @@
 #define __unknown_params
 #define __optional_params ...
 #endif
+
 
 #include	<string.h>
 #include	<stdio.h>
@@ -456,7 +451,7 @@ char		*aptr, *vptr;
 		else	continue;
 
 		/* Is there '=' and value ? */
-		if ( vptr = strchr(aptr, '=') )
+		if ( (vptr = strchr(aptr, '=')) )
 			len = vptr - aptr;
 		else	len = strnlen(aptr, ASC$K_SZ);
 
@@ -592,7 +587,7 @@ char		*pverb;
 	/*
 	 * First at all we need to match  argv[1] in the verbs list
 	 */
-	len = strnlen(pverb, CLI$SZ_MAXVERB);
+	len = strnlen(pverb, CLI$SSZ_MAXVERB);
 
 	$IFTRACE(qlog, "argv[1]='%s'->[0:%d]='%.*s'", pverb, len, len, pverb);
 
@@ -851,6 +846,14 @@ CLI_VERB	*verb;
 CLI_KEYWORD	diff_log_opts [];
 int		sort_action	(CLI_CTX *clictx, void *arg);
 
+#include	<stdint.h>
+
+/* The definition tables below use the idiomatic {$ASCINI(..)} / {0} aggregate initialisers;
+ * -Wmissing-braces is a benign pedantic complaint about them and is scoped to this example only.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-braces"
+
 #include	<stdio.h>
 #include	<errno.h>
 
@@ -996,9 +999,9 @@ int	diff_action	( CLI_CTX *clictx, void *arg);
 int	show_action	( CLI_CTX *clictx, void *arg);
 
 CLI_VERB	show_what []  = {
-	{ {$ASCINI("volume")},	.params = show_volume_params, .quals = show_volume_quals , .act_rtn = show_action, .act_arg = SHOW$K_VOLUME },
-	{ {$ASCINI("vm")},	.params = show_user_params, .quals = show_vm_quals,  .act_rtn = show_action, .act_arg = SHOW$K_VM  },
-	{ {$ASCINI("user")},	.params = show_vm_params, .quals = show_user_quals , .act_rtn = show_action, .act_arg = SHOW$K_USER  },
+	{ {$ASCINI("volume")},	.params = show_volume_params, .quals = show_volume_quals , .act_rtn = show_action, .act_arg = (void *)(intptr_t) SHOW$K_VOLUME },
+	{ {$ASCINI("vm")},	.params = show_user_params, .quals = show_vm_quals,  .act_rtn = show_action, .act_arg = (void *)(intptr_t) SHOW$K_VM  },
+	{ {$ASCINI("user")},	.params = show_vm_params, .quals = show_user_quals , .act_rtn = show_action, .act_arg = (void *)(intptr_t) SHOW$K_USER  },
 	{0}};
 
 
@@ -1019,14 +1022,17 @@ int	diff_action	(
 int	status;
 ASC	fl1, fl2;
 
+	(void) arg;
+
 	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "Action routine is just called!");
 
-	status = cli$get_value(clictx, &diff_params, &fl1);
+	status = cli$get_value(clictx, &diff_params[0], &fl1);
 
-	status = cli$get_value(clictx, &diff_params, &fl2);
+	status = cli$get_value(clictx, &diff_params[1], &fl2);
 
 	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "Comparing %.*s vs %.*s", $ASC(&fl1), $ASC(&fl2));
 
+	(void) status;
 
 	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "Action routine has been completed!");
 
@@ -1038,6 +1044,8 @@ int	sort_action	(
 			void	*arg
 			)
 {
+	(void) arg;
+
 	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "sort action routine called");
 
 	return	STS$K_SUCCESS;
@@ -1045,9 +1053,9 @@ int	sort_action	(
 
 int	show_action	( CLI_CTX *clictx, void *arg)
 {
-int	what = (int) arg, status;
-ASC	val;
+int	what = (int)(intptr_t) arg;
 
+	(void) clictx;
 
 	switch	( what )
 		{
@@ -1106,6 +1114,8 @@ void	*clictx = NULL;
 	return 0;
 }
 
+
+#pragma GCC diagnostic pop
 
 #ifdef __cplusplus
     }

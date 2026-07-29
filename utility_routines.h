@@ -2395,6 +2395,53 @@ int	outlen = 0;
 
 #pragma	pack (pop)
 
+
+/*
+**  Message issuing on the FAO engine - the counterpart of __UTIL$PUTMSG and __UTIL$PUTMSGD.
+**
+**  The existing pair hands the text of a message record to vsnprintf; this one hands it to
+**  UTIL$FAOL. A message text is therefore an FAO control string and the whole directive set of the
+**  engine is open to it - fixed-width fields !n<...!>, zero-filled numbers !nZL, counted strings
+**  !AC, repetition !n*c, the plural !%S - none of which the C run-time library offers.
+**
+**  The registry is shared: the records are those established by __UTIL$INIMSG and located by
+**  __UTIL$GETMSG, so a facility already carrying a message table needs no change beyond the text
+**  of its messages. The two forms of text are not interchangeable: to FAO the per cent sign is an
+**  ordinary character and the exclamation mark is the escape, so a table is converted as a whole.
+**
+**  The parameters are passed as an array, not as a variable list: a variable list cannot be
+**  forwarded to UTIL$FAOL, and the engine accepts an array anyway. The $PUTMSG_FAO macro hides
+**  this, assembling a compound literal and deriving its length at translation time. Every
+**  parameter is to be cast to fao_prm_t by the caller, as UTIL$FAO requires: a pointer does not
+**  convert to an integer type implicitly.
+*/
+#include	"starlet.h"
+
+unsigned	__util$putmsg_fao	(unsigned sts, const fao_prm_t *prm, int prmcnt);
+unsigned	__util$putmsgd_fao	(unsigned sts, const char *mod, const char *func, unsigned line,
+						const fao_prm_t *prm, int prmcnt);
+
+/*
+**  Assembly of the parameter array and of its length. The leading zero lets the list be empty:
+**  a compound literal with no initializer is not admissible in standard C.
+*/
+#define	$FAO_PRM(...)		(((const fao_prm_t []) { 0, ## __VA_ARGS__ }) + 1)
+#define	$FAO_PRMCNT(...)	((int) (sizeof((const fao_prm_t []) { 0, ## __VA_ARGS__ })	\
+					/ sizeof(fao_prm_t)) - 1)
+
+#ifndef	NDEBUG
+	#define	$PUTMSG_FAO(sts, ...)	__util$putmsgd_fao((unsigned) (sts), __MODULE__,		\
+					__FUNCTION__, __LINE__, $FAO_PRM(__VA_ARGS__),			\
+					$FAO_PRMCNT(__VA_ARGS__))
+#else
+	#define	$PUTMSG_FAO(sts, ...)	__util$putmsg_fao((unsigned) (sts),				\
+					$FAO_PRM(__VA_ARGS__), $FAO_PRMCNT(__VA_ARGS__))
+#endif
+
+#define	$PUTMSGD_FAO(sts, ...)	__util$putmsgd_fao((unsigned) (sts), __MODULE__,			\
+					__FUNCTION__, __LINE__, $FAO_PRM(__VA_ARGS__),			\
+					$FAO_PRMCNT(__VA_ARGS__))
+
 #ifdef __cplusplus
 }
 #endif

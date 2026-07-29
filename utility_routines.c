@@ -2295,796 +2295,6 @@ int	olen = 0;
 
 
 
-/*
- * stc_msg_vformat
- *
- * The core formatting routine.
- * Do NOT use sprintf-style formatting codes in
- * message strings! Use the formatting directives
- * below:
- * !A{D, Z, C}
- * !U{Q, L, W, B} = unsigned quad\int64, int32, short, byte
- * !S{Q, L, W, B} = signed quad\int64, int32, short, byte
- * !X{Q, L, W, B} = hexadecimal quad\int64, int32, short, byte
- * !P = pointer
- * !T = time (DD-MMM-YYYY HH:MM:SS)
- * !D = date (DD-MMM-YYYY)
- * !! = exclamation point
- */
-#ifdef	WIN32
-#define	snprintf(buf, len, format,...)	_snprintf_s(buf, len, len, format, __VA_ARGS__)
-#endif
-
-static int	__util$vfao (char *a_fmt, char *a_buf, size_t a_bufsz, va_list a_ap)
-{
-int	l_len;
-char	*outp = a_buf;
-
-	/* Reserve one octet for the terminating NUL so that '*outp = 0' below never overruns <a_buf> */
-	if ( !a_bufsz )
-		return	0;
-	a_bufsz--;
-
-	for ( ; (a_bufsz && *a_fmt); )
-		{
-		if (*a_fmt != '!')
-			{
-			*outp++ = *a_fmt++;
-			a_bufsz--;
-
-			continue;
-			}
-
-		if ( !(*(++a_fmt)) )
-			break;
-
-		/* !!
-		*/
-		if (*a_fmt == '!')
-			{
-			*outp++ = *a_fmt++;
-			a_bufsz--;
-
-			continue;
-			}
-
-		/* !X{L, W, B}, U{L, W, B}, S{L, W, B}, Q{L, W, B}
-		*/
-		if (*a_fmt == 'U' || *a_fmt == 'X' || *a_fmt == 'S' )
-			{
-			uint64_t l_val = 0;
-
-			if (*(a_fmt+1) == 'B')
-				{
-				l_val = va_arg(a_ap, int);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%02X" : (*a_fmt == 'U') ? "%3u" : "%3d"),
-					(unsigned char) l_val);
-				}
-			else if (*(a_fmt + 1) == 'W')
-				{
-				l_val = va_arg(a_ap, int);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%04X" : ( *a_fmt == 'U') ? "%5u" : "%6d"),
-					(uint16_t) l_val);
-				}
-			else if (*(a_fmt + 1) == 'L')
-				{
-				l_val = va_arg(a_ap, uint32_t);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%08X": ( *a_fmt == 'U') ? "%u" : "%d"),
-					(uint32_t) l_val);				/* %d re-reads the same 32-bit pattern as signed */
-
-				}
-			else if (*(a_fmt + 1) == 'Q')
-				{
-				l_val = va_arg(a_ap, uint64_t);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%016llx": ( *a_fmt == 'U') ? "%llu" : "%lld"),
-					(unsigned long long) l_val);			/* %lld re-reads the same 64-bit pattern as signed */
-
-				}
-			else	continue;
-
-			if ( l_len < 0 )
-				break;
-
-			if ( (size_t) l_len >= a_bufsz )
-				l_len = a_bufsz - 1;
-
-			outp	+= l_len;
-			a_bufsz	-= l_len;
-			a_fmt	+= 2;
-
-			continue;
-			}
-
-
-
-
-		/* !P
-		*/
-		if (*a_fmt == 'P')
-			{
-			if ( 0 > (l_len = snprintf(outp, a_bufsz, "@%p", va_arg(a_ap, void *))) )
-				break;
-
-			if ( (size_t) l_len >= a_bufsz )
-				l_len = a_bufsz - 1;
-
-			outp	+= l_len;
-			a_bufsz	-= l_len;
-			a_fmt	+= 1;
-
-			continue;
-			}
-
-		/* !AD, !AC, !AZ ...	*/
-		if (*a_fmt == 'A')
-			{
-			unsigned int l_slen = 0;
-			char *l_ptr;
-
-			if (*(a_fmt+1) == 'D')
-				{
-				l_slen	= va_arg(a_ap, unsigned int);
-				l_ptr	= va_arg(a_ap, char *);
-
-				}
-			else if (*(a_fmt+1) == 'Z')
-				{
-				l_ptr	= va_arg(a_ap, char *);
-				l_slen	= (unsigned int) strnlen(l_ptr, a_bufsz);
-				}
-			else if (*(a_fmt+1) == 'C')
-				{
-				l_ptr	= va_arg(a_ap, char *);
-				l_slen	= *(l_ptr++);
-				}
-			else	continue;
-
-			if (l_slen >= (unsigned int) a_bufsz)
-				l_slen = (unsigned int)a_bufsz - 1;
-
-			memcpy(outp, l_ptr, l_slen);
-
-			outp	+= l_slen;
-			a_bufsz	-= l_slen;
-			a_fmt	+= 2;
-
-			continue;
-			}
-
-		// Unrecognized directive here, just loop back up to the top
-		} /* while bufsz > 0 && *fmt != null char */
-
-	*outp = '\0';
-
-	return (outp - a_buf);
-}
-
-
-
-int	__util$fao (void *a_fmt, void *a_buf, size_t a_bufsz, ...)
-{
-va_list l_ap;
-int l_result;
-
-	va_start(l_ap, a_bufsz);
-	l_result = __util$vfao((char *) a_fmt, (char*) a_buf, a_bufsz, l_ap);
-	va_end(l_ap);
-
-	return l_result;
-}
-
-
-
-
-
-
-
-/*
- * Emulate VMS system services SYS$FAOL and SYS$NUMTIM (as SYS_FAOL and
- * SYS_NUMTIM)
- *
- * The following FAO directives are supported:
- *     !Sx !Ux !Zx !Ox !%S !%D !%T !AS !AZ !AC !AD !AF !n*c
- *
- * Times are represented as pointers to time_t values rather than
- * pointers to VMS time structures.
- *
- * Revised:	1-NOV-1995		Fix bug in !XL processing.
- * Revised:	3-JAN-1995		Fix bug in NUMTIM emulation (month #).
- * Revised:	15-FEB-2024	RRL	Reorganizing code to be more readable, removed SYS_NUMTIM.
- */
-
-
-
-#ifndef VMS
-typedef struct tm tm_t;
-#endif
-
-
-#define SS$_BUFFEROVF 1537
-#define STS$K_SUCCESS 1
-#define SS$_BADPARAM 20
-
-#define MIN_INT (-2147483647 - 1)					/* INT_MIN as a signed int, avoids sign-compare */
-#define MIN_INT_STR "-2147483648"
-#define MIN_INT_STR_L 11
-
-#define LONG unsigned long
-#define APPEND_C(c) if (j<ctx->outsize) ctx->out[j++]=c; else \
-	{ ctx->outused=j; return SS$_BUFFEROVF; }
-
-typedef struct { unsigned short l; char *a; } decsriptor_s;
-typedef struct ctl_buf_t {
-    char *out;				/* Output buffer */
-    LONG *prmlst;			/* Parameter list */
-    int ctloffset;
-    int outused;			/* Output position */
-    int outsize;			/* Size of output buffer */
-    int width_type;
-    int width;
-    int value;				/* last value formatted for !%s */
-} CTL$_BUF;
-
-static int s_output_directive ( int d1, int d2, CTL$_BUF *ctx );
-static int s_fmt_signed ( int value, CTL$_BUF *ctx );
-static int s_fmt_unsigned ( LONG value, int base, char fill, CTL$_BUF *ctx );
-static int s_fmt_pad ( char fill, int cur, CTL$_BUF *ctx );
-
-/************************************************************************/
-static int s_fmt_time (
-			int	date_flag,
-		struct timespec	*a_now,
-		CTL$_BUF	*ctx
-			)
-{
-static const char *l_mon [] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
-int	j, k, l_len;
-char	l_buf[32];
-struct tm l_tm = {0};
-struct timespec l_now;
-
-	if ( !a_now )
-		s___time(&l_now);
-	else	l_now = *a_now;
-
-#ifdef	WIN32
-	localtime_s(&l_tm, (time_t *) &l_now);
-#else
-	localtime_r((time_t *) &l_now, &l_tm);
-#endif
-
-	/* !%D -> "DD-MMM-YYYY",  !%T -> "DD-MMM-YYYY HH:MM:SS" */
-	if ( date_flag )
-		l_len = snprintf(l_buf, sizeof(l_buf), "%02d-%3s-%04d",
-			l_tm.tm_mday, l_mon[l_tm.tm_mon % 12], 1900 + l_tm.tm_year);
-	else	l_len = snprintf(l_buf, sizeof(l_buf), "%02d-%3s-%04d %02d:%02d:%02d",
-			l_tm.tm_mday, l_mon[l_tm.tm_mon % 12], 1900 + l_tm.tm_year,
-			l_tm.tm_hour, l_tm.tm_min, l_tm.tm_sec);
-
-	if ( l_len < 0 )
-		return	SS$_BADPARAM;
-
-	/* Copy the formatted string into the FAOL output buffer, honouring its size */
-	j = ctx->outused;
-	for ( k = 0; k < l_len; k++ )
-		{
-		if ( j >= ctx->outsize )
-			return	ctx->outused = j, SS$_BUFFEROVF;
-
-		ctx->out[j++] = l_buf[k];
-		}
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-
-
-
-
-int	__util$faol (
-	const decsriptor_s	*a_ctlstr,
-			int	*a_outlen,
-		decsriptor_s	*a_outbuf,
-			LONG	*a_prmlst
-		)
-{
-char	*l_ctl, *l_out;
-CTL$_BUF l_ctx;
-int	i, j, k, l_len, l_outsize, l_repcnt, l_rc;
-char	l_d1, l_d2;
-
-	/*
-	* Setup for scanning string.
-	*/
-	l_len = a_ctlstr->l;
-	l_ctl = a_ctlstr->a;
-	l_ctx.outsize = l_outsize = a_outbuf->l;
-	l_ctx.out = l_out = a_outbuf->a;
-	l_ctx.prmlst = a_prmlst;
-	l_ctx.value = 0;
-
-	/*
-	* Main loop, i is position in control string, j = output point.
-	*/
-	for (j = i = 0;  i < l_len; )
-		{
-		/*
-		 * Copy characters until a directive encountered.
-		 */
-		while ( l_ctl[i] != '!' )
-			{
-			if ( j < l_outsize )
-				{
-				l_out[j++] = l_ctl[i++];
-
-				if ( i >= l_len )
-					return *a_outlen = j, STS$K_SUCCESS;		/* All done */
-				}
-			else	return	*a_outlen = l_outsize, SS$_BUFFEROVF;		/* Output buffer full */
-			}
-
-
-		/*
-		* Parse directive, first parse field length/repeat count
-		*/
-		l_ctx.width = l_ctx.width_type = 0;
-		l_repcnt = 0;
-
-		for ( i++; i < l_len; i++ )
-			{
-			if ( l_ctl[i] == '#' )
-				{
-				l_ctx.width_type = 2;
-				break;
-				}
-			else if ( (l_ctl[i] >= '0') && (l_ctl[i] <= '9') )
-				{
-				l_ctx.width_type = 1;
-				l_ctx.width = (l_ctx.width * 10) + (int) l_ctl[i] - (int) '0';
-
-				if ( l_ctx.width > 0x0ffff )
-					return SS$_BADPARAM + 2;
-				}
-			else if ( l_ctl[i] == '(' )
-				{
-				/* Width field is really repeat count */
-				l_repcnt = l_ctx.width;
-				l_ctx.width = 0;
-
-				for ( i++; i < l_len; i++ )
-					{
-					if ( l_ctl[i] == ')' )
-						break;
-
-					if ( l_ctl[i] == '#' )
-						{
-						l_ctx.width_type = 2;
-						break;
-						}
-					else if ( (l_ctl[i] >= '0') && (l_ctl[i] <= '9') )
-						{
-						l_ctx.width_type = 1;
-						l_ctx.width = (l_ctx.width * 10) + (int) l_ctl[i] - (int) '0';
-
-						if ( l_ctx.width > 0x0ffff )
-							return SS$_BADPARAM+4;
-						}
-					}
-				}
-			else	break;	/* end of numerics */
-			}
-
-		if ( i >= l_len )
-			return SS$_BADPARAM + 6;
-
-		if ( l_repcnt == 0 )
-			l_repcnt = 1;
-		else if (l_repcnt < 0)
-			l_repcnt = *l_ctx.prmlst++;
-
-		if ( l_ctx.width_type == 2 )
-			l_ctx.width = *l_ctx.prmlst++;
-
-		/*
-		* Interpret directive.
-		*/
-		l_d1 = l_ctl[i++];
-		l_d2 =  ( i < l_len ) ? l_ctl[i] : '\0';
-
-		l_ctx.outused = j;
-
-		for ( k = 0; k < l_repcnt; k++ )
-			{
-			if ( 1 != (l_rc = s_output_directive ( l_d1, l_d2, &l_ctx )) )
-				return	*a_outlen = l_ctx.outused, l_rc;
-			}
-
-		j = l_ctx.outused;
-		i += l_ctx.ctloffset;
-		}
-
-	return	*a_outlen = j, STS$K_SUCCESS;
-}
-/************************************************************************/
-/* Process single directive.
- */
-static int s_output_directive ( int d1, int d2, CTL$_BUF *ctx )
-{
-int	j, value, l_rc;
-LONG	uvalue;
-char	*out;
-
-	j = ctx->outused;
-	ctx->ctloffset = 1;
-
-	/* printf("output directive d1: %d(%c), d2: %d(%c)\n", d1, d1, d2, d2 ); */
-	switch ( d1 )
-		{
-		case 'A':
-			{	/* Ascii output */
-			int	srclen;
-			char	*src;
-
-			if ( d2 == 'Z' )
-				{
-				for ( src = (char *) *ctx->prmlst++; *src; src++ )
-					{APPEND_C ( *src );}
-				break;
-
-				}
-			else if ( d2 == 'D' )
-				{
-				srclen = *ctx->prmlst++;
-				src = (char *) *ctx->prmlst++;
-				}
-			else if ( d2 == 'C' )
-				{
-				src = (char *) *ctx->prmlst++;
-				srclen = (unsigned char) *src++;
-				}
-			else if ( d2 == 'S' )
-				{
-				decsriptor_s *desc = (decsriptor_s *) *ctx->prmlst++;
-				srclen = desc->l; src = desc->a;
-				}
-			else if ( d2 == 'F' )
-				{
-				srclen = *ctx->prmlst++;
-
-				for ( src = (char *) *ctx->prmlst++; srclen > 0; srclen-- )
-					{
-					if ( isprint(*src) )
-						{ APPEND_C(*src); }
-					else	{ APPEND_C('.'); }
-
-					src++;
-					}
-
-				break;
-
-				}
-			else	return SS$_BADPARAM + 8;
-
-			if ( srclen > (ctx->outsize-j) )
-				{
-				for ( ; srclen > 0; srclen-- )
-					{ APPEND_C(*src); (void) *src++; }
-				}
-			else	{
-				for ( out = ctx->out; srclen > 0; srclen-- )
-					out[j++] = *src++;
-				}
-			}
-
-			break;
-
-
-		case 'S':
-			{	/* Blank filled signed decimal */
-			value = (int) *ctx->prmlst++;
-
-			if ( d2 == 'L' )
-				{
-				}
-			else if ( d2 == 'B' )
-				{
-				value = (value & 255);
-				if ( value > 127 ) value |= 0xffffff00;
-				}
-			else if ( d2 == 'W' )
-				{
-				value = (value & 0x0ffff);
-				if ( value > 0x7fff )
-					value |= 0xffff0000;
-				}
-			else	{ return SS$_BADPARAM + 10; }
-
-			ctx->value = value;
-			return	l_rc = s_fmt_signed ( value, ctx );
-			}
-
-		case 'U':
-		case 'Z':
-		case 'O':
-		case 'X':
-			{
-			int	l_base = 10;
-			char	l_fill = '0';
-
-			uvalue = *ctx->prmlst++;
-
-			if ( d1 == 'U' )
-				l_fill = ' ';
-			else if  ( d1 == 'X' )
-				l_base = 16;
-			else if ( d1 == 'O' )
-				l_base = 8;
-
-			if ( d2 == 'B' )
-				uvalue = (uvalue & 255);
-			else if ( d2 == 'W' )
-				uvalue = (uvalue & 0x0ffff);
-			else if ( d2 == 'L' )
-				uvalue = (uvalue & 0xffffffffUL);
-			else if ( d2 == 'Q' )
-				;						/* Full 64-bit value, no masking */
-			else	return SS$_BADPARAM + 12;
-
-			ctx->value = (uvalue == 1) ? 1 : 0;
-			return	l_rc = s_fmt_unsigned ( uvalue, l_base, l_fill, ctx );
-			}
-
-		case '/':	/* newline */
-			ctx->ctloffset = 0;
-			APPEND_C ( '\r' )
-			APPEND_C ( '\n' )
-			break;
-
-		case '_':	/* tab */
-			ctx->ctloffset = 0;
-			APPEND_C ( '\t' );
-			break;
-
-		case '^': 	/* form feed */
-			ctx->ctloffset = 0;
-			APPEND_C ( '\014' );
-			break;
-
-		case '!':	/* exclamation mark */
-			ctx->ctloffset = 0;
-			APPEND_C ( '!' );
-			break;
-
-		case '%':	/* system call, date-time */
-			{
-			if ( d2 == 'D' || d2 == 'T' )
-				return	l_rc = s_fmt_time ( (d2=='D') ? 1 : 0, (struct timespec *) *ctx->prmlst++, ctx );
-			else if ( d2 == 'S' )
-				{
-				if ( (j > 0) && (ctx->value != 1) )
-					{
-					char	l_prev = ctx->out[j-1];
-
-					if ( _tolower(l_prev) == l_prev )
-						{APPEND_C('s');}
-					else	{ APPEND_C('S'); }
-					}
-				}
-			else	return SS$_BADPARAM + 14;
-			}
-			break;
-
-		case '*': 	/* Repeat character */
-			return l_rc = s_fmt_pad ( (char) d2, j, ctx );
-		default:
-
-			return SS$_BADPARAM+16;
-		}
-
-	if ( ctx->width_type )
-		return l_rc = s_fmt_pad ( ' ', j, ctx );
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-/************************************************************************/
-static int s_fmt_pad ( char fill, int cur, CTL$_BUF *ctx )
-{
-char *	out = ctx->out;							/* Always valid - both branches below write through <out> */
-int	j, limit;
-
-	if ( cur >= 0 )
-		{
-		limit = ctx->width + ctx->outused;
-
-		if ( limit < cur )
-			{ cur = ctx->outused; fill = '*'; ctx->width_type =  (-1); }
-		}
-	else	{
-		/* Right justify, fil field to (-cur) spaces */
-		limit = ctx->width + ctx->outused + cur;
-
-		if ( limit < ctx->outused )
-			{ limit = limit-cur; fill = '*'; ctx->width_type = (-1); }
-
-		cur = ctx->outused;
-		}
-
-	if ( limit <= ctx->outsize )
-		{
-		ctx->outused = limit;
-
-		for ( j = cur; j < limit; )
-			out[j++] = fill;
-
-		return STS$K_SUCCESS;
-		}
-
-
-	ctx->outused = ctx->outsize;
-
-	for ( j = cur; j < ctx->outused; )
-		out[j++] = fill;
-
-	return SS$_BUFFEROVF;
-
-}
-
-/************************************************************************/
-static int s_fmt_signed ( int value, CTL$_BUF *ctx )
-{
-int	j, length, status, negative, digit_stack[16];			/* 'value' is a 32-bit int - 10 digits max */
-
-	/*
-	* Test for zero case (algorithm below results in null string on zero).
-	* If not zero, normalize negative number (should test for MIN_INT).
-	*/
-	j = ctx->outused;
-
-	if ( !value )
-		{
-		if ( ctx->width_type )
-			{
-			status = s_fmt_pad ( ' ', -1, ctx );
-
-			if ( status != 1 )
-				return status;
-
-			j = ctx->outused;
-
-			if ( ctx->width_type == -1 )
-				return STS$K_SUCCESS;
-			}
-
-		APPEND_C ( '0' );
-		return	ctx->outused = j, STS$K_SUCCESS;
-		}
-	else if ( value < 0 )
-		{
-		/* In 2's complement format, the negative of the min. integer can
-		* not be represented in the same number of bits, check for that case.
-		*/
-		if ( value == MIN_INT )
-			{
-			char *str;
-
-			if ( ctx->width_type )
-				{
-				if ( 1 != (status = s_fmt_pad ( ' ', -MIN_INT_STR_L, ctx )) )
-					return status;
-
-				if ( ctx->width_type == -1 )
-					return STS$K_SUCCESS;
-
-				j = ctx->outused;
-				}
-
-			for ( str = MIN_INT_STR; *str; str++ )
-				{APPEND_C ( *str );}
-
-			return	ctx->outused = j, STS$K_SUCCESS;
-			}
-
-		negative = 1;
-		value = -value;
-		}
-	else	negative = 0;
-
-
-	/*
-	*  Build stack of successively higher order digits.
-	*/
-	for (length = 0; value > 0; value = value / 10)
-		digit_stack[length++] = value;
-
-	if ( ctx->width_type )
-		{
-		if ( 1 != (status = s_fmt_pad ( ' ', -(length+negative), ctx )) )
-			return status;
-
-		if ( ctx->width_type == -1 )
-			return STS$K_SUCCESS;
-
-		j = ctx->outused;
-		}
-
-	/*
-	* pop stack and make lowest digit an ascii char in output buffer.
-	*/
-	if ( negative )
-		{APPEND_C('-');}
-
-	for ( digit_stack[length] = 0; length > 0; length-- )
-		{APPEND_C( (char) ((digit_stack[length - 1] - (digit_stack[length] * 10)) + 48) );}
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-/************************************************************************/
-static int s_fmt_unsigned ( LONG value, int base, char fill, CTL$_BUF *ctx )
-{
-int	j, status, length;
-LONG	digit_stack[24];						/* holds the full 64-bit running value at each step */
-const char *ascdigit = "0123456789ABCDEF";
-
-	/*
-	* Test for zero case (algorithm below results in null string on zero).
-	*/
-	j = ctx->outused;
-
-	if ( !value )
-		{
-		if ( ctx->width_type )
-			{
-			if ( 1 != (status = s_fmt_pad ( fill, -1, ctx )) )
-				return status;
-
-			if ( ctx->width_type == -1 )
-				return STS$K_SUCCESS;
-
-			j = ctx->outused;
-			}
-
-		APPEND_C ( '0' );
-		ctx->outused = j;
-		return 1;
-		}
-
-	/*
-	*  Build stack of successively higher order digits.
-	*/
-	for (length=0; value > 0; value = value/base)
-		digit_stack[length++] = value;
-
-	if ( ctx->width_type )
-		{
-		if ( 1 != (status = s_fmt_pad ( fill, -(length), ctx )) )
-			return status;
-
-		if ( ctx->width_type == -1 )
-			return STS$K_SUCCESS;
-
-		j = ctx->outused;
-		}
-
-
-	/*
-	* pop stack and make lowest digit an ascii char in output buffer.
-	*/
-	for ( digit_stack[length] = 0; length > 0; length-- )
-		{
-		int l_num = digit_stack[length - 1] -(digit_stack[length] * base);
-
-		APPEND_C ( ascdigit[l_num] );
-		/* APPEND_C( (char)
-		((digit_stack[length-1]-(digit_stack[length]*base)) + 48) ); */
-		}
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-
-
-
-
-
-
 #if __util_DEBUG__
 
 int	main (int argc, char *argv[])
@@ -3290,6 +2500,164 @@ char	buf[1024];
 
 
 
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**	Assembles a message with the FAO engine and writes it to the log descriptor.
+**
+**	The prefix is identical to the one __UTIL$PUTMSGD lays down - the date, the time to the
+**	millisecond, the identifier of the process and, where the caller named them, the module, the
+**	routine and the line. The body is the text of the message record,
+**	which is an FAO control string, formatted with the parameters supplied.
+**
+**	The line is built in two passes over one buffer: the engine writes from the beginning of the
+**	descriptor it is given, so the second pass is handed a descriptor over what the first left.
+**
+**	A record that cannot be found yields the bare rendering of the condition value, in the manner
+**	of __UTIL$PUTMSGD, so that a message missing from the table still names its condition.
+**
+**  INPUT PARAMETERS:
+**	sts	- condition value.
+**	mod	- module name, or NULL to leave the position out of the prefix.
+**	func	- routine name, disregarded when mod is NULL.
+**	line	- line number, disregarded when mod is NULL.
+**	prm	- array of parameters of the message text, or NULL when it calls for none.
+**	prmcnt	- number of parameters in the array.
+**
+**  OUTPUT PARAMETERS:
+**	None; the message is written to g_logoutput.
+**
+**  RETURNS:
+**	The value of sts, unchanged.
+**--
+*/
+static unsigned	__util$putmsg_fao_i	(
+			unsigned		sts,
+			const char *		mod,
+			const char *		func,
+			unsigned		line,
+			const fao_prm_t *	prm,
+			int			prmcnt
+				)
+{
+EMSG_RECORD	*msgrec;
+fao_desc_t	dsc;
+struct timespec	now;
+unsigned short	len = 0, tot = 0;
+char		out [1024], sev [2];
+ssize_t		rc;
+
+static const char	sevlet [] = "WSEIF???";
+
+/*
+**  The prefix is the one the existing pair lays down, "DD-MM-YYYY HH:MM:SS.msec <PID/TID> ". The
+**  whole of the date and the time is one directive, !%L, which takes the timespec as it stands and
+**  needs neither a breakdown of the time nor the seven parameters the equivalent by parts would.
+**  The two pairs write to one descriptor, so their prefixes agree to the character.
+*/
+const char	lfao [] = {"!%L !6SL "},
+		mfao [] = {"!%L !6SL [!AZ\\!AZ:!UL] "};
+
+	sev[0] = sevlet[$SEV(sts)];
+	sev[1] = '\0';
+
+	s___time(&now);
+
+	dsc.dsc$w_length	= (unsigned short) sizeof(out);
+	dsc.dsc$b_dtype		= 0;
+	dsc.dsc$b_class		= 0;
+	dsc.dsc$a_pointer	= out;
+
+	if ( mod )
+		util$fao(mfao, &len, &dsc, (fao_prm_t) &now, (fao_prm_t) __gettid(),
+				(fao_prm_t) mod, (fao_prm_t) func, (fao_prm_t) line);
+	else	util$fao(lfao, &len, &dsc, (fao_prm_t) &now, (fao_prm_t) __gettid());
+
+	tot			= len;
+	dsc.dsc$a_pointer	= out + tot;
+	dsc.dsc$w_length	= (unsigned short) (sizeof(out) - tot);
+	len			= 0;
+
+	if ( 1 & __util$getmsg(sts, &msgrec) )
+		util$faol(msgrec->text, &len, &dsc, prm, prmcnt);
+	else	util$fao("%NONAME-!AZ-NOMSG, condition !XL, facility !UL, message !UL", &len, &dsc,
+				(fao_prm_t) sev, (fao_prm_t) sts, (fao_prm_t) $FAC(sts),
+				(fao_prm_t) ($MSG(sts) & 0x1FFF));
+
+	tot += len;
+
+	if ( tot >= sizeof(out) )
+		tot = sizeof(out) - 1;
+
+	out[tot++] = '\n';
+
+	rc = write(g_logoutput, out, (size_t) tot);
+	(void) rc;
+
+	return	sts;
+}
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**	Issues the message of a condition value without naming the place at which it was detected.
+**	See __UTIL$PUTMSG_FAO_I for the particulars.
+**
+**  INPUT PARAMETERS:
+**	sts	- condition value.
+**	prm	- array of parameters of the message text, or NULL.
+**	prmcnt	- number of parameters in the array.
+**
+**  OUTPUT PARAMETERS:
+**	None.
+**
+**  RETURNS:
+**	The value of sts, unchanged.
+**--
+*/
+unsigned	__util$putmsg_fao	(
+			unsigned		sts,
+			const fao_prm_t *	prm,
+			int			prmcnt
+				)
+{
+	return	__util$putmsg_fao_i(sts, NULL, NULL, 0, prm, prmcnt);
+}
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**	Issues the message of a condition value, naming the module, the routine and the line at which
+**	it was detected. See __UTIL$PUTMSG_FAO_I for the particulars.
+**
+**  INPUT PARAMETERS:
+**	sts	- condition value.
+**	mod	- module name, not NULL.
+**	func	- routine name, not NULL.
+**	line	- line number.
+**	prm	- array of parameters of the message text, or NULL.
+**	prmcnt	- number of parameters in the array.
+**
+**  OUTPUT PARAMETERS:
+**	None.
+**
+**  RETURNS:
+**	The value of sts, unchanged.
+**--
+*/
+unsigned	__util$putmsgd_fao	(
+			unsigned		sts,
+			const char *		mod,
+			const char *		func,
+			unsigned		line,
+			const fao_prm_t *	prm,
+			int			prmcnt
+				)
+{
+	return	__util$putmsg_fao_i(sts, mod, func, line, prm, prmcnt);
+}
+
 #ifdef	__MAIN_FOR_DEBUG__
 
 int	main (int argc, char *argv[])
@@ -3315,5 +2683,3 @@ const OPTS l_optstbl [] =					/* General CLI options		*/
 	__util$showparams(l_optstbl);
 }
 #endif	/* __MAIN_FOR_DEBUG__ */
-
-

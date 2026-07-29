@@ -45,8 +45,17 @@
 **		  !^  - form feed	!!  - literal '!'
 **		  !%S - 's' if the last converted number != 1
 **		  !%T - time,  hh:mm:ss.cc  (UTC + FAO$K_TZOFFSET)
-**		  !%D - date,  dd-MMM-yyyy hh:mm:ss.cc
+**		  !%D - date,  dd-mm-yyyy hh:mm:ss
 **			(parameter: 0 - current time, else time_t *)
+**		  !%L - log stamp, dd-mm-yyyy hh:mm:ss.mmm
+**			(parameter: 0 - current time with a zero
+**			fraction, else struct timespec *). A time_t
+**			carries no fraction of a second, which is why
+**			this one takes a timespec.
+**
+**		UTIL$ASCTIM keeps the OpenVMS rendering,
+**		dd-MMM-yyyy hh:mm:ss.cc: it is the analogue of
+**		$ASCTIM and owes its format to that service.
 **
 **		Width / repetition (n - decimal number or '#' to take
 **		the value from the parameter list):
@@ -660,6 +669,21 @@ unsigned l_doy = (153 * (a_mon + (a_mon > 2 ? (unsigned)-3 : 9)) + 2) / 5
 	return	l_era * 146097 + (int64_t) l_doe - 719468;
 }
 
+/*
+**  Rendering selected by S_FAO$PUT_TIME.
+*/
+#define	FAO$K_PUTTIME	0	/* !%T - hh:mm:ss.cc */
+#define	FAO$K_PUTDATE	1	/* !%D - dd-mm-yyyy hh:mm:ss */
+#define	FAO$K_PUTSTAMP	2	/* !%L - dd-mm-yyyy hh:mm:ss.mmm, the log stamp */
+#define	FAO$K_PUTVMS	3	/* dd-MMM-yyyy hh:mm:ss.cc, the OpenVMS rendering of UTIL$ASCTIM */
+
+/*
+**  Divisor of the fraction of a second in the log stamp. It is the one the UTIL$ module applies,
+**  a shift by twenty rather than a division by a million, so that the stamp of !%L and that of
+**  __UTIL$PUTMSGD agree to the character.
+*/
+#define	FAO$K_MSECDIV	(1024 * 1024)
+
 static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 {
 	s_fao$put_raw (a_ctx, &s_dig2 [a_val * 2], 2);
@@ -667,7 +691,8 @@ static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 
 /*
 **++
-**  S_FAO$PUT_TIME - emit time (!%T) or date+time (!%D).
+**  S_FAO$PUT_TIME - emit time (!%T), date+time (!%D) or the
+**	log stamp (!%L).
 **
 **	The civil date is derived from the UNIX epoch count by the
 **	module itself (proleptic Gregorian calendar, inverse of the
@@ -676,9 +701,22 @@ static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
-**	a_prm	- FAO parameter: 0 - current time, else time_t *
-**	a_date	- non-zero: !%D (dd-MMM-yyyy hh:mm:ss.cc),
-**		  zero: !%T (hh:mm:ss.cc)
+**	a_prm	- FAO parameter. For !%T and !%D: 0 - current time,
+**		  else time_t *. For !%L: 0 - current time with a zero
+**		  fraction, else struct timespec *.
+**	a_mode	- FAO$K_PUTTIME:  !%T (hh:mm:ss.cc),
+**		  FAO$K_PUTDATE:  !%D (dd-mm-yyyy hh:mm:ss),
+**		  FAO$K_PUTSTAMP: !%L (dd-mm-yyyy hh:mm:ss.mmm),
+**		  FAO$K_PUTVMS:   dd-MMM-yyyy hh:mm:ss.cc
+**
+**	The month of !%D and !%L is numeric. Only !%L carries the
+**	fraction of a second, and only it therefore takes a timespec:
+**	a time_t holds no fraction at all.
+**
+**	FAO$K_PUTVMS answers to no directive. It preserves the
+**	OpenVMS rendering for UTIL$ASCTIM, which is the analogue of
+**	$ASCTIM and owes its output format to that service rather
+**	than to the taste of the caller.
 **
 **  OUTPUT:
 **	NONE
@@ -687,12 +725,22 @@ static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 **	NONE
 **--
 */
-static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
+static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_mode)
 {
+const struct timespec *l_ts;
 int64_t	l_now, l_days, l_secs, l_year;
-unsigned l_hh, l_mm, l_ss, l_mon, l_day;
+unsigned l_hh, l_mm, l_ss, l_mon, l_day, l_msec = 0;
 
-	if ( a_prm )
+	if ( a_mode == FAO$K_PUTSTAMP )
+		{
+		if ( (l_ts = (const struct timespec *) a_prm) )
+			{
+			l_now	= (int64_t) l_ts->tv_sec;
+			l_msec	= (unsigned) (l_ts->tv_nsec / FAO$K_MSECDIV);
+			}
+		else	l_now = (int64_t) FAO$GETTIME ();
+		}
+	else if ( a_prm )
 		l_now = (int64_t) * (const fao_time_t *) a_prm;
 	else	l_now = (int64_t) FAO$GETTIME ();
 
@@ -711,17 +759,26 @@ unsigned l_hh, l_mm, l_ss, l_mon, l_day;
 	l_mm = (unsigned) ((l_secs / 60) % 60);
 	l_ss = (unsigned) (l_secs % 60);
 
-	if ( a_date )
+	if ( a_mode != FAO$K_PUTTIME )
 		{
 		s_fao$days_to_civil (l_days, &l_year, &l_mon, &l_day);
 
-		if ( l_day < 10 )
-			s_fao$put_chr (a_ctx, ' ');
-		else	s_fao$put_chr (a_ctx, (char)('0' + l_day / 10));
+		if ( a_mode == FAO$K_PUTVMS )
+			{
+			if ( l_day < 10 )
+				s_fao$put_chr (a_ctx, ' ');
+			else	s_fao$put_chr (a_ctx, (char)('0' + l_day / 10));
 
-		s_fao$put_chr (a_ctx, (char)('0' + l_day % 10));
-		s_fao$put_chr (a_ctx, '-');
-		s_fao$put_raw (a_ctx, s_months [l_mon - 1], 3);
+			s_fao$put_chr (a_ctx, (char)('0' + l_day % 10));
+			s_fao$put_chr (a_ctx, '-');
+			s_fao$put_raw (a_ctx, s_months [l_mon - 1], 3);
+			}
+		else	{
+			s_fao$put_2d  (a_ctx, l_day);
+			s_fao$put_chr (a_ctx, '-');
+			s_fao$put_2d  (a_ctx, l_mon);
+			}
+
 		s_fao$put_chr (a_ctx, '-');
 		s_fao$put_2d  (a_ctx, (unsigned) (l_year / 100));
 		s_fao$put_2d  (a_ctx, (unsigned) (l_year % 100));
@@ -733,7 +790,16 @@ unsigned l_hh, l_mm, l_ss, l_mon, l_day;
 	s_fao$put_2d  (a_ctx, l_mm);
 	s_fao$put_chr (a_ctx, ':');
 	s_fao$put_2d  (a_ctx, l_ss);
-	s_fao$put_raw (a_ctx, ".00", 3);
+
+	/* Only the log stamp and the OpenVMS rendering carry a fraction of a second */
+	if ( a_mode == FAO$K_PUTSTAMP )
+		{
+		s_fao$put_chr (a_ctx, '.');
+		s_fao$put_chr (a_ctx, (char)('0' + (l_msec / 100) % 10));
+		s_fao$put_2d  (a_ctx, l_msec % 100);
+		}
+	else if ( a_mode != FAO$K_PUTDATE )
+		s_fao$put_raw (a_ctx, ".00", 3);
 }
 
 /*
@@ -951,12 +1017,20 @@ char	l_fldbuf [FAO$K_FLDBUF];
 
 					case 'T':
 						s_fao$put_time (a_ctx,
-							s_fao$get_prm (l_prm), 0);
+							s_fao$get_prm (l_prm),
+							FAO$K_PUTTIME);
 						break;
 
 					case 'D':
 						s_fao$put_time (a_ctx,
-							s_fao$get_prm (l_prm), 1);
+							s_fao$get_prm (l_prm),
+							FAO$K_PUTDATE);
+						break;
+
+					case 'L':
+						s_fao$put_time (a_ctx,
+							s_fao$get_prm (l_prm),
+							FAO$K_PUTSTAMP);
 						break;
 
 					default:
@@ -1652,7 +1726,8 @@ char	*l_dig;
 	l_ctx.sts	= STS$K_SUCCESS;
 
 	if ( l_val >= 0 )			/* Absolute time	*/
-		s_fao$put_time (&l_ctx, (fao_prm_t) &l_tim, ! a_cvtflg);
+		s_fao$put_time (&l_ctx, (fao_prm_t) &l_tim,
+				(a_cvtflg) ? FAO$K_PUTTIME : FAO$K_PUTVMS);
 	else	{				/* Delta time		*/
 		l_mag	= - l_val;
 		l_secs	= l_mag % 86400;

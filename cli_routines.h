@@ -1,3 +1,9 @@
+#ifndef	__CLI$ROUTINES__
+#define __CLI$ROUTINES__	1
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
 **++
@@ -27,14 +33,6 @@
 **
 **--
 */
-
-
-#ifndef	__CLI$ROUTINES__
-#define __CLI$ROUTINES__	1
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 
 /*
@@ -69,7 +67,7 @@ extern "C" {
 #define	CLI$M_LIST	2
 #define	CLI$M_PRESENT	4
 
-#define	CLI$SZ_MAXVERB	32	/* Maximum verb's length	*/
+#define	CLI$SSZ_MAXVERB	32	/* Maximum verb's length	*/
 
 #ifndef	__ASC_TYPE__
 typedef	struct __asc__	{
