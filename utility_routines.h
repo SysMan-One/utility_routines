@@ -707,7 +707,7 @@ ENTRY *	_entold, *_entnew = (ENTRY *) ent;
 inline static int __util$remqent (void * que, void *ent, unsigned * count)
 {
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	_ent = (ENTRY *) ent, *_entleft;
+ENTRY *	_ent = (ENTRY *) ent, *_entleft, *_entright;
 
 	/*
 	 * Sanity check
@@ -734,8 +734,21 @@ ENTRY *	_ent = (ENTRY *) ent, *_entleft;
 	/*
 	** Main work ...
 	*/
-	_entleft = _ent->left;
-	_entleft->right = _ent->right;
+	/*
+	**  Either neighbour may be absent: the entry being removed can stand at the head of the queue,
+	**  at its tail, or be the only one there. Where a neighbour is absent it is the queue itself
+	**  that has to be re-pointed.
+	*/
+	_entleft  = _ent->left;
+	_entright = _ent->right;
+
+	if ( _entleft )
+		_entleft->right = _entright;
+	else	_que->head	= _entright;
+
+	if ( _entright )
+		_entright->left = _entleft;
+	else	_que->tail	= _entleft;
 
 	/*
 	 * Reset head & tail if queue is empty
@@ -1680,7 +1693,6 @@ char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
 
 unsigned	__util$crc32c	(unsigned int crc, const void *buf, size_t buflen);
 
-int	__util$fao		(void *fmt, void *buf, size_t bufsz, ...);
 int	__util$faohex		(const void *src, unsigned short srclen, char *out, unsigned short outsz, unsigned short *outlen);
 
 /*
@@ -2394,53 +2406,6 @@ int	outlen = 0;
 #endif
 
 #pragma	pack (pop)
-
-
-/*
-**  Message issuing on the FAO engine - the counterpart of __UTIL$PUTMSG and __UTIL$PUTMSGD.
-**
-**  The existing pair hands the text of a message record to vsnprintf; this one hands it to
-**  UTIL$FAOL. A message text is therefore an FAO control string and the whole directive set of the
-**  engine is open to it - fixed-width fields !n<...!>, zero-filled numbers !nZL, counted strings
-**  !AC, repetition !n*c, the plural !%S - none of which the C run-time library offers.
-**
-**  The registry is shared: the records are those established by __UTIL$INIMSG and located by
-**  __UTIL$GETMSG, so a facility already carrying a message table needs no change beyond the text
-**  of its messages. The two forms of text are not interchangeable: to FAO the per cent sign is an
-**  ordinary character and the exclamation mark is the escape, so a table is converted as a whole.
-**
-**  The parameters are passed as an array, not as a variable list: a variable list cannot be
-**  forwarded to UTIL$FAOL, and the engine accepts an array anyway. The $PUTMSG_FAO macro hides
-**  this, assembling a compound literal and deriving its length at translation time. Every
-**  parameter is to be cast to fao_prm_t by the caller, as UTIL$FAO requires: a pointer does not
-**  convert to an integer type implicitly.
-*/
-#include	"starlet.h"
-
-unsigned	__util$putmsg_fao	(unsigned sts, const fao_prm_t *prm, int prmcnt);
-unsigned	__util$putmsgd_fao	(unsigned sts, const char *mod, const char *func, unsigned line,
-						const fao_prm_t *prm, int prmcnt);
-
-/*
-**  Assembly of the parameter array and of its length. The leading zero lets the list be empty:
-**  a compound literal with no initializer is not admissible in standard C.
-*/
-#define	$FAO_PRM(...)		(((const fao_prm_t []) { 0, ## __VA_ARGS__ }) + 1)
-#define	$FAO_PRMCNT(...)	((int) (sizeof((const fao_prm_t []) { 0, ## __VA_ARGS__ })	\
-					/ sizeof(fao_prm_t)) - 1)
-
-#ifndef	NDEBUG
-	#define	$PUTMSG_FAO(sts, ...)	__util$putmsgd_fao((unsigned) (sts), __MODULE__,		\
-					__FUNCTION__, __LINE__, $FAO_PRM(__VA_ARGS__),			\
-					$FAO_PRMCNT(__VA_ARGS__))
-#else
-	#define	$PUTMSG_FAO(sts, ...)	__util$putmsg_fao((unsigned) (sts),				\
-					$FAO_PRM(__VA_ARGS__), $FAO_PRMCNT(__VA_ARGS__))
-#endif
-
-#define	$PUTMSGD_FAO(sts, ...)	__util$putmsgd_fao((unsigned) (sts), __MODULE__,			\
-					__FUNCTION__, __LINE__, $FAO_PRM(__VA_ARGS__),			\
-					$FAO_PRMCNT(__VA_ARGS__))
 
 #ifdef __cplusplus
 }

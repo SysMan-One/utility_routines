@@ -149,11 +149,11 @@ typedef struct __cli_ctx__
 /*
  * CLI API Routines declaration section
  */
-void	cli$show_verbs	(CLI_VERB *verbs, int level);
-int	cli$parse	(CLI_VERB *verbs, int opts, int	argc, char ** argv, void **clictx);
-int	cli$dispatch	(CLI_CTX *clictx);
-int	cli$cleanup	(CLI_CTX *clictx);
-int	cli$get_value	(CLI_CTX *clictx, CLI_PQDESC *pq, ASC *val);
+void	__cli$show_verbs	(CLI_VERB *verbs, int level);
+int	__cli$parse	(CLI_VERB *verbs, int opts, int	argc, char ** argv, void **clictx);
+int	__cli$dispatch	(CLI_CTX *clictx);
+int	__cli$cleanup	(CLI_CTX *clictx);
+int	__cli$get_value	(CLI_CTX *clictx, CLI_PQDESC *pq, ASC *val);
 
 #ifdef __cplusplus
     }

@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-07"
-#define	__REV__		"1.07.0"
+#define	__IDENT__	"V.01-09"
+#define	__REV__		"1.09.0"
 
 
 /*
@@ -121,6 +121,17 @@
 **				- ARMv8 hardware path (crc32b/crc32x) under __ARM_FEATURE_CRC32, bit-identical
 **				  output (build RK targets with -march=armv8-a+crc / -mcpu=cortex-a35|a55).
 **
+**	28-JUL-2026	DN	V.01-08 : Removed the legacy FAO facility (__util$fao/__util$faol
+**				and their static helpers __util$vfao/s_output_directive/s_fmt_*); the
+**				FAO service is now provided by the starlet module as __util$fao/
+**				__util$faol. Renamed the static __msgcmp() to s_msgcmp() so that every
+**				static routine carries the s_ prefix. __util$faohex() is retained.
+**				Dropped the vestigial #if __util_DEBUG__ scratch/test block.
+**
+**	30-JUL-2026	DN	V.01-09 : __util$remqent() - fixed removal of an entry that is the head,
+**				the tail or the only element of the queue: re-point __QUEUE head/tail when a
+**				neighbour is absent instead of dereferencing a NULL left link.
+**
 */
 
 
@@ -230,7 +241,7 @@ static EMSG_RECORD_DESC	*emsg_record_desc_root;				/* A root to the message reco
  *   RETURNS:
  *	a - b
  */
-static int __msgcmp (const void *a, const void *b)
+static int s_msgcmp (const void *a, const void *b)
 {
 const EMSG_RECORD *m1 = a, *m2 = b;
 
@@ -274,7 +285,7 @@ EMSG_RECORD_DESC *md;
 			return	STS$K_WARN;
 
 
-	qsort(msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), __msgcmp);
+	qsort(msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp);
 
 	msgdsc->link = emsg_record_desc_root;
 	emsg_record_desc_root = msgdsc;
@@ -317,7 +328,7 @@ EMSG_RECORD *msgrec;
 	/* We found message records descriptor for the facility,
 	 * so we can try to find the message record with the given <msgno>
 	 */
-	if ( !(msgrec = bsearch(&sts, msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), __msgcmp)) )
+	if ( !(msgrec = bsearch(&sts, msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp)) )
 		return	STS$K_ERROR;		/* RNF */
 
 	*outmsg = msgrec;
@@ -2295,369 +2306,6 @@ int	olen = 0;
 
 
 
-#if __util_DEBUG__
-
-int	main (int argc, char *argv[])
-{
-int count, bcnt;
-char	buf[1024];
-
-
-	bcnt  = __util$fao("!UL, !UW, !UB", buf, sizeof(buf), 1, 2, 3);
-
-	for (bcnt = 0; bcnt < 32; bcnt++)
-		$INSQTAIL(&free_bufs, &_stm_buf_area[bcnt], &count);
-
-	return	1;
-}
-
-
-
-
-#if	0
-// Factory macros
-#undef	$DEFMSG
-
-#define $DEFMSGLIST \
-	$DEFMSG(util,  0, S, NORMAL,	"normal successful completion") \
-	$DEFMSG(util,  1, W, WARNING,	"unknown warning") \
-	$DEFMSG(util,  2, E, ERROR,	"unknown error") \
-	$DEFMSG(util,  3, F, FATALERR,	"unknown fatal error") \
-	$DEFMSG(util, 13, E, NUMCNVERR,	"numeric conversion error: !SL") \
-
-#define	$DEFMSG(fac, num, sev, nam, txt) #nam,
-static const char *__$msgmnemonics[] = {
-	$DEFMSGLIST
-};
-#undef	$DEFMSG
-
-#define $DEFMSG(fac, num, sev,nam, txt) txt,
-static const char *__$msgtexts[] = {
-	$DEFMSGLIST
-};
-#undef	$DEFMSG
-
-#define $DEFMSG(fac, num, sev, nam, txt) #define fac##txt num
-static const char *__$msgtexts[] = {
-	$DEFMSGLIST
-};
-
-#define	$DEFMSG(fac, num, sev, nam, txt) fac##__##nam =  STC_CODE_##typ(msg),
-typedef enum {
-STATCODES
-} statcode_t;
-#undef STATCODE
-
-
-
-//#define	$MSGCOUNT (sizeof(__$##fac##msgmnemonics)/sizeof(__$##fac##msgmnemonics))
-
-#endif
-
-
-
-#if	0
-OPTS	opts [] = {
-		OPTS_NULL
-};
-
-
-#define	IOBUFSZ		4096		/* A size of single buffer			*/
-#define	IOBUFCNT	4096		/* A total number of buffers			*/
-
-struct _stm_buf				/* One item of Stream buffer			*/
-{
-	ENTRY	links;			/* Left, right links, used by queue macros	*/
-	int	len;			/* Actual length of data in the buffer		*/
-	int	ref;			/* Count of reference				*/
-	char buf[IOBUFSZ];		/* Buffer itself				*/
-} _stm_buf_area[IOBUFCNT];		/* We declare a static buffers area		*/
-
-QUEUE	free_bufs = QUEUE_INITIALIZER,
-	busy_bufs = QUEUE_INITIALIZER;
-
-
-DWORD WINAPI worker_f2b (void *arg)
-{
-int	status, count, i;
-struct _stm_buf	* sbuf;
-
-	$LOG(STS$K_INFO, "tid :%d running ...", GetCurrentThreadId());
-
-	for (i = 0; i < 10000 * 500; i++)
-		{
-		if ( !(i %  10000) )
-			$LOG(STS$K_INFO, "tid:%d, iteration %d", GetCurrentThreadId(), i);
-
-		if ( !(1 & (status = $REMQHEAD(&free_bufs, &sbuf, &count))) )
-			{
-			$LOG(STS$K_ERROR, "$REMQHEAD() ->  %d, count = %d", status, count);
-			continue;
-			}
-
-		if ( !sbuf )
-			$LOG(STS$K_ERROR, "sbuf == NULL");
-
-
-		if ( !(1 & (status = status = $INSQTAIL(&busy_bufs, sbuf, &count))) )
-			$LOG(STS$K_ERROR, "$INSQTAIL() ->  %d", status);
-		}
-
-	return	status;
-}
-
-DWORD WINAPI worker_b2f (void *arg)
-{
-	int	status, count, i;
-	struct _stm_buf	* sbuf;
-
-	$LOG(STS$K_INFO, "tid :%d running ...", GetCurrentThreadId());
-
-	for (i = 0; i < 10000 * 500; i++)
-		{
-		if ( !(i %  10000) )
-			$LOG(STS$K_INFO, "tid:%d, iteration %d", GetCurrentThreadId(), i);
-
-		if ( !(1 & (status = $REMQHEAD(&busy_bufs, &sbuf, &count))) )
-			{
-			$LOG(STS$K_ERROR, "$REMQHEAD() ->  %d, count = %d", status, count);
-			continue;
-			}
-
-
-		if ( !sbuf )
-			$LOG(STS$K_ERROR, "sbuf == NULL");
-
-
-		if ( !(1 & (status = status = $INSQTAIL(&free_bufs, sbuf, &count))) )
-			$LOG(STS$K_ERROR, "$INSQTAIL() ->  %d", status);
-		}
-
-	return	status;
-}
-
-
-
-int	main (int argc, char *argv[])
-{
-int count, i;
-HANDLE scan_tid;
-char	buf[1024];
-
-
-	i = __util$fao("!UL, !UW, !UB", buf, sizeof(buf), 1, 2, 3);
-
-
-	/*
-	**
-	*/
-	i = __util$pattern_match("ch33---0010904935.torrent", "*.torrent");
-
-	i = __util$pattern_match("Hello World!!!", "*llo*");
-
-
-
-
-	__util$getparams(argc, argv, opts);
-//	__util$setlogfile("logfile2.log");
-
-
-	//InitializeSRWLock(&free_bufs.lock);
-
-
-
-
-	for (i = 0; i < IOBUFCNT; i++)
-		$INSQTAIL(&free_bufs, &_stm_buf_area[i], &count);
-
-
-
-	for (i = 0; i <  32; i++)
-		{
-		if ( (scan_tid = CreateThread(NULL, 0, worker_f2b, NULL, 0, NULL)) == NULL )
-			return $LOG(STS$K_ERROR, "Creation streaming thread was failed :%d", GetLastError());
-		}
-
-
-	for (i = 0; i <  32; i++)
-		{
-		if ( (scan_tid = CreateThread(NULL, 0, worker_b2f, NULL, 0, NULL)) == NULL )
-			return $LOG(STS$K_ERROR, "Creation streaming thread was failed :%d", GetLastError());
-		}
-
-	WaitForSingleObject(scan_tid, INFINITE);
-
-	return STS$K_SUCCESS;
-}
-#endif
-#endif
-
-
-
-
-
-
-
-
-
-
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**	Assembles a message with the FAO engine and writes it to the log descriptor.
-**
-**	The prefix is identical to the one __UTIL$PUTMSGD lays down - the date, the time to the
-**	millisecond, the identifier of the process and, where the caller named them, the module, the
-**	routine and the line. The body is the text of the message record,
-**	which is an FAO control string, formatted with the parameters supplied.
-**
-**	The line is built in two passes over one buffer: the engine writes from the beginning of the
-**	descriptor it is given, so the second pass is handed a descriptor over what the first left.
-**
-**	A record that cannot be found yields the bare rendering of the condition value, in the manner
-**	of __UTIL$PUTMSGD, so that a message missing from the table still names its condition.
-**
-**  INPUT PARAMETERS:
-**	sts	- condition value.
-**	mod	- module name, or NULL to leave the position out of the prefix.
-**	func	- routine name, disregarded when mod is NULL.
-**	line	- line number, disregarded when mod is NULL.
-**	prm	- array of parameters of the message text, or NULL when it calls for none.
-**	prmcnt	- number of parameters in the array.
-**
-**  OUTPUT PARAMETERS:
-**	None; the message is written to g_logoutput.
-**
-**  RETURNS:
-**	The value of sts, unchanged.
-**--
-*/
-static unsigned	__util$putmsg_fao_i	(
-			unsigned		sts,
-			const char *		mod,
-			const char *		func,
-			unsigned		line,
-			const fao_prm_t *	prm,
-			int			prmcnt
-				)
-{
-EMSG_RECORD	*msgrec;
-fao_desc_t	dsc;
-struct timespec	now;
-unsigned short	len = 0, tot = 0;
-char		out [1024], sev [2];
-ssize_t		rc;
-
-static const char	sevlet [] = "WSEIF???";
-
-/*
-**  The prefix is the one the existing pair lays down, "DD-MM-YYYY HH:MM:SS.msec <PID/TID> ". The
-**  whole of the date and the time is one directive, !%L, which takes the timespec as it stands and
-**  needs neither a breakdown of the time nor the seven parameters the equivalent by parts would.
-**  The two pairs write to one descriptor, so their prefixes agree to the character.
-*/
-const char	lfao [] = {"!%L !6SL "},
-		mfao [] = {"!%L !6SL [!AZ\\!AZ:!UL] "};
-
-	sev[0] = sevlet[$SEV(sts)];
-	sev[1] = '\0';
-
-	s___time(&now);
-
-	dsc.dsc$w_length	= (unsigned short) sizeof(out);
-	dsc.dsc$b_dtype		= 0;
-	dsc.dsc$b_class		= 0;
-	dsc.dsc$a_pointer	= out;
-
-	if ( mod )
-		util$fao(mfao, &len, &dsc, (fao_prm_t) &now, (fao_prm_t) __gettid(),
-				(fao_prm_t) mod, (fao_prm_t) func, (fao_prm_t) line);
-	else	util$fao(lfao, &len, &dsc, (fao_prm_t) &now, (fao_prm_t) __gettid());
-
-	tot			= len;
-	dsc.dsc$a_pointer	= out + tot;
-	dsc.dsc$w_length	= (unsigned short) (sizeof(out) - tot);
-	len			= 0;
-
-	if ( 1 & __util$getmsg(sts, &msgrec) )
-		util$faol(msgrec->text, &len, &dsc, prm, prmcnt);
-	else	util$fao("%NONAME-!AZ-NOMSG, condition !XL, facility !UL, message !UL", &len, &dsc,
-				(fao_prm_t) sev, (fao_prm_t) sts, (fao_prm_t) $FAC(sts),
-				(fao_prm_t) ($MSG(sts) & 0x1FFF));
-
-	tot += len;
-
-	if ( tot >= sizeof(out) )
-		tot = sizeof(out) - 1;
-
-	out[tot++] = '\n';
-
-	rc = write(g_logoutput, out, (size_t) tot);
-	(void) rc;
-
-	return	sts;
-}
-
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**	Issues the message of a condition value without naming the place at which it was detected.
-**	See __UTIL$PUTMSG_FAO_I for the particulars.
-**
-**  INPUT PARAMETERS:
-**	sts	- condition value.
-**	prm	- array of parameters of the message text, or NULL.
-**	prmcnt	- number of parameters in the array.
-**
-**  OUTPUT PARAMETERS:
-**	None.
-**
-**  RETURNS:
-**	The value of sts, unchanged.
-**--
-*/
-unsigned	__util$putmsg_fao	(
-			unsigned		sts,
-			const fao_prm_t *	prm,
-			int			prmcnt
-				)
-{
-	return	__util$putmsg_fao_i(sts, NULL, NULL, 0, prm, prmcnt);
-}
-
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**	Issues the message of a condition value, naming the module, the routine and the line at which
-**	it was detected. See __UTIL$PUTMSG_FAO_I for the particulars.
-**
-**  INPUT PARAMETERS:
-**	sts	- condition value.
-**	mod	- module name, not NULL.
-**	func	- routine name, not NULL.
-**	line	- line number.
-**	prm	- array of parameters of the message text, or NULL.
-**	prmcnt	- number of parameters in the array.
-**
-**  OUTPUT PARAMETERS:
-**	None.
-**
-**  RETURNS:
-**	The value of sts, unchanged.
-**--
-*/
-unsigned	__util$putmsgd_fao	(
-			unsigned		sts,
-			const char *		mod,
-			const char *		func,
-			unsigned		line,
-			const fao_prm_t *	prm,
-			int			prmcnt
-				)
-{
-	return	__util$putmsg_fao_i(sts, mod, func, line, prm, prmcnt);
-}
-
 #ifdef	__MAIN_FOR_DEBUG__
 
 int	main (int argc, char *argv[])
@@ -2683,3 +2331,5 @@ const OPTS l_optstbl [] =					/* General CLI options		*/
 	__util$showparams(l_optstbl);
 }
 #endif	/* __MAIN_FOR_DEBUG__ */
+
+

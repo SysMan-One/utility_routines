@@ -96,7 +96,7 @@ typedef	struct	__fao_desc
 /*
 **  Type of a single FAO parameter.  On OpenVMS every argument of $FAO
 **  is a longword; in the portable variant it is a machine word capable
-**  of holding both an integer and a pointer.  Callers of util$fao() MUST
+**  of holding both an integer and a pointer.  Callers of __util$fao() MUST
 **  cast every parameter to fao_prm_t (or pass a pointer) explicitly.
 */
 typedef	uintptr_t	fao_prm_t;
@@ -118,24 +118,24 @@ typedef	FAO$T_TIME	fao_time_t;
 **  Public routines, see starlet.c for the detailed description of the
 **  supported directives and of the UTIL$BINTIM time string grammar.
 */
-int	util$fao	(const char *a_ctlstr, unsigned short *a_outlen,
+int	__util$fao	(const char *a_ctlstr, unsigned short *a_outlen,
 			fao_desc_t *a_outbuf, ...);
 
-int	util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
+int	__util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 			fao_desc_t *a_outbuf,
 			const fao_prm_t *a_prmlst, int a_prmcnt);
 
-int	util$bintim	(const char *a_timstr, fao_time_t *a_timadr);
+int	__util$bintim	(const char *a_timstr, fao_time_t *a_timadr);
 
-int	util$gettim	(fao_time_t *a_timadr);
+int	__util$gettim	(fao_time_t *a_timadr);
 
-int	util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
+int	__util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
 			const fao_time_t *a_timadr, int a_cvtflg);
 
-int	util$add_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
+int	__util$add_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
 			fao_time_t *a_result);
 
-int	util$sub_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
+int	__util$sub_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
 			fao_time_t *a_result);
 
 #ifdef	__cplusplus

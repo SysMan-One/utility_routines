@@ -1,6 +1,12 @@
 #ifndef	__AVPROTO$DEF__
 #define	__AVPROTO$DEF__	1
 
+#ifdef	__GNUC__
+	#pragma GCC diagnostic ignored  "-Wparentheses"
+	#pragma	GCC diagnostic ignored	"-Wdate-time"
+	#pragma	GCC diagnostic ignored	"-Wunused-variable"
+#endif
+
 
 #ifdef _WIN32
 	#pragma once
@@ -56,8 +62,8 @@
 **	22-FEB-2019	RRL	Added closing for "#ifdef __cplusplus"
 **				some code reorganizing;
 **
-**	29-JUL-2019	RRL	Added declaration for avproto_dump();
-**				improved error handling in the avproto_hget();
+**	29-JUL-2019	RRL	Added declaration for __tlv$dump();
+**				improved error handling in the __tlv$hget();
 **
 **
 **--
@@ -94,7 +100,7 @@ enum	{
 #define	TAG$M_TYPE	0xf000
 #define	TAG$M_ID	(~(TAG$M_TYPE))
 
-typedef struct __avproto_tlv__ {
+typedef struct ____tlv$tlv__ {
 
 	unsigned short	w_tag;	/* Tag's type and id			*/
 	unsigned short	w_len;	/* Actual data length in the b_val[]	*/
@@ -107,7 +113,7 @@ typedef struct __avproto_tlv__ {
 	};
 } AVPROTO_TLV;
 
-typedef struct __avproto_hdr__ {
+typedef struct ____tlv$hdr__ {
 	unsigned char	magic[8];
 	unsigned	u_len;		/* A length of payload follows header	*/
 	unsigned	u_csr;		/* Command/Status Register		*/
@@ -117,7 +123,7 @@ typedef struct __avproto_hdr__ {
 
 } AVPROTO_HDR;
 
-typedef struct __avproto_pdu__ {
+typedef struct ____tlv$pdu__ {
 	AVPROTO_HDR	r_hdr;		/* Fixed length header			*/
 	AVPROTO_TLV	r_tlv[0];	/* Placeholder for variable part of PDU	*/
 } AVPROTO_PDU;
@@ -125,7 +131,7 @@ typedef struct __avproto_pdu__ {
 #pragma	pack (pop)
 
 /*
- *  DESCRIPTION: avproto_encode_tag - encapsulate given 'v_type' and  'v_tag' into the 16-bits field.
+ *  DESCRIPTION: __tlv$encode_tag - encapsulate given 'v_type' and  'v_tag' into the 16-bits field.
  *	return NBO representation of the w_tag;
  *
  *  INPUTS:
@@ -138,7 +144,7 @@ typedef struct __avproto_pdu__ {
  *   RETURNS:
  *	16 bits TLV.w_tag field, NBO
  */
-inline	static unsigned short avproto_encode_tag
+inline	static unsigned short __tlv$encode_tag
 		(
 	unsigned short	a_v_type,
 	unsigned short	a_v_tag
@@ -149,7 +155,7 @@ inline	static unsigned short avproto_encode_tag
 }
 
 /*
- *  DESCRIPTION: avproto_decode_tag - extract 'tag id' and 'tag type' field from the TLV.w_tag.
+ *  DESCRIPTION: __tlv$decode_tag - extract 'tag id' and 'tag type' field from the TLV.w_tag.
  *	Return w_tag in the Host Order Byte
  *
  *  INPUTS:
@@ -162,7 +168,7 @@ inline	static unsigned short avproto_encode_tag
  *   RETURNS:
  *	16 bits, TLV_w_tag in Host Order Byte
  */
-inline static unsigned short	avproto_decode_tag
+inline static unsigned short	__tlv$decode_tag
 		(
 	unsigned short	a_w_tag,
 	unsigned short	*a_v_type,
@@ -181,10 +187,10 @@ unsigned short	l_tag = 0;
 }
 
 
-int	avproto_put    (void *a_pdu, unsigned short a_pdusz, unsigned a_v_tag, unsigned a_v_type, void *a_val, unsigned a_valsz);
-int	avproto_get    (void *a_pdu, unsigned a_pdusz, int *a_context, unsigned a_v_tag, unsigned *a_v_type, void *a_val, unsigned *a_valsz);
-int	avproto_lookup (void *a_pdu, unsigned a_pdusz, int *a_context, unsigned a_v_tag, unsigned *a_v_type, void **a_val, unsigned *a_valsz);
-void	avproto_dump   (void *a_pdu, unsigned a_pdusz);
+int	__tlv$put    (void *a_pdu, unsigned short a_pdusz, unsigned a_v_tag, unsigned a_v_type, void *a_val, unsigned a_valsz);
+int	__tlv$get    (void *a_pdu, unsigned a_pdusz, int *a_context, unsigned a_v_tag, unsigned *a_v_type, void *a_val, unsigned *a_valsz);
+int	__tlv$lookup (void *a_pdu, unsigned a_pdusz, int *a_context, unsigned a_v_tag, unsigned *a_v_type, void **a_val, unsigned *a_valsz);
+void	__tlv$dump   (void *a_pdu, unsigned a_pdusz);
 
 
 /*
@@ -203,7 +209,7 @@ void	avproto_dump   (void *a_pdu, unsigned a_pdusz);
  *   RETURNS:
  *	condition code
  */
-inline static int	avproto_hset	(
+inline static int	__tlv$hset	(
 		void		*a_pdup,
 	const unsigned char	*a_sig,
 		unsigned	a_u_csr,
@@ -240,7 +246,7 @@ AVPROTO_PDU	*l_pdu = (AVPROTO_PDU *) a_pdup;
  *   RETURNS:
  *	condition code
  */
-inline static int	avproto_hget	(
+inline static int	__tlv$hget	(
 		void		*a_pdup,
 	const unsigned char	*a_sig,
 		unsigned	*a_u_len,

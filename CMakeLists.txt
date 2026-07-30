@@ -69,6 +69,10 @@ add_library (starlet STATIC
 		${SRC_LIST}
 )
 
+# Export the header directory so consumers that add_subdirectory()/FetchContent() this
+# project get the include path automatically when they link against 'starlet'.
+target_include_directories (starlet PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 
 set_target_properties(starlet PROPERTIES PUBLIC_HEADER utility_routines.h avproto.h cli_routines.h)
 

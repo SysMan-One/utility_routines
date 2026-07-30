@@ -1,5 +1,5 @@
 #define	__MODULE__	"CLI_ROUTINES"
-#define	__IDENT__	"X.00-02"
+#define	__IDENT__	"X.00-03"
 #define	__REV__		"0.02.0"
 
 /*
@@ -33,16 +33,16 @@
 **	28-JUL-2021	RRL	Project reanimation.
 **
 **	27-JUL-2026	DN	X.00-02 : Audit fixes.
-**				- cli$parse() now propagates the parse status instead of always
+**				- __cli$parse() now propagates the parse status instead of always
 **				  returning SUCCESS, and releases the half-built context on error;
-**				- rewrote and wired up cli$val_check(): correct UUID check (canonical
+**				- rewrote and wired up __cli$val_check(): correct UUID check (canonical
 **				  8-4-4-4-12 validated via %n length), snprintf() for the device path,
 **				  errno reset and trailing-garbage check for numbers, values are taken
 **				  as NUL-terminated strings;
-**				- wired up cli$check_keyword() (CLI$K_KWD) and initialised its 'ksel';
-**				- checked the cli$add_item2ctx() status in the qualifier path;
+**				- wired up __cli$check_keyword() (CLI$K_KWD) and initialised its 'ksel';
+**				- checked the __cli$add_item2ctx() status in the qualifier path;
 **				- fixed the sub-verb recursion argument (argv + 1), the argc<1 message,
-**				  a NULL guard in cli$cleanup(); removed diagnostic-suppression pragmas
+**				  a NULL guard in __cli$cleanup(); removed diagnostic-suppression pragmas
 **				  and the resulting -Wparentheses; unified the verb-length macro name.
 **--
 */
@@ -85,7 +85,7 @@
 #define $SHOW_BOOL(var)			$SHOW_PARM(var, (var ? "ENABLED(TRUE)" : "DISABLED(FALSE)"), "%s");
 
 
-static	char *cli$val_type	(
+static	char *__cli$val_type	(
 			int	valtype
 		)
 {
@@ -111,7 +111,7 @@ static	char *cli$val_type	(
 
  *
  *  INPUT:
- *	clictx:	CLI-context has been created by cli$parse()
+ *	clictx:	CLI-context has been created by __cli$parse()
  *	pqdesc:	Parameter/Qualifier descriptor
  *	val:	an ASCIC string to be checked
  *
@@ -119,10 +119,10 @@ static	char *cli$val_type	(
  *	SS$_NORMAL, condition status
  *
  */
-static	int	cli$check_keyword (char *sts, int len, int opts, CLI_KEYWORD *klist, CLI_KEYWORD **kwd);
+static	int	__cli$check_keyword (char *sts, int len, int opts, CLI_KEYWORD *klist, CLI_KEYWORD **kwd);
 
 
-static	int	cli$val_check	(
+static	int	__cli$val_check	(
 		CLI_CTX		*clictx,
 		CLI_PQDESC	*pqdesc,
 		const char	*a_val
@@ -210,7 +210,7 @@ char	buf[NAME_MAX], *cp;
 			if ( !pqdesc->kwd )
 				break;			/* no keyword list - nothing to check against */
 
-			return	cli$check_keyword((char *) a_val, (int) strlen(a_val),
+			return	__cli$check_keyword((char *) a_val, (int) strlen(a_val),
 						clictx->opts, pqdesc->kwd, &l_kwd);
 			}
 
@@ -223,7 +223,7 @@ char	buf[NAME_MAX], *cp;
 	return	STS$K_SUCCESS;
 }
 
-static	int	cli$add_item2ctx	(
+static	int	__cli$add_item2ctx	(
 		CLI_CTX		*clictx,
 		int		type,
 		void		*item,
@@ -272,7 +272,7 @@ CLI_ITEM	*avp, *avp2;
 	return	STS$K_SUCCESS;
 }
 
-void	cli$show_verbs	(
+void	__cli$show_verbs	(
 	CLI_VERB	*verbs,
 		int	level
 		)
@@ -293,11 +293,11 @@ char	spaces [64];
 
 		/* Run over command's verbs list ... */
 		for ( subverb = verb->next; subverb; subverb = subverb->next)
-			cli$show_verbs(verb->next, ++level);
+			__cli$show_verbs(verb->next, ++level);
 
 		for ( par = verb->params; par && par->pn; par++)
 			{
-			$LOG(STS$K_INFO, "   P%d - '%.*s' (%s)", par->pn, $ASC(&par->name), cli$val_type (par->type));
+			$LOG(STS$K_INFO, "   P%d - '%.*s' (%s)", par->pn, $ASC(&par->name), __cli$val_type (par->type));
 
 			if ( par->kwd )
 				{
@@ -309,7 +309,7 @@ char	spaces [64];
 
 		for ( qual = verb->quals; qual && $ASCLEN(&qual->name); qual++)
 			{
-			$LOG(STS$K_INFO, "   /%.*s (%s)", $ASC(&qual->name), cli$val_type (qual->type) );
+			$LOG(STS$K_INFO, "   /%.*s (%s)", $ASC(&qual->name), __cli$val_type (qual->type) );
 
 			if ( qual->kwd )
 				{
@@ -322,7 +322,7 @@ char	spaces [64];
 }
 
 
-void	cli$show_ctx	(
+void	__cli$show_ctx	(
 		CLI_CTX	*	clictx
 		)
 {
@@ -367,7 +367,7 @@ int	splen = 0;
  *	SS$_NORMAL, condition status
  *
  */
-static	int	cli$check_keyword	(
+static	int	__cli$check_keyword	(
 			char	*sts,
 			int	 len,
 		int		opts,
@@ -430,7 +430,7 @@ int	qlog = opts & CLI$M_OPTRACE;
  *	SS$_NORMAL, condition status
  *
  */
-static	int	_cli$parse_quals(
+static	int	__cli$parse_quals(
 	CLI_CTX	*	clictx,
 	CLI_VERB	*verb,
 		int	argc,
@@ -476,10 +476,10 @@ char		*aptr, *vptr;
 
 				/* Validate the value against the qualifier's declared type */
 				if ( vptr && *vptr )
-					if ( !(1 & (status = cli$val_check(clictx, qrun, vptr))) )
+					if ( !(1 & (status = __cli$val_check(clictx, qrun, vptr))) )
 						return	status;
 
-				if ( !(1 & (status = cli$add_item2ctx(clictx, CLI$K_QUAL, qrun, vptr))) )
+				if ( !(1 & (status = __cli$add_item2ctx(clictx, CLI$K_QUAL, qrun, vptr))) )
 					return	status;
 
 				qsel = qrun;
@@ -505,7 +505,7 @@ char		*aptr, *vptr;
  *	SS$_NORMAL, condition status
  *
  */
-static	int	_cli$parse_params(
+static	int	__cli$parse_params(
 	CLI_CTX	*	clictx,
 	CLI_VERB	*verb,
 		int	argc,
@@ -524,11 +524,11 @@ int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
 
 		/* Validate the value against the parameter's declared type */
 		if ( argv[pi] && *argv[pi] )
-			if ( !(1 & (status = cli$val_check(clictx, param, argv[pi]))) )
+			if ( !(1 & (status = __cli$val_check(clictx, param, argv[pi]))) )
 				return	status;
 
 		/* Put parameter's value into the CLI context */
-		if ( !(1 & (status = cli$add_item2ctx (clictx, param->pn, param, argv[pi]))) )
+		if ( !(1 & (status = __cli$add_item2ctx (clictx, param->pn, param, argv[pi]))) )
 			return	(clictx->opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Error inserting P%d - %.*s into CLI context area", param->pn, $ASC(&param->name)) : STS$K_FATAL;
 		}
 
@@ -537,7 +537,7 @@ int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
 		return	(clictx->opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Missing P%d - %.*s !", param->pn, $ASC(&param->name)) : STS$K_FATAL;
 
 	/* Now we can extract qualifiers ... */
-	status = _cli$parse_quals(clictx, verb, argc - pi, argv + pi);
+	status = __cli$parse_quals(clictx, verb, argc - pi, argv + pi);
 
 	return	status;
 }
@@ -547,7 +547,7 @@ int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
  *  DESCRIPTION: parsing input list of arguments by using a command's verbs definition is provided by 'verbs'
  *		syntax definition. Internaly performs command verb matching and calling other CLI-routines to parse 'parameters'
  *		and 'qualifiers'.
- *		Create a CLI-context area is supposed to be used by cli$get_value() routine to extract a parameter value.
+ *		Create a CLI-context area is supposed to be used by __cli$get_value() routine to extract a parameter value.
 
  *  INPUT:
  *	verbs:	commands' verbs definition structure, null entry terminated
@@ -562,7 +562,7 @@ int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
  *	SS$_NORMAL, condition status
  *
  */
-static	int	_cli$parse_verb	(
+static	int	__cli$parse_verb	(
 	CLI_CTX		*clictx,
 	CLI_VERB *	verbs,
 		int	argc,
@@ -633,16 +633,16 @@ char		*pverb;
 	 * the verb's parameters and qualifiers list
 	 */
 	/* Insert new item into the CLI context list */
-	cli$add_item2ctx (clictx, 0, vsel, pverb);
+	__cli$add_item2ctx (clictx, 0, vsel, pverb);
 
 	/* Is there a next subverb ? */
 	if ( vsel->next )
-		status = _cli$parse_verb	(clictx, vsel, argc - 1, argv + 1);
+		status = __cli$parse_verb	(clictx, vsel, argc - 1, argv + 1);
 	else	{
 		if ( ( !vsel->params) && (!vsel->quals) )
 			return	STS$K_SUCCESS;
 
-		status = _cli$parse_params(clictx, vsel, argc - 1, argv + 1);
+		status = __cli$parse_params(clictx, vsel, argc - 1, argv + 1);
 		}
 
 	return	status;
@@ -652,7 +652,7 @@ char		*pverb;
 /*
  *
  *  DESCRIPTION: a top level routine - as main entry for the CLI parsing.
- *		Create a CLI-context area is supposed to be used by cli$get_value() routine to extract a parameter value.
+ *		Create a CLI-context area is supposed to be used by __cli$get_value() routine to extract a parameter value.
 
  *  INPUT:
  *	verbs:	commands' verbs definition structure, null entry terminated
@@ -667,7 +667,7 @@ char		*pverb;
  *	SS$_NORMAL, condition status
  *
  */
-int	cli$parse	(
+int	__cli$parse	(
 	CLI_VERB *	verbs,
 	int		opts,
 		int	argc,
@@ -693,12 +693,12 @@ CLI_CTX	*ctx;
 	ctx->opts = opts;
 
 
-	status = _cli$parse_verb(*clictx, verbs, argc, argv);
+	status = __cli$parse_verb(*clictx, verbs, argc, argv);
 
 	/* Propagate a parsing error to the caller and release the half-built context */
 	if ( !(1 & status) )
 		{
-		cli$cleanup(ctx);
+		__cli$cleanup(ctx);
 		*clictx = NULL;
 		}
 
@@ -707,10 +707,10 @@ CLI_CTX	*ctx;
 
 /*
  *
- *  DESCRIPTION: retreive a value of the parameter or qualifier from the CLI-context has been created and filled by cli$parse().
+ *  DESCRIPTION: retreive a value of the parameter or qualifier from the CLI-context has been created and filled by __cli$parse().
 
  *  INPUT:
- *	ctx:	A CLI-context has been created by cli$parse()
+ *	ctx:	A CLI-context has been created by __cli$parse()
  *	pq:	A pointer to parameter/qualifier definition
  *	val:	A buffer to accept value
  *
@@ -719,7 +719,7 @@ CLI_CTX	*ctx;
  *	SS$_NORMAL, condition status
  *
  */
-int	cli$get_value	(
+int	__cli$get_value	(
 	CLI_CTX		*clictx,
 	CLI_PQDESC	*pq,
 		ASC	*val
@@ -759,16 +759,16 @@ CLI_ITEM *item;
 
 /*
  *
- *  DESCRIPTION: release resources has been allocated by cli$parse() routine.
+ *  DESCRIPTION: release resources has been allocated by __cli$parse() routine.
  *
  *  INPUT:
- *	ctx:	A CLI-context has been created by cli$parse()
+ *	ctx:	A CLI-context has been created by __cli$parse()
  *
  *  RETURN:
  *	SS$_NORMAL, condition status
  *
  */
-int	cli$cleanup	(
+int	__cli$cleanup	(
 		CLI_CTX	*clictx
 		)
 {
@@ -806,13 +806,13 @@ CLI_ITEM	*avp, *avp2;
  *  DESCRIPTION: dispatch processing to action routine has been defined for the last verb's keyword.
  *
  *  INPUT:
- *	ctx:	A CLI-context has been created by cli$parse()
+ *	ctx:	A CLI-context has been created by __cli$parse()
  *
  *  RETURN:
  *	SS$_NORMAL, condition status
  *
  */
-int	cli$dispatch	(
+int	__cli$dispatch	(
 		CLI_CTX	*clictx
 			)
 {
@@ -1026,9 +1026,9 @@ ASC	fl1, fl2;
 
 	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "Action routine is just called!");
 
-	status = cli$get_value(clictx, &diff_params[0], &fl1);
+	status = __cli$get_value(clictx, &diff_params[0], &fl1);
 
-	status = cli$get_value(clictx, &diff_params[1], &fl2);
+	status = __cli$get_value(clictx, &diff_params[1], &fl2);
 
 	$IFTRACE(clictx->opts & CLI$M_OPTRACE, "Comparing %.*s vs %.*s", $ASC(&fl1), $ASC(&fl2));
 
@@ -1095,21 +1095,21 @@ void	*clictx = NULL;
 
 
 	/* Dump to screen verbs definitions */
-	cli$show_verbs (top_commands, 0);
+	__cli$show_verbs (top_commands, 0);
 
 	/* Process command line arguments */
-	if ( !(1 & (status = cli$parse (top_commands, CLI$M_OPTRACE | CLI$M_OPSIGNAL, argc - 1, argv + 1, &clictx))) )
+	if ( !(1 & (status = __cli$parse (top_commands, CLI$M_OPTRACE | CLI$M_OPSIGNAL, argc - 1, argv + 1, &clictx))) )
 		return	-EINVAL;
 
 	/* Show  a result of the parsing */
-	cli$show_ctx (clictx);
+	__cli$show_ctx (clictx);
 
 	/* Process command line arguments */
-	if ( !(1 & (status = cli$dispatch (clictx))) )
+	if ( !(1 & (status = __cli$dispatch (clictx))) )
 		return	-EINVAL;
 
 	/* Release hass been allocated resources */
-	cli$cleanup(clictx);
+	__cli$cleanup(clictx);
 
 	return 0;
 }
