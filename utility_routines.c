@@ -1,12 +1,12 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-09"
-#define	__REV__		"1.09.0"
+#define	__IDENT__	"V.01-26"
+#define	__REV__		"1.26.0"
 
 
 /*
 **  Abstract: General purpose and utility routines
 **
-**  Author: Ruslan R. Laishev
+**  Author: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  Creation date: 4-SEP-2017
 **
@@ -91,7 +91,7 @@
 **	24-APR-2026	RRL	V.01-05 : Added support for parsing CLI option started with "--",
 **				--trace --logfile ...
 **
-**	27-JUL-2026	DN	V.01-06 : Memory-safety fixes:
+**	27-JUL-2026	RRL	V.01-06 : Memory-safety fixes:
 **				- __util$uint32_2_dec() : fixed 1-byte heap overflow (pointer was
 **				  set one past the buffer), render 0 as "0", keep room for the NUL;
 **				- __util$faohex() : do not read past <a_src> for short input, check
@@ -115,22 +115,139 @@
 **				- converted the remaining Doxygen comment blocks to the VMS style and
 **				  corrected spelling throughout.
 **
-**	27-JUL-2026	DN	V.01-07 : Performance - __util$crc32c() (which actually computes the
+**	27-JUL-2026	RRL	V.01-07 : Performance - __util$crc32c() (which actually computes the
 **				standard IEEE CRC-32, not Castagnoli - see note at the routine):
 **				- portable slice-by-8 core, ~4.5x the byte-at-a-time loop, endian-neutral;
 **				- ARMv8 hardware path (crc32b/crc32x) under __ARM_FEATURE_CRC32, bit-identical
 **				  output (build RK targets with -march=armv8-a+crc / -mcpu=cortex-a35|a55).
 **
-**	28-JUL-2026	DN	V.01-08 : Removed the legacy FAO facility (__util$fao/__util$faol
+**	28-JUL-2026	RRL	V.01-08 : Removed the legacy FAO facility (__util$fao/__util$faol
 **				and their static helpers __util$vfao/s_output_directive/s_fmt_*); the
 **				FAO service is now provided by the starlet module as __util$fao/
 **				__util$faol. Renamed the static __msgcmp() to s_msgcmp() so that every
 **				static routine carries the s_ prefix. __util$faohex() is retained.
 **				Dropped the vestigial #if __util_DEBUG__ scratch/test block.
 **
-**	30-JUL-2026	DN	V.01-09 : __util$remqent() - fixed removal of an entry that is the head,
+**	30-JUL-2026	RRL	V.01-09 : __util$remqent() - fixed removal of an entry that is the head,
 **				the tail or the only element of the queue: re-point __QUEUE head/tail when a
 **				neighbour is absent instead of dereferencing a NULL left link.
+**
+**	30-JUL-2026	RRL	V.01-10 : Documentation pass - gave every routine a VMS-style
+**				**++ / **-- header (FUNCTIONAL DESCRIPTION / FORMAL PARAMETERS / IMPLICIT
+**				INPUTS-OUTPUTS / RETURN VALUE) and added in-code comments to the sparsely
+**				commented routines. No functional change.
+**				Also documented the __MAIN_FOR_DEBUG__ demo main and normalised the
+**				source to LF line endings (see .gitattributes).
+**
+**	01-AUG-2026	RRL	V.01-11 : __util$log()/__util$log2buf() validated the severity
+**				against [STS$K_WARN..STS$K_ERROR], which rejected STS$K_FATAL (4);
+**				it was clamped to STS$K_UNDEF (odd, reads as success).  Widened the
+**				accepted range to STS$K_FATAL.
+**
+**	01-AUG-2026	RRL	V.01-12 : Routed the nine best-effort log writes through a new
+**				s_util$logwrite() helper that consumes write()'s result, so the
+**				module builds clean under -O2 / -D_FORTIFY_SOURCE (warn_unused_result).
+**
+**	01-AUG-2026	RRL	V.01-13 : Fixed two stack buffer overflows of the same shape:
+**				__util$out() and __util$putmsg() appended the terminating <LF> at
+**				the offset (v)snprintf() had REQUIRED rather than the one it had
+**				actually WRITTEN, so a formatted record longer than the buffer wrote
+**				the <LF> past its end and then handed the inflated length to write().
+**				__util$logd() and __util$log2buf() already clamped; the same clamp is
+**				applied here. Tightened three further clamps from sizeof(out) - 1 and
+**				UTIL$SZ_OUTBUF down to UTIL$SZ_OUTBUF - 1: the arrays carry 8 octets of
+**				padding which (v)snprintf() never writes, so a truncated record used to
+**				emit up to 8 uninitialized stack octets into the log.
+**				See tests/test_log_overflow.c.
+**
+**	01-AUG-2026	RRL	V.01-14 : Hardened __util$log2buf() against overflow of the CALLER's
+**				buffer, on two counts: (a) it clamped the length to outsz and wrote the
+**				terminator at __outbuf[outsz], one past the end, when a record filled
+**				the buffer - clamp to outsz-1; (b) when the timestamp prefix alone was
+**				longer than outsz, snprintf() returned a length > outsz and the follow-
+**				up vsnprintf() was handed a negative (hence huge) size, writing far past
+**				the buffer - the prefix length is now clamped before the append and a
+**				outsz < 1 guard was added. Caught by tests/test_log_overflow.c.
+**
+**	01-AUG-2026	RRL	V.01-15 : The p_cb_log_f diversion hook is honoured by the logging
+**				routines as well. It was consulted by __util$out(), __util$trace() and
+**				__util$dumphex() only, while __util$log(), __util$logd(), __util$putmsg()
+**				and __util$putmsgd() wrote to g_logoutput regardless - so an application
+**				that installed the hook could divert its tracing and its raw output but
+**				not its $LOG records, which kept landing on the standard output. That is
+**				a hazard for a utility whose standard output carries data.
+**
+**	01-AUG-2026	RRL	V.01-16 : Removed the p_cb_log_f diversion hook and its global pointer
+**				entirely; every logging routine now writes straight to g_logoutput.
+**				Output is redirected with __util$deflog() (file or SYSLOG host) instead.
+**
+**	01-AUG-2026	RRL	V.01-17 : Added __util$setlogfd(): point the logging at an already-
+**				open descriptor without opening a file or seizing stdout/stderr, as
+**				__util$deflog() does. Lets a utility whose standard output carries data
+**				send its log to the standard error with one call and no dup2() dance.
+**
+**	 3-AUG-2026	RRL	V.01-18 : Added the FAO variants of the message signalling:
+**				__util$putmsg_fao() and __util$putmsgd_fao(), reached through the
+**				$PUTMSG_FAO() macro. They look a catalogue record up by its
+**				condition value like __util$putmsg()/__util$putmsgd(), but format
+**				the record text as an FAO control string via __util$faol() (the
+**				starlet FAO service) rather than as a printf format - so a record
+**				may use !UL/!UQ/!AS/!AD and friends. starlet.h is now included by
+**				this module for the FAO API.
+**
+**	 3-AUG-2026	RRL	V.01-19 : $PUTMSG_FAO() now applies the (fao_prm_t) cast to each
+**				parameter itself (FAO$_EACH machinery in the header), so a caller writes
+**				the value plain - $PUTMSG_FAO(sts, 2, l_seq, l_disp) - and can no longer
+**				forget the cast, which was silent undefined behaviour. The explicit
+**				count is unchanged; 0..16 parameters are handled.
+**
+**	 3-AUG-2026	RRL	V.01-20 : Under NDEBUG the no-op $IFTRACE() now references its condition
+**				via sizeof (used, but not evaluated), so a trace-only local such as
+**				cli_routines' qlog no longer draws -Wunused-variable in a release build.
+**
+**	 3-AUG-2026	RRL	V.01-21 : $PUTMSG_FAO() now derives the parameter count from the list
+**				itself (FAO$_NARG), so the caller writes neither the count nor the casts:
+**				$PUTMSG_FAO(sts, l_seq, l_disp). A count that is never written by hand
+**				cannot disagree with the list beside it, nor send the routine reading
+**				parameters that were never passed.
+**
+**	 7-AUG-2026	RRL	V.01-22 : s_msgcmp() compared the whole condition value, so a record was
+**				found only when the signalled severity matched the registered one. It now
+**				compares the message number ($MSG, severity bits dropped), so one record
+**				serves any severity - a status may be signalled INFO in one place and
+**				WARNING in another. The severity shown/returned is the caller's ($SEV);
+**				a message number is expected once per facility catalogue.
+**
+**	 7-AUG-2026	RRL	V.01-23 : s_msgcmp() now compares facility then message number (still
+**				severity-independent), so records of different facilities cannot collide.
+**				__util$putmsg_fao()/__util$putmsgd_fao() prefix a found record with the
+**				caller's severity - %<S>- taken from $SEV(sts) - so one record shows its
+**				INFO/WARNING/... face.
+**
+**	 7-AUG-2026	RRL	V.01-24 : Restored the facname field in EMSG_RECORD_DESC (the field only,
+**				not __util$fmtmsg), so a signalled record is now framed with the full
+**				OpenVMS envelope %<facility>-<S>-<text>: s_util$facname() supplies the
+**				name (or NONAME), the severity is the caller's ($SEV).
+**
+**	13-AUG-2026	RRL	V.01-25 : The log-record prefix is now rendered by s_util$prefix() -
+**				byte-identical to the former snprintf of "%02u-%02u-%04u ..." but ~20x
+**				cheaper: the date-time is reformatted only when the second changes
+**				(a per-thread cache), the digits are laid out by hand, and the thread
+**				id is fetched once per thread instead of a syscall per record. All nine
+**				prefix sites (putmsg[d][_fao], logd, log, log2buf, trace, dumphex) use
+**				the helper; the suffixes ([mod:line], %<fac>-<S>-) stay as snprintf.
+**				End-to-end: putmsg_fao 1153 -> 259 ns, $LOG 1216 -> 302 ns. En passant:
+**				dumphex's WIN32 branch referenced _tm/now instead of l_tm/l_now (would
+**				not compile there) - gone with the block. NB: after a fork() the child
+**				inherits the cached tid - see s_util$prefix() notes.
+**
+**	14-AUG-2026	RRL	V.01-26 : __util$pattern_match() rewritten from the recursive matcher
+**				to the iterative one with a single backtrack point. Same semantics ('*'
+**				a run, '%' one octet; 500000 random cases agree with the old algorithm,
+**				see tests/test_pattern_match.c), but bounded by O(|s|*|p|): the pattern
+**				a*a*a*a*a*b over 200 octets of 'a' went from 8.6 SECONDS to 318 ns, and
+**				the typical cases got 1.6-3.6x faster (15-26 ns). No recursion - no
+**				stack hazard on hostile patterns from a config or the CLI.
 **
 */
 
@@ -191,6 +308,7 @@
 #endif
 
 #include	"utility_routines.h"
+#include	"starlet.h"					/* FAO service for the _FAO message variants	*/
 
 
 #ifndef	WIN32
@@ -221,9 +339,6 @@
 static int	g_logoutput = STDOUT_FILENO;				/* Default descriptor for default output device		*/
 
 
-void (*p_cb_log_f) (const char * buf, unsigned int olen) = NULL;	/* A reference to an external routine to accept
-									   a has been formated message. It's is supposed to be used
-									   instead of write() to a STDOUT */
 
 struct sockaddr_in slogsock;						/* SYSLOG Host socket					*/
 
@@ -231,47 +346,92 @@ struct sockaddr_in slogsock;						/* SYSLOG Host socket					*/
 static EMSG_RECORD_DESC	*emsg_record_desc_root;				/* A root to the message records descriptor		*/
 
 /*
- *   DESCRIPTION: Message record compare routine
- *
- *   INPUT:
- *
- *   OUTPUT:
- *	NONE
- *
- *   RETURNS:
- *	a - b
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Best-effort write of a formatted record to the log descriptor.  The result
+**	is deliberately discarded - there is nothing sensible to do when the log
+**	write itself fails - but it is consumed so that write()'s warn_unused_result
+**	does not fire under -D_FORTIFY_SOURCE / -O2.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fd	The log file descriptor
+**	a_buf	The record to write
+**	a_len	Its length in octets
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	NONE.
+**--
+*/
+static	inline void	s_util$logwrite	(int a_fd, const void *a_buf, size_t a_len)
+{
+	if ( 0 > write (a_fd, a_buf, a_len) )
+		return;			/* best-effort: nothing to do on failure	*/
+}
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Comparison routine for the message catalogue. Orders two EMSG_RECORD
+**	entries by their condition/message code, so that qsort() can sort the
+**	catalogue and bsearch() can look a message up by that code.
+**
+**  FORMAL PARAMETERS:
+**
+**	a	Address of the first  EMSG_RECORD
+**	b	Address of the second EMSG_RECORD
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	Negative, zero or positive as a->sts is less than, equal to or
+**	greater than b->sts.
+**--
+*/
 static int s_msgcmp (const void *a, const void *b)
 {
 const EMSG_RECORD *m1 = a, *m2 = b;
+int	l_c;
 
 
-	return	( (int)m1->sts - (int)m2->sts);
+	/*
+	 * Compare by facility, then by message number, with the severity bits
+	 * dropped. A record is thus found regardless of the severity carried by the
+	 * signalled status - one status may be signalled INFO in one place and
+	 * WARNING in another from a single record - while records of different
+	 * facilities never collide. The severity shown is the caller's ($SEV of the
+	 * status). A message number is expected to appear once in a facility's catalogue.
+	 */
+	l_c = (int) $FAC(m1->sts) - (int) $FAC(m2->sts);
+	return	l_c ? l_c : ( (int) $MSG(m1->sts) - (int) $MSG(m2->sts) );
 }
 
 
 /*
- *   DESCRIPTION: Sorting message records according <sts> field as a key,
- *	link message records descriptor in to the global list.
- *	This routine is should be called once at task initialization time before any
- *	consecutive $GETMSG/$PUTMSG calls!
- *
- *   IMPLICITE INPUTS:
- *	emsg_record_desc_root
- *
- *   INPUTS:
- *	msgdsc:	Message Records Descriptor
- *
- *   OUTPUTS:
- *	NONE
- *
- *   IMPLICITE OUTPUTS:
- *	msgdsc:
- *
- *   RETURNS:
- *	STS$K_WARN	- non-principal error
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Initialise a message catalogue: sort the caller's array of message
+**	records by code so that __util$getmsg() can binary-search it, and link
+**	the descriptor into the active catalogue list.
+**
+**  FORMAL PARAMETERS:
+**
+**	msgdsc	Address of the message-records descriptor (array + count)
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Links <msgdsc> into the module-static emsg_record_desc_root list.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; STS$K_WARN / condition code otherwise.
+**--
+*/
 unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc)
 {
 EMSG_RECORD_DESC *md;
@@ -295,21 +455,26 @@ EMSG_RECORD_DESC *md;
 
 
 /*
- *   DESCRIPTION: Retrieve message record by using message number code.
- *
- *   IMPLICITE INPUTS:
- *	emsg_record_desc_root
- *
- *   INPUTS:
- *	sts:	condition code/message number code
- *
- *   OUTPUTS:
- *	outmsg:	A found message record
- *
- *   RETURNS:
- *	STS$K_SUCCESS	- outmsg contains an address of the has been found message record
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Look up a message record by its condition/message code in the
+**	catalogue registered with __util$inimsg(). The facility number selects
+**	the descriptor, then the record is found by binary search.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition code / message number to find
+**	outmsg	Receives the address of the matching EMSG_RECORD
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the module-static emsg_record_desc_root list.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS - <outmsg> holds the found record;
+**	condition code otherwise.
+**--
+*/
 unsigned	__util$getmsg	(unsigned sts, EMSG_RECORD **outmsg )
 {
 unsigned	facno;
@@ -337,24 +502,154 @@ EMSG_RECORD *msgrec;
 }
 
 /*
- *   DESCRIPTION: Format a message to be output on the SYS$OUTPUT by using a format from the message record
- *
- *   IMPLICITE INPUTS:
- *	emsg_record_desc_root
- *
- *   INPUTS:
- *	sts:	condition code/message number code
- *	...:	Additional parameters, according the FAO of the message
- *
- *   OUTPUTS:
- *	NONE
- *
- *   RETURNS:
- *	<sts>
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a catalogue message by its condition/message code (looked up via
+**	__util$getmsg()) together with any FAO/printf-style arguments, and write
+**	the result to the current log destination.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition/message code selecting the catalogue record
+**	...	Arguments for the message text, per its format
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the message catalogue; writes to the log destination.
+**
+**  RETURN VALUE:
+**	The <sts> argument, so the call may be used in a return statement.
+**--
+*/
 
 static const char s_severity[STS$K_MAX]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
 static const char s_defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: %#x/%d, sev: %#x/%d, msgno: %#x/%d]"};
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format the standard log-record prefix - "DD-MM-YYYY HH:MM:SS.msc <tid> ",
+**	byte-identical to the former snprintf of
+**	"%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT - but at a fraction
+**	of the cost: the date-time part up to the '.' is reformatted only when the
+**	second changes (a per-thread cache), the digits are emitted by hand, and
+**	the thread id is fetched from the kernel once per thread instead of a
+**	syscall per record.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_out	- address of the output buffer, at least 48 octets
+**
+**  IMPLICIT INPUTS:
+**	Per-thread caches of the current second's text and of the thread id.
+**
+**  SIDE EFFECTS:
+**	NB: after a fork() the child inherits the parent's cached thread id;
+**	a process that forks after its first log record and cares about the tid
+**	column should reset it via pthread_atfork() or re-exec.
+**
+**  COMPLETION STATUS:
+**	Length of the prefix written to <a_out>, octets.
+**--
+*/
+#if defined(_WIN32)
+#define	UTIL$TLS	__declspec(thread)
+#else
+#define	UTIL$TLS	__thread
+#endif
+
+static int	s_util$prefix (char *a_out)
+{
+struct timespec l_now;
+unsigned l_val;
+int	l_n, l_k, l_pad;
+char	l_tmp [16];
+static UTIL$TLS time_t	s_sec = (time_t) -1;
+static UTIL$TLS char	s_datim [20];		/* "DD-MM-YYYY HH:MM:SS."	*/
+static UTIL$TLS unsigned s_tid;
+
+	s___time (&l_now);
+
+	if ( l_now.tv_sec != s_sec )		/* A new second - reformat the cached date-time part */
+		{
+		struct tm l_tm;
+
+#ifdef	WIN32
+		localtime_s (&l_tm, (time_t *) &l_now);
+#else
+		localtime_r ((time_t *) &l_now, &l_tm);
+#endif
+		s_datim[0] = (char) ('0' + l_tm.tm_mday / 10);
+		s_datim[1] = (char) ('0' + l_tm.tm_mday % 10);
+		s_datim[2] = '-';
+		s_datim[3] = (char) ('0' + (l_tm.tm_mon + 1) / 10);
+		s_datim[4] = (char) ('0' + (l_tm.tm_mon + 1) % 10);
+		s_datim[5] = '-';
+		l_val = (unsigned) (1900 + l_tm.tm_year);
+		s_datim[6] = (char) ('0' + l_val / 1000);
+		s_datim[7] = (char) ('0' + (l_val / 100) % 10);
+		s_datim[8] = (char) ('0' + (l_val / 10) % 10);
+		s_datim[9] = (char) ('0' + l_val % 10);
+		s_datim[10] = ' ';
+		s_datim[11] = (char) ('0' + l_tm.tm_hour / 10);
+		s_datim[12] = (char) ('0' + l_tm.tm_hour % 10);
+		s_datim[13] = ':';
+		s_datim[14] = (char) ('0' + l_tm.tm_min / 10);
+		s_datim[15] = (char) ('0' + l_tm.tm_min % 10);
+		s_datim[16] = ':';
+		s_datim[17] = (char) ('0' + l_tm.tm_sec / 10);
+		s_datim[18] = (char) ('0' + l_tm.tm_sec % 10);
+		s_datim[19] = '.';
+
+		s_sec = l_now.tv_sec;
+		}
+
+	memcpy (a_out, s_datim, 20);
+	l_n = 20;
+
+	/* The fraction, zero-filled to three digits as %03u did - the very same
+	** (unsigned) tv_nsec / TIMSPECDEVIDER value as before
+	*/
+	l_val = (unsigned) l_now.tv_nsec / TIMSPECDEVIDER;
+	l_k = 0;
+	do	{
+		l_tmp[l_k++] = (char) ('0' + l_val % 10);
+		l_val /= 10;
+		}
+	while ( l_val );
+	for ( ; l_k < 3; l_k++)
+		l_tmp[l_k] = '0';
+	while ( l_k )
+		a_out[l_n++] = l_tmp[--l_k];
+
+	a_out[l_n++] = ' ';
+
+	/* The thread id, right-aligned to six columns as "%6d " did - fetched once per thread */
+	if ( !s_tid )
+#ifdef	_WIN32
+		s_tid = (unsigned) gettid ();
+#else
+		s_tid = (unsigned) __gettid ();
+#endif
+
+	l_val = s_tid;
+	l_k = 0;
+	do	{
+		l_tmp[l_k++] = (char) ('0' + l_val % 10);
+		l_val /= 10;
+		}
+	while ( l_val );
+	for ( l_pad = 6 - l_k; l_pad > 0; l_pad--)
+		a_out[l_n++] = ' ';
+	while ( l_k )
+		a_out[l_n++] = l_tmp[--l_k];
+
+	a_out[l_n++] = ' ';
+
+	return	l_n;
+}
+
 
 unsigned	__util$putmsg
 			(
@@ -364,28 +659,14 @@ unsigned	__util$putmsg
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT;
 char	out[UTIL$SZ_OUTBUF + 8];
 int	olen, sev;
-struct tm _tm;
-struct timespec now;
 EMSG_RECORD *msgrec;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
 	*/
-	s___time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,			/* Format a prefix part of the message: time + PID ... */
-		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid());
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retrieve the message record */
 		{
@@ -399,12 +680,14 @@ EMSG_RECORD *msgrec;
 			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
 		}
 
+	/* (v)snprintf() returns the length it WOULD have written - clamp before appending */
+	olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen);
+	s_util$logwrite (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -414,6 +697,29 @@ EMSG_RECORD *msgrec;
 	return	sts;
 }
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a catalogue message by code, with the call-site module, function
+**	and line and any arguments, and write it to the log. Descriptor form
+**	behind __util$putmsg().
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition/message code
+**	__mod	Call-site module name
+**	__fi	Call-site function name
+**	__li	Call-site line number
+**	...	Message arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the message catalogue; writes to the log destination.
+**
+**  RETURN VALUE:
+**	The <sts> argument.
+**--
+*/
 unsigned	__util$putmsgd
 			(
 		unsigned	sts,
@@ -425,34 +731,21 @@ unsigned	__util$putmsgd
 
 {
 va_list arglist;
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "[%s:%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] "};
+const char	lfmt [] = {"[%s:%u] "},
+	mfmt [] = {"[%s\\%s:%u] "};
 char	out[UTIL$SZ_OUTBUF + 8];
 int	olen, sev;
-struct tm _tm;
-struct timespec now;
 EMSG_RECORD *msgrec;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
 	*/
-	s___time(&now);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += __mod
+		? snprintf (out + olen, UTIL$SZ_OUTBUF - olen, mfmt, __mod, __fi, __li)
+		: snprintf (out + olen, UTIL$SZ_OUTBUF - olen, lfmt, __fi, __li);
 
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = __mod
-		? snprintf (out, UTIL$SZ_OUTBUF, mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __mod, __fi, __li)
-		: snprintf (out, UTIL$SZ_OUTBUF, lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __fi, __li);
-
-	olen = $MIN(UTIL$SZ_OUTBUF, olen);
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retrieve the message record */
 		{
@@ -467,13 +760,13 @@ EMSG_RECORD *msgrec;
 		}
 
 
-	olen = $MIN(UTIL$SZ_OUTBUF, olen);
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen);
+	s_util$logwrite (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -484,10 +777,212 @@ EMSG_RECORD *msgrec;
 }
 
 
+/*
+**  Return the name registered for a status's facility, or "NONAME" when the
+**  facility carries none - used to frame a signalled record as %<facility>-<S>-.
+*/
+static const char *s_util$facname (unsigned sts)
+{
+EMSG_RECORD_DESC *md;
+
+	for ( md = emsg_record_desc_root; md; md = md->link )
+		if ( md->facno == $FAC(sts) )
+			return	(md->facname && *md->facname) ? md->facname : "NONAME";
+
+	return	"NONAME";
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO variant of __util$putmsg(): look the catalogue record up by its
+**	condition value and format its text as an FAO control string (via
+**	__util$faol()) rather than a printf format, then write it to the log
+**	destination with the usual timestamp/PID prefix. The record text may
+**	use the FAO directives (!UL, !UQ, !AS, !AD, !XL ...); each variadic
+**	parameter must be passed already cast to fao_prm_t.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition/message code selecting the catalogue record
+**	...	FAO parameters for the record text, each cast to fao_prm_t
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the message catalogue; writes to the log destination.
+**
+**  RETURN VALUE:
+**	sts
+**--
+*/
+unsigned	__util$putmsg_fao	(unsigned sts, int prmcnt, ...)
+{
+va_list	arglist;
+char	out [UTIL$SZ_OUTBUF + 8], body [UTIL$SZ_OUTBUF];
+fao_desc_t	bodydsc = $FAO_DESC(body);
+unsigned short	bodylen = 0;
+int	olen, sev, n;
+fao_prm_t	prm [16];
+EMSG_RECORD *msgrec;
+
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+
+	/*
+	**  Collect the FAO parameters into a list for __util$faol().  The
+	**  count is taken from the caller rather than assumed: reading more
+	**  arguments than were passed is undefined behaviour, and telling
+	**  __util$faol() there are sixteen of them defeats its own guard
+	**  against a control string with more directives than parameters -
+	**  a mismatch between a catalogue entry and its caller would then
+	**  format whatever the stack happened to hold.
+	*/
+	if ( prmcnt > (int) (sizeof(prm)/sizeof(prm[0])) )
+		prmcnt = (int) (sizeof(prm)/sizeof(prm[0]));
+
+	if ( prmcnt < 0 )
+		prmcnt = 0;
+
+	va_start (arglist, prmcnt);
+	for ( n = 0; n < prmcnt; n++ )
+		prm[n] = va_arg(arglist, fao_prm_t);
+	va_end (arglist);
+
+	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Format the record text through FAO */
+		{
+		/* Prefix the caller's severity - %<S>- - so one record can show its INFO/WARNING/... face */
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
+
+		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
+		if ( (int) bodylen > (UTIL$SZ_OUTBUF - olen - 1) )
+			bodylen = (unsigned short) (UTIL$SZ_OUTBUF - olen - 1);
+		memcpy (out + olen, body, (size_t) bodylen);
+		olen += (int) bodylen;
+		}
+	else	{							/* No record - the default diagnostic */
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
+			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
+		}
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+	out[olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, out, olen);
+
+	return	sts;
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO variant of __util$putmsgd(): as __util$putmsg_fao(), but with the
+**	module/function/line location prefix used by the debug $PUTMSG_FAO macro.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts		Condition/message code selecting the catalogue record
+**	__mod,__fi,__li	Module, function and line of the call site
+**	...		FAO parameters for the record text, each cast to fao_prm_t
+**
+**  RETURN VALUE:
+**	sts
+**--
+*/
+unsigned	__util$putmsgd_fao	(unsigned sts, const char *__mod, const char *__fi, unsigned __li, int prmcnt, ...)
+{
+va_list	arglist;
+const char	lfmt [] = {"[%s:%u] "},
+	mfmt [] = {"[%s\\%s:%u] "};
+char	out [UTIL$SZ_OUTBUF + 8], body [UTIL$SZ_OUTBUF];
+fao_desc_t	bodydsc = $FAO_DESC(body);
+unsigned short	bodylen = 0;
+int	olen, sev, n;
+fao_prm_t	prm [16];
+EMSG_RECORD *msgrec;
+
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += __mod
+		? snprintf (out + olen, UTIL$SZ_OUTBUF - olen, mfmt, __mod, __fi, __li)
+		: snprintf (out + olen, UTIL$SZ_OUTBUF - olen, lfmt, __fi, __li);
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+
+	/*  The count is the caller's, see __util$putmsg_fao() above  */
+	if ( prmcnt > (int) (sizeof(prm)/sizeof(prm[0])) )
+		prmcnt = (int) (sizeof(prm)/sizeof(prm[0]));
+
+	if ( prmcnt < 0 )
+		prmcnt = 0;
+
+	va_start (arglist, prmcnt);
+	for ( n = 0; n < prmcnt; n++ )
+		prm[n] = va_arg(arglist, fao_prm_t);
+	va_end (arglist);
+
+	if ( 1 & __util$getmsg(sts, &msgrec) )
+		{
+		/* Prefix the caller's severity - %<S>- - as __util$putmsg_fao() does */
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
+
+		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
+		if ( (int) bodylen > (UTIL$SZ_OUTBUF - olen - 1) )
+			bodylen = (unsigned short) (UTIL$SZ_OUTBUF - olen - 1);
+		memcpy (out + olen, body, (size_t) bodylen);
+		olen += (int) bodylen;
+		}
+	else	{
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
+			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
+		}
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+	out[olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, out, olen);
+
+	return	sts;
+}
 
 
 
 
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a record under a printf-style format and write it, with the
+**	timestamp / severity / location prefix, to the current log destination.
+**	This is the routine the $LOG macro expands to.
+**
+**  FORMAL PARAMETERS:
+**
+**	fac	Facility name for the prefix
+**	sev	Record severity (STS$K_*)
+**	fmt	printf-style format string
+**	__mod	Call-site module name
+**	__func	Call-site function name
+**	__line	Call-site line number
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination (and the SYSLOG socket, if set).
+**
+**  RETURN VALUE:
+**	The <sev> argument, so the call may be used in a return statement.
+**--
+*/
 unsigned	__util$logd
 			(
 		const char *	fac,
@@ -501,14 +996,12 @@ unsigned	__util$logd
 
 {
 va_list arglist;
-const char	__fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] %%%s-%c:  "};
+const char	__fmt [] = {"[%s\\%s:%u] %%%s-%c:  "};
 char	out[UTIL$SZ_OUTBUF + 8];
 unsigned olen, _sev = $SEV(sev);
 #ifdef	__SYSLOG__
 unsigned opcom = sev & STS$M_SYSLOG;
 #endif
-struct tm _tm = {0};
-struct timespec now = {0};
 
 
 	sev &= ~STS$M_SYSLOG;
@@ -516,17 +1009,8 @@ struct timespec now = {0};
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]-E-:" prefix
 	*/
-	s___time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = snprintf (out, UTIL$SZ_OUTBUF, __fmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __mod, __func, __line, fac, s_severity[_sev]);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += snprintf (out + olen, UTIL$SZ_OUTBUF - olen, __fmt, __mod, __func, __line, fac, s_severity[_sev]);
 
 	va_start (arglist, __line);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
@@ -538,7 +1022,7 @@ struct timespec now = {0};
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen );
+	s_util$logwrite (g_logoutput, out, olen);
 
 		/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -568,28 +1052,27 @@ struct timespec now = {0};
 
 
 /*
- *
- *  Description: a simplified analog of the C RTL syslog() routine is supposed to used to
- *	format and send a message directly to IP (has been defined by $deflog();
- *
- *  Usage:
- *	__util$deflog(NULL, "172.28.4.112");
- *	...
- *	char msg [] = "GAMEOVER, all your base are belong to us";
- *	__util$syslog(LOG_KERN, LOG_DEBUG, "NOXBIT", msg, sizeof(msg));
- *
- *  Input:
- *	fac:	SYSLOG Facility code, see LOG_* constants
- *	pri:	SYSLOG Severity code, see LOG_* constants
- *	tag:	A tag string - a part of the MSG part :-)
- *	msg:	message buffer to be send
- *	msglen:	message length
- *
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a record in RFC-3164 syslog form and send it as a UDP datagram to
+**	the SYSLOG host configured by __util$deflog(). A no-op if no host is set.
+**
+**  FORMAL PARAMETERS:
+**
+**	fac	Syslog facility code
+**	sev	Syslog severity code
+**	tag	Message tag (program/facility name)
+**	msg	Message text
+**	msglen	Length of <msg> in octets
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Sends a datagram on the module-static SYSLOG socket.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; a condition code otherwise.
+**--
+*/
 
 unsigned	__util$syslog
 		(
@@ -679,18 +1162,23 @@ struct	msghdr  msg_desc = {0};
 }
 
 /*
- *
- *  Description: out to the current SYS$OUTPUT option's name  and values.
- *
- *  Input:
- *
- *	opts:	options' table, address of array terminated by 'NUL' entry
- *
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Write the current value of every descriptor in an option table to the
+**	log destination. Password descriptors (OPTS$K_PWD) are shown masked.
+**
+**  FORMAL PARAMETERS:
+**
+**	opts	Option table: address of an OPTS array terminated by OPTS_NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS.
+**--
+*/
 int	__util$showparams	(
 			const OPTS *	opts
 			)
@@ -749,20 +1237,26 @@ OPTS	*optp;
 
 
 /*
- *
- *  Description: processing command line arguments to extract parameters according of options table;
- *		performs basic syntax checking, copy options values to local storage for using at run-time.
- *  Input:
- *	fconf:	A configuration file to be processed
- *	opts:	options' table, address of array terminated by 'NUL' entry
- *
- *  Output:
- *	fills the 'runparams' vector by option
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Fill a table of typed option descriptors from a text configuration
+**	file. Each line has the form -name=value; text after a '!' is a comment.
+**	The same OPTS table may be shared with __util$getparams().
+**
+**  FORMAL PARAMETERS:
+**
+**	fconf	Zero-terminated path of the configuration file
+**	opts	OPTS table terminated by OPTS_NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the named file; updates the variables named by the descriptors.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; STS$K_ERROR on a bad file name, an
+**	unreadable file or an invalid value.
+**--
+*/
 int	__util$readconfig	(
 		const	char *	fconf,
 			OPTS *	opts
@@ -927,21 +1421,28 @@ OPTS	*optp, *optp2;
 
 
 /*
- *
- *  Description: processing command line arguments to extract parameters according of options table;
- *		performs basic syntax checking, copy options values to local storage for using at run-time.
- *  Input:
- *	argc:	an argument count
- *	argv:	an array of command line options
- *	opts:	options' table, address of array terminated by 'NUL' entry
- *
- *  Output:
- *	fills the 'runparams' vector by option
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Parse the program argument vector against a table of typed option
+**	descriptors. Accepts -name=value, /name=value and --name=value; names
+**	may be abbreviated to any unambiguous prefix. An OPTS$K_CONF option
+**	triggers an immediate read of the named file via __util$readconfig().
+**
+**  FORMAL PARAMETERS:
+**
+**	argc	Argument count, as passed to main()
+**	argv	Argument vector
+**	opts	OPTS table terminated by OPTS_NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Updates the variables named by the descriptors.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS if all options parsed; STS$K_ERROR on a bad value or a
+**	missing mandatory option.
+**--
+*/
 int	__util$getparams	(
 			int	argc,
 			char *	argv[],
@@ -1088,22 +1589,27 @@ OPTS	*optp;
 
 
 /*
- *++
- *  Description: dump byte array to sys$output in hex, is supposed to be called indirectly by $DUMPHEX macro.
- *
- * Input:
- *	__fi:	A file name or module name string
- *	__li:	Line number in the source file
- *	src:	A pointer to source buffer  do be dumped
- *	srclen:	A Length of the source buffer
- *
- * Output:
- *	NONE
- * Return:
- *	NONE
- *
- *--
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Write a formatted hexadecimal/ASCII dump of a memory region to the log
+**	destination, laid out sixteen octets per line as 'offset: hex ... ascii'.
+**	Normally invoked through the $DUMPHEX macro, which supplies the call site.
+**
+**  FORMAL PARAMETERS:
+**
+**	a__fi	Call-site function name (from $DUMPHEX)
+**	a__li	Call-site line number (from $DUMPHEX)
+**	a_src	Address of the region to dump
+**	a_srclen	Number of octets to dump
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	NONE.
+**--
+*/
 
 void	__util$dumphex	(
 		const char *	a__fi,
@@ -1112,39 +1618,24 @@ void	__util$dumphex	(
 		unsigned short	a_srclen
 			)
 {
-const char	l_fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s:%u] Dump of %u octets follows:"};
+const char	l_fmt [] = {"[%s:%u] Dump of %u octets follows:"};
 #define		UTILS$SZ_HEXWIDTH	80
 char	l_out[256];
 unsigned char *l_src = (unsigned char *) a_src, l_low, l_high;
 unsigned l_olen = 0, i, j;
-struct tm l_tm;
-struct timespec l_now;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]" prefix
 	*/
-	s___time(&l_now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&l_now, &l_tm);
-#endif
-
-	l_olen = snprintf (l_out, sizeof(l_out) - 1, l_fmt,
-		l_tm.tm_mday, l_tm.tm_mon + 1, 1900 + l_tm.tm_year,
-		l_tm.tm_hour, l_tm.tm_min, l_tm.tm_sec, (unsigned) l_now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(),
-		a__fi, a__li, a_srclen);
+	l_olen = s_util$prefix (l_out);			/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	l_olen += snprintf (l_out + l_olen, sizeof(l_out) - 1 - l_olen, l_fmt, a__fi, a__li, a_srclen);
 
 
 	/* Add <LF> at end of record*/
 	l_olen = $MIN(sizeof(l_out) - 1, l_olen);
 	l_out[l_olen++] = '\n';
 
-	if ( p_cb_log_f )
-		p_cb_log_f(l_out, l_olen);
-	else	write (g_logoutput, l_out, l_olen );
+	s_util$logwrite (g_logoutput, l_out, l_olen );
 
 	memset(l_out, ' ', UTILS$SZ_HEXWIDTH);
 
@@ -1173,9 +1664,7 @@ struct timespec l_now;
 		l_out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
-		if ( p_cb_log_f )
-			p_cb_log_f(l_out, UTILS$SZ_HEXWIDTH);
-		else	write (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
+		s_util$logwrite (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
 		}
 
 	if ( a_srclen % 16 )
@@ -1200,29 +1689,34 @@ struct timespec l_now;
 		l_out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
-		if ( p_cb_log_f )
-			p_cb_log_f(l_out, UTILS$SZ_HEXWIDTH);
-		else	write (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
+		s_util$logwrite (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
 		}
 }
 
 
 /*
- *++
- *  Description: dump byte array to sys$output in hex, is supposed to be called indirectly by $DUMPHEX macro.
- *
- * Input:
- *	src:	A pointer to source buffer  do be dumped
- *	srclen:	A Length of the source buffer
- *	dst:
- *	dstsz:
- *	dstlen:
- *
- * Return:
- *	NONE
- *
- *--
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format up to sixteen octets as a single hex-and-ASCII dump line of the
+**	form 'XX XX ... XX  ....ascii....'. Unused columns are space-padded and
+**	non-printable octets are shown as a dot. Does not read past <a_src>.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_src	Address of the octets to format
+**	a_srclen	Number of octets; values above 16 are clamped to 16
+**	a_out	Destination buffer
+**	a_outsz	Size of <a_out>; must be at least 67 bytes or the routine returns 0
+**	a_outlen	Receives the number of bytes written
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	Number of bytes written; 0 indicates <a_outsz> was too small.
+**--
+*/
 int	__util$faohex	(
 	const void *	a_src,
 	unsigned short	a_srclen,
@@ -1267,22 +1761,29 @@ unsigned l_j;
 
 
 /*
- *++
- *  Description: print to sys$output a program trace information, supposed to be called from
- *		$TRACE 	macro.
- *
- * Input:
- *	fmt:	A format string
- *	__fi:	A file name or module name string
- *	__li:	Line number in the source file
- *	...	Format string arguments
- * Output:
- *	NONE
- * Return:
- *	NONE
- *
- *--
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Emit a diagnostic trace record carrying the call-site module, function
+**	and line. Reached through the $TRACE macro (and $IFTRACE, which guards
+**	the record on a condition). Compiles to nothing under -DNDEBUG.
+**
+**  FORMAL PARAMETERS:
+**
+**	cond	Emit the record only when non-zero (from $IFTRACE)
+**	fmt	A format string
+**	__mod	Module name string
+**	__fi	Function name string
+**	__li	Line number in the source file
+**	...	Format string arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	NONE.
+**--
+*/
 static const	char spaces[64] = {"                                                                "};
 
 void	__util$trace	(
@@ -1296,12 +1797,10 @@ void	__util$trace	(
 {
 va_list arglist;
 
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s:%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] "};
+const char	lfmt [] = {"[%s:%u] "},
+	mfmt [] = {"[%s\\\\%s:%u] "};
 char	out[1024];
 int	olen, len;
-struct tm _tm;
-struct timespec now;
 
 	if ( !cond )
 		return;
@@ -1310,21 +1809,10 @@ struct timespec now;
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]" prefix
 	*/
-	s___time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = __mod
-		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __mod, __fi, __li)
-		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __fi, __li);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += __mod
+		? snprintf (out + olen, sizeof(out) - olen, mfmt, __mod, __fi, __li)
+		: snprintf (out + olen, sizeof(out) - olen, lfmt, __fi, __li);
 
 	if ( 0 < (len = (72 - olen)) )
 		{
@@ -1345,9 +1833,7 @@ struct timespec now;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer */
-	if ( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen );
+	s_util$logwrite (g_logoutput, out, olen );
 
 
 
@@ -1371,6 +1857,27 @@ struct timespec now;
 }
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Like __util$logd() but without an explicit call-site descriptor: format
+**	a record and write it to the current log destination.
+**
+**  FORMAL PARAMETERS:
+**
+**	fac	Facility name
+**	sev	Record severity
+**	fmt	printf-style format string
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	The <sev> argument.
+**--
+*/
 unsigned	__util$log
 			(
 		const char *	fac,
@@ -1381,45 +1888,34 @@ unsigned	__util$log
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "%%%s-%C: ";
+const char lfmt [] = "%%%s-%C: ";
 char	out[UTIL$SZ_OUTBUF + 8];
 unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
-struct tm _tm;
-struct timespec now;
 
 	/*
 	** Some sanity check
 	*/
-	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_ERROR)) )
+	/* BATCH: STS$K_FATAL is 4 and was clamped to STS$K_UNDEF, which is odd and so reads as success */
+	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_FATAL)) )
 		sev = STS$K_UNDEF;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]<FAC>-E:" prefix
 	*/
-	s___time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,
-		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(), fac, s_severity[_sev]);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += snprintf (out + olen, UTIL$SZ_OUTBUF - olen, lfmt, fac, s_severity[_sev]);
 
 	va_start (arglist, fmt);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
 	va_end (arglist);
 
-	olen = $MIN(olen, sizeof(out) - 1);
+	olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);			/* Not sizeof(out): the padding is uninitialized	*/
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen );
+	s_util$logwrite (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -1442,16 +1938,30 @@ struct timespec now;
 }
 
 /*
- *  DESCRIPTION: __util$log2buf - format a message into the given output buffer
- *
- *  INPUT:
- *	out:
- *	outsz:
- *	outlen:
- *	fac:
- *	sev:
- *	fmt:
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a log record exactly as $LOG would, but deliver it into a caller-
+**	supplied buffer instead of the log destination - handy when the text is
+**	needed as a string (a protocol field, a UI element, and so on).
+**
+**  FORMAL PARAMETERS:
+**
+**	out	Address of the output buffer
+**	outsz	Size of <out> in bytes
+**	outlen	Receives the number of bytes written
+**	fac	Facility name
+**	sev	Record severity
+**	fmt	printf-style format string
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	The <sev> argument.
+**--
+*/
 unsigned	__util$log2buf
 			(
 		void	*	out,
@@ -1465,39 +1975,48 @@ unsigned	__util$log2buf
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "%%%s-%C:";
+const char lfmt [] = "%%%s-%C:";
 char	*__outbuf = (char *) out;
 unsigned	_sev = sev;
-struct tm _tm;
-struct timespec now;
+char	l_pfx [48];
+int	l_pl;
 
 	/*
 	** Some sanity check
 	*/
-	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_ERROR)) )
+	/* BATCH: STS$K_FATAL is 4 and was clamped to STS$K_UNDEF, which is odd and so reads as success */
+	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_FATAL)) )
 		sev = STS$K_UNDEF;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]<FAC>-E:" prefix
 	*/
-	s___time(&now);
+	l_pl = s_util$prefix (l_pfx);			/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
 
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
+	if ( outsz < 1 )				/* no usable room in the caller buffer	*/
+		{
+		*outlen = 0;
+		return	_sev;
+		}
 
-	*outlen = snprintf (__outbuf, outsz, lfmt,
-		_tm.tm_mday, _tm.tm_mon + 1, 1900+_tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(), fac, s_severity[sev]);
+	*outlen = $MIN(l_pl, outsz - 1);		/* the prefix, clamped to the caller buffer */
+	memcpy (__outbuf, l_pfx, (size_t) *outlen);
+	*outlen += snprintf (__outbuf + *outlen, outsz - *outlen, lfmt, fac, s_severity[sev]);
+
+	/* snprintf() returns the length it WOULD have written; clamp before reusing
+	** it as an offset, so the append below never gets a negative (huge) size when
+	** the prefix alone already fills the buffer.
+	*/
+	*outlen = $MIN(*outlen, outsz - 1);
 
 	va_start (arglist, fmt);
 	*outlen += vsnprintf(__outbuf + *outlen, outsz - *outlen, fmt, arglist);
 	va_end (arglist);
 
-	*outlen = $MIN(*outlen, outsz);
+	/* outsz-1, not outsz: the explicit terminator below writes __outbuf[*outlen],
+	** so *outlen == outsz would land one byte past the caller's buffer.
+	*/
+	*outlen = $MIN(*outlen, outsz - 1);
 
 	/* Add NIL at end of record*/
 	__outbuf[*outlen] = '\0';
@@ -1506,18 +2025,25 @@ struct timespec now;
 }
 
 /*
- * Description: Open a file to be used as default output file for $TRACE/$LOG/$DUMPHEX routines.
- *		File will be open in shared for read and append mode!
- *
- *  Input:
- *	logfile:	a log file name string, ASCIZ
- *	sloghost:	a SYSLOG Host IP address, ASCIZ
- *
- *  Implicit output:	global logoutput variable
- *
- *  Return:
- *	condition status, see STS$ constants
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Redirect subsequent log output to a file and, optionally, forward each
+**	record as a UDP datagram to a SYSLOG host. Called once at start-up,
+**	before the first $LOG.
+**
+**  FORMAL PARAMETERS:
+**
+**	logfile	Zero-terminated log file path to append to, or NULL for stdout
+**	sloghost	Zero-terminated IPv4 address of a SYSLOG server, or NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Sets the global g_logoutput descriptor (and the SYSLOG socket).
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; the file could not be opened otherwise.
+**--
+*/
 int	__util$deflog	(
 		const char *	logfile,
 		const char *	sloghost
@@ -1561,11 +2087,60 @@ int	fd = -1;
 
 
 /*
- * Description: compare a current file size with the 'limit' and rewind a current file pointer at beginning of file.
- *
- *  Return:
- *	condition status, see STS$ constants
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Point the logging at an already-open descriptor, without opening a file
+**	or touching the standard streams.  The companion to __util$deflog(),
+**	which takes a file NAME and seizes both stdout and stderr with dup2() -
+**	right for a daemon, wrong for a utility whose standard output carries
+**	the data it was run to produce.  Such a utility calls
+**	__util$setlogfd(STDERR_FILENO) once, keeping its output clean while its
+**	$LOG / $TRACE records go to the standard error.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fd	An already-open descriptor to receive the log records
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Sets the global g_logoutput descriptor.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS; STS$K_ERROR if a_fd is negative.
+**--
+*/
+int	__util$setlogfd	(
+		int	a_fd
+			)
+{
+	if ( a_fd < 0 )
+		return	STS$K_ERROR;
+
+	g_logoutput = a_fd;
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Truncate and rewind the current log file once it grows past a limit, so
+**	that a long-running process cannot fill the disk. A no-op when the log
+**	goes to standard output or the limit is zero.
+**
+**  FORMAL PARAMETERS:
+**
+**	limit	Maximum log-file size in bytes before it is rewound
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	May truncate the file behind the global g_logoutput descriptor.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS.
+**--
+*/
 int	__util$rewindlogfile	(
 			size_t	limit
 				)
@@ -1684,52 +2259,67 @@ int	status;
 #endif
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Test whether a string matches a wildcard pattern, recursively. '*'
+**	matches any run of characters and '%' matches exactly one character.
+**	The comparison is case-sensitive.
+**
+**  FORMAL PARAMETERS:
+**
+**	str$		Zero-terminated subject string
+**	pattern$	Zero-terminated pattern, with '*' and '%' wildcards
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	Non-zero if the string matches the pattern, zero otherwise.
+**--
+*/
 int	__util$pattern_match	(
 		char	*	str$,        /* A LITERAL string to match */
 		char	*	pattern$     /* Pattern, with potential wildcards (*,%) to * match the string.*/
 				)
 {
-int done = FALSE, matched_to_eos = FALSE;
+const char *l_s = str$, *l_p = pattern$,
+	*l_sbk = NULL, *l_pbk = NULL;	/* The single backtrack point of the last '*' seen */
 
-	while( (*pattern$ != '\0') && (!done) && ( ((*str$=='\0') && ( (*pattern$==WILD_STAR)) ) || (*str$!='\0')) )
+	/*
+	 * The iterative matcher: advance both cursors on a literal or a '%' hit;
+	 * on a '*' remember the backtrack point and try the shortest run first;
+	 * on a mismatch fall back to the last '*' and let it swallow one more
+	 * octet. One live backtrack point suffices for the star semantics, which
+	 * bounds the work by O(|str| * |pattern|) - the recursive predecessor
+	 * exploded combinatorially on several stars (a*a*a*a*b against a run of
+	 * 'a' took seconds); this one is linear in practice.
+	 */
+	while ( *l_s )
 		{
-		switch (*pattern$)
-			{
-			case WILD_STAR:
-				pattern$++;
-				matched_to_eos = FALSE;
-				while ( (*str$ != '\0') && (! ( matched_to_eos = __util$pattern_match( str$++, pattern$))));
-
-				if ( matched_to_eos )
-					{
-					while (*str$ != '\0') str$++;
-					while (*pattern$ != '\0') pattern$++;
-					}
-				break;
-
-			case WILD_PERCENT:
-				pattern$++;
-				str$++;
-				break;
-
-			/* case '\\':*/
-			/* pattern$++;*/
-
-			default:
-				if (*str$ == *pattern$)
-					{
-					str$++;
-					pattern$++;
-					}
-				else done = TRUE;
+		if ( (*l_p == WILD_PERCENT) || (*l_p == *l_s) )
+			{			/* '%' takes exactly one octet; a literal must equal */
+			l_p++;
+			l_s++;
 			}
+		else if ( *l_p == WILD_STAR )
+			{			/* Remember the star; first try it empty	*/
+			l_pbk = l_p++;
+			l_sbk = l_s;
+			}
+		else if ( l_pbk )
+			{			/* Mismatch: the last star swallows one more octet */
+			l_p = l_pbk + 1;
+			l_s = ++l_sbk;
+			}
+		else	return	FALSE;		/* Mismatch with no star to fall back to	*/
 		}
 
-	while (*pattern$ == WILD_STAR) pattern$++;
+	while ( *l_p == WILD_STAR )		/* Trailing stars match the empty tail		*/
+		l_p++;
 
-	return ( (*str$ == '\0') && (*pattern$ == '\0') );
-
-
+	return	( *l_p == '\0' );
 }
 /******************* end of C_STR$pattern_match *******************/
 
@@ -1780,10 +2370,29 @@ char **	strings;
 
 #if defined(__ARM_FEATURE_CRC32)
 /*
- *  ARMv8 hardware path. The CRC32 instructions implement exactly the IEEE reflected CRC-32,
- *  so the output is bit-identical to the table version. Enabled when the target advertises the
- *  CRC extension (e.g. -march=armv8-a+crc, -mcpu=cortex-a53). A little-endian target is assumed.
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Compute the standard IEEE 802.3 / zlib CRC-32 (reflected polynomial
+**	0xEDB88320) over a memory region. Despite the name this is NOT
+**	Castagnoli CRC-32C. On ARMv8 the hardware crc32 instructions are used;
+**	elsewhere a portable slice-by-eight table. The result is identical on
+**	every platform and byte order; check value for "123456789" is 0xCBF43926.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_crc	Initial value: 0 to start, or a previous result to continue
+**	a_buf	Address of the data
+**	a_buflen	Number of octets
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	The 32-bit checksum (this routine does not use the condition-value
+**	convention).
+**--
+*/
 #include	<arm_acle.h>
 
 unsigned int	__util$crc32c (unsigned int a_crc, const void *a_buf, size_t a_buflen)
@@ -2206,15 +2815,26 @@ unsigned int	l_crc = a_crc ^ ~0U;
 
 
 /*
-**  STRSTR/_STRSTR64
+**++
+**  FUNCTIONAL DESCRIPTION:
 **
-**  The 'strstr' function locates the first occurrence in the string pointed
-**  to by 's1' of the sequence of characters in the string pointed to by 's2'.
+**	Locate the first occurrence in the counted region <s1> of the counted
+**	sequence <s2>, without relying on NUL termination. Both operands may
+**	contain embedded NUL octets.
 **
-**  Return values:
+**  FORMAL PARAMETERS:
 **
-**	non-NULL    the address of the located string
-**	NULL	    indicates that the string was not found
+**	s1	Address of the region to search
+**	s1len	Length of the region
+**	s2	Address of the pattern
+**	s2len	Length of the pattern
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	Address of the first occurrence, or NULL if not found.
+**--
 */
 char *	__util$strstr
 			(
@@ -2271,6 +2891,25 @@ size_t	p1len = s1len, cmplen = s2len - 1;
 
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Write a printf-formatted line to the log destination WITHOUT the
+**	timestamp/severity prefix - for banners, tables and similar output.
+**
+**  FORMAL PARAMETERS:
+**
+**	fmt	printf-style format string
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	A status code.
+**--
+*/
 unsigned	__util$out
 			(
 		char *	fmt,
@@ -2286,13 +2925,14 @@ int	olen = 0;
 	olen += vsnprintf(out, sizeof(out) - 1, fmt, arglist);
 	va_end (arglist);
 
+	/* vsnprintf() returns the length it WOULD have written - clamp before appending */
+	olen = $MIN(olen, (int) sizeof(out) - 1);
+
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	if( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen);
+	s_util$logwrite (g_logoutput, out, olen);
 
 	return	STS$K_SUCCESS;
 }
@@ -2308,6 +2948,24 @@ int	olen = 0;
 
 #ifdef	__MAIN_FOR_DEBUG__
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__MAIN_FOR_DEBUG__ demo harness - not part of the library API.]
+**
+**	Entry point of the demo: declare an option table, parse the command
+**	line with __util$getparams() and print the result with __util$showparams().
+**
+**  FORMAL PARAMETERS:
+**
+**	argc	Argument count
+**	argv	Argument vector
+**
+**  RETURN VALUE:
+**	Process exit status.
+**--
+*/
 int	main (int argc, char *argv[])
 {
 ASC	l_logfspec = {0}, l_confspec = {0}, l_settings = {0};

@@ -62,9 +62,9 @@ extern "C" {
 **  the routines return STS$K_SUCCESS on full conversion, FAO$K_BUFOVF
 **  when output has been truncated, FAO$K_BADDIR on malformed directive.
 */
-#define	FAO$K_BUFOVF	5	/* Output buffer overflow, result truncated */
+#define	FAO$K_BUFOVF	0xa	/* Output buffer overflow, result truncated */
 #define	FAO$K_BADDIR	6	/* Unknown or malformed FAO directive */
-#define	FAO$K_IVTIME	7	/* Invalid time string (UTIL$BINTIM)	*/
+#define	FAO$K_IVTIME	0xc	/* Invalid time string (UTIL$BINTIM)	*/
 #define	FAO$K_NEGTIM	8	/* Negative time result (LIB$_NEGTIM)	*/
 
 /*
@@ -95,11 +95,13 @@ typedef	struct	__fao_desc
 
 /*
 **  Type of a single FAO parameter.  On OpenVMS every argument of $FAO
-**  is a longword; in the portable variant it is a machine word capable
-**  of holding both an integer and a pointer.  Callers of __util$fao() MUST
-**  cast every parameter to fao_prm_t (or pass a pointer) explicitly.
+**  is a longword; in the portable variant it is a 64-bit value able to
+**  hold a 64-bit integer, a time value or a pointer - all BY VALUE.  A
+**  quadword (!xQ) and a time (!%D/!%T) are therefore passed by value, not
+**  by reference.  Callers of __util$fao() MUST cast every parameter to
+**  fao_prm_t explicitly (e.g. (fao_prm_t) my_uint64, (fao_prm_t) my_time).
 */
-typedef	uintptr_t	fao_prm_t;
+typedef	uint64_t	fao_prm_t;
 
 /*
 **  Binary time type used by !%T/!%D and UTIL$BINTIM: seconds of the

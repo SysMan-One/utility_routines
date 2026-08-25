@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the library and run the tests (CMake / CTest)
+        run: |
+          cmake -B build -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      - name: Re-run the tests standalone under ASan / UBSan
+        run: |
+          CFLAGS="-std=gnu11 -O2 -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all" \
+            sh tests/run.sh
+
+  build-and-test-musl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build the library and run the tests (CMake / CTest, musl-gcc)
+        run: |
+          cmake -B build-musl -DCMAKE_C_COMPILER=musl-gcc -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+          cmake --build build-musl
+          ctest --test-dir build-musl --output-on-failure
+
+      - name: Re-run the tests standalone, statically linked against musl
+        run: |
+          CC=musl-gcc CFLAGS="-std=gnu11 -O2 -Wall -Wextra -Werror -static" \
+            sh tests/run.sh

@@ -109,7 +109,6 @@ extern "C" {
 /*
  * For bagent logging
 */
-extern void (*p_cb_log_f)(const char * buf, unsigned int olen);
 
 
 
@@ -437,6 +436,7 @@ typedef struct __emsg_record_desc__ {
 		unsigned		msgnr;			/* A number of messages in the msgs[] */
 		unsigned		facno;			/* A facility number */
 		struct __emsg_record__	*msgrec;		/* An address of the message records */
+		const char		*facname;		/* A facility name, "HELP" - see __util$putmsg_fao() */
 } EMSG_RECORD_DESC;
 
 
@@ -444,6 +444,8 @@ unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc);
 unsigned	__util$getmsg	(unsigned sts, EMSG_RECORD **outmsg);
 unsigned	__util$putmsg	(unsigned sts, ...);
 unsigned	__util$putmsgd	(unsigned sts, const char *__mod, const char *__fi, unsigned __li, ...);
+unsigned	__util$putmsg_fao	(unsigned sts, int prmcnt, ...);
+unsigned	__util$putmsgd_fao	(unsigned sts, const char *__mod, const char *__fi, unsigned __li, int prmcnt, ...);
 
 
 unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
@@ -452,12 +454,58 @@ unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, un
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
 unsigned	__util$out	(char *fmt, ...);
 
+
+/*
+**  $PUTMSG_FAO() casts each FAO parameter to fao_prm_t for the caller, so a
+**  value is written plain: $PUTMSG_FAO(sts, l_seq, l_disp).  The cast is
+**  mandatory - the parameters travel through varargs and __util$faol() reads
+**  each as a 64-bit fao_prm_t, so an un-cast 32-bit value would be read wrong -
+**  and folding it in here means it can never be forgotten.  The leading comma
+**  lives inside FAO$_C(), so a zero-parameter call still expands cleanly.
+**  fao_prm_t comes from starlet.h, which a $PUTMSG_FAO() caller already needs.
+**
+**  The count is not written either: FAO$_NARG() below derives it from the
+**  same list, so it cannot disagree with what follows it.
+*/
+#define	FAO$_C(x)	, ((fao_prm_t)(x))
+#define	FAO$_E0()
+#define	FAO$_E1(a)	FAO$_C(a)
+#define	FAO$_E2(a,b)	FAO$_C(a) FAO$_C(b)
+#define	FAO$_E3(a,b,c)	FAO$_C(a) FAO$_C(b) FAO$_C(c)
+#define	FAO$_E4(a,b,c,d)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d)
+#define	FAO$_E5(a,b,c,d,e)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e)
+#define	FAO$_E6(a,b,c,d,e,f)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f)
+#define	FAO$_E7(a,b,c,d,e,f,g)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g)
+#define	FAO$_E8(a,b,c,d,e,f,g,h)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h)
+#define	FAO$_E9(a,b,c,d,e,f,g,h,i)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i)
+#define	FAO$_E10(a,b,c,d,e,f,g,h,i,j)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j)
+#define	FAO$_E11(a,b,c,d,e,f,g,h,i,j,k)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k)
+#define	FAO$_E12(a,b,c,d,e,f,g,h,i,j,k,l)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l)
+#define	FAO$_E13(a,b,c,d,e,f,g,h,i,j,k,l,m)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m)
+#define	FAO$_E14(a,b,c,d,e,f,g,h,i,j,k,l,m,n)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m) FAO$_C(n)
+#define	FAO$_E15(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m) FAO$_C(n) FAO$_C(o)
+#define	FAO$_E16(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m) FAO$_C(n) FAO$_C(o) FAO$_C(p)
+#define	FAO$_GET(_0,_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,NAME,...)	NAME
+
+/*
+**  The same selection used to count rather than to name: FAO$_NARG()
+**  yields how many parameters were written, 0 to 16.  It exists so that
+**  $PUTMSG_FAO() need not be told a number the compiler can see for
+**  itself - a number written by hand is a number that can disagree with
+**  the list beside it, and a count larger than the list sends
+**  __util$putmsg_fao() reading arguments that were never passed.
+*/
+#define	FAO$_NARG(...)	FAO$_GET(_0, ##__VA_ARGS__, 16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+#define	FAO$_EACH(...)	FAO$_GET(_0, ##__VA_ARGS__, FAO$_E16,FAO$_E15,FAO$_E14,FAO$_E13,FAO$_E12,FAO$_E11,FAO$_E10,FAO$_E9,FAO$_E8,FAO$_E7,FAO$_E6,FAO$_E5,FAO$_E4,FAO$_E3,FAO$_E2,FAO$_E1,FAO$_E0)(__VA_ARGS__)
+
 #ifndef	NDEBUG
 	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
+	#define $PUTMSG_FAO(sts, ...)		__util$putmsgd_fao(sts, __MODULE__, __FUNCTION__ , __LINE__ , FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : severity
 #else
 	#define $PUTMSG(sts, ...)		__util$putmsg(sts, ## __VA_ARGS__)
+	#define $PUTMSG_FAO(sts, ...)		__util$putmsg_fao(sts, FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$log(__FAC__, severity, fmt, ## __VA_ARGS__)
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)	: severity
 
@@ -1361,7 +1409,7 @@ static inline void __util$nope (void) {}
 
 
 	#define $TRACE(fmt, ...)		__util$nope()
-	#define $IFTRACE(cond, fmt, ...)	__util$nope()
+	#define $IFTRACE(cond, fmt, ...)	((void) sizeof(cond), __util$nope())
 
 #endif
 
@@ -1686,6 +1734,7 @@ int	__util$readconfig	(const char *, OPTS *);
 int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);
+int	__util$setlogfd	(int);
 int	__util$rewindlogfile	(size_t);
 int	__util$pattern_match	(char * str$, char * pattern$);
 
