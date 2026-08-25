@@ -1,12 +1,12 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-05"
-#define	__REV__		"1.05.0"
+#define	__IDENT__	"V.01-26"
+#define	__REV__		"1.26.0"
 
 
 /*
 **  Abstract: General purpose and utility routines
 **
-**  Author: Ruslan R. Laishev
+**  Author: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  Creation date: 4-SEP-2017
 **
@@ -42,7 +42,7 @@
 **
 **	 4-JUN-2019	RRL	Improved output buffer security in the $trace(), $log(), $logd(), $log2buf() routines.
 **
-**	25-JUN-2019	ARL	Special changes for Adnroid;
+**	25-JUN-2019	ARL	Special changes for Android;
 **			RRL	Small changes in the  __utility$trace();
 **
 **	 8-JUL-2019	RRL	Improved code quality in the routines processing of configuration options.
@@ -90,6 +90,164 @@
 **
 **	24-APR-2026	RRL	V.01-05 : Added support for parsing CLI option started with "--",
 **				--trace --logfile ...
+**
+**	27-JUL-2026	RRL	V.01-06 : Memory-safety fixes:
+**				- __util$uint32_2_dec() : fixed 1-byte heap overflow (pointer was
+**				  set one past the buffer), render 0 as "0", keep room for the NUL;
+**				- __util$faohex() : do not read past <a_src> for short input, check
+**				  <a_outsz> before writing (was a fixed-offset overrun);
+**				- __util$vfao() : reserve one octet for the terminating NUL;
+**				- s_fmt_pad() : fixed write through an uninitialized pointer on the
+**				  buffer-overflow path;
+**				- s_fmt_unsigned() : digit_stack is now LONG (was int) - fixes
+**				  truncation and signed overflow for 64-bit !xQ/!xL values;
+**				- s_fmt_time() : implemented !%D / !%T (was returning an uninitialized
+**				  value and corrupting the output length);
+**				- __util$faol() : accept the L/Q size specifiers for !U/!X/!O/!Z;
+**				- __util$readconfig() : fixed inverted "no config file" guard
+**				  (rejected every valid file name), report an error instead of reading stdin;
+**				- made s_severity[]/s_defmsgfao[] static, O_CLOEXEC on the log file,
+**				  strtoul() for the PORT option, int (not size_t) length in __util$putmsgd();
+**				- silenced all -Wsign-compare in __util$vfao()/s_fmt_signed() (MIN_INT
+**				  is now a signed INT_MIN), fixed $STS_ERROR()/$DEFMSG() macros in the header;
+**				- __util$readconfig() : reject an input longer than the option name so a
+**				  typo like "NSERVERXYZ" no longer matches "NSERVER";
+**				- converted the remaining Doxygen comment blocks to the VMS style and
+**				  corrected spelling throughout.
+**
+**	27-JUL-2026	RRL	V.01-07 : Performance - __util$crc32c() (which actually computes the
+**				standard IEEE CRC-32, not Castagnoli - see note at the routine):
+**				- portable slice-by-8 core, ~4.5x the byte-at-a-time loop, endian-neutral;
+**				- ARMv8 hardware path (crc32b/crc32x) under __ARM_FEATURE_CRC32, bit-identical
+**				  output (build RK targets with -march=armv8-a+crc / -mcpu=cortex-a35|a55).
+**
+**	28-JUL-2026	RRL	V.01-08 : Removed the legacy FAO facility (__util$fao/__util$faol
+**				and their static helpers __util$vfao/s_output_directive/s_fmt_*); the
+**				FAO service is now provided by the starlet module as __util$fao/
+**				__util$faol. Renamed the static __msgcmp() to s_msgcmp() so that every
+**				static routine carries the s_ prefix. __util$faohex() is retained.
+**				Dropped the vestigial #if __util_DEBUG__ scratch/test block.
+**
+**	30-JUL-2026	RRL	V.01-09 : __util$remqent() - fixed removal of an entry that is the head,
+**				the tail or the only element of the queue: re-point __QUEUE head/tail when a
+**				neighbour is absent instead of dereferencing a NULL left link.
+**
+**	30-JUL-2026	RRL	V.01-10 : Documentation pass - gave every routine a VMS-style
+**				**++ / **-- header (FUNCTIONAL DESCRIPTION / FORMAL PARAMETERS / IMPLICIT
+**				INPUTS-OUTPUTS / RETURN VALUE) and added in-code comments to the sparsely
+**				commented routines. No functional change.
+**				Also documented the __MAIN_FOR_DEBUG__ demo main and normalised the
+**				source to LF line endings (see .gitattributes).
+**
+**	01-AUG-2026	RRL	V.01-11 : __util$log()/__util$log2buf() validated the severity
+**				against [STS$K_WARN..STS$K_ERROR], which rejected STS$K_FATAL (4);
+**				it was clamped to STS$K_UNDEF (odd, reads as success).  Widened the
+**				accepted range to STS$K_FATAL.
+**
+**	01-AUG-2026	RRL	V.01-12 : Routed the nine best-effort log writes through a new
+**				s_util$logwrite() helper that consumes write()'s result, so the
+**				module builds clean under -O2 / -D_FORTIFY_SOURCE (warn_unused_result).
+**
+**	01-AUG-2026	RRL	V.01-13 : Fixed two stack buffer overflows of the same shape:
+**				__util$out() and __util$putmsg() appended the terminating <LF> at
+**				the offset (v)snprintf() had REQUIRED rather than the one it had
+**				actually WRITTEN, so a formatted record longer than the buffer wrote
+**				the <LF> past its end and then handed the inflated length to write().
+**				__util$logd() and __util$log2buf() already clamped; the same clamp is
+**				applied here. Tightened three further clamps from sizeof(out) - 1 and
+**				UTIL$SZ_OUTBUF down to UTIL$SZ_OUTBUF - 1: the arrays carry 8 octets of
+**				padding which (v)snprintf() never writes, so a truncated record used to
+**				emit up to 8 uninitialized stack octets into the log.
+**				See tests/test_log_overflow.c.
+**
+**	01-AUG-2026	RRL	V.01-14 : Hardened __util$log2buf() against overflow of the CALLER's
+**				buffer, on two counts: (a) it clamped the length to outsz and wrote the
+**				terminator at __outbuf[outsz], one past the end, when a record filled
+**				the buffer - clamp to outsz-1; (b) when the timestamp prefix alone was
+**				longer than outsz, snprintf() returned a length > outsz and the follow-
+**				up vsnprintf() was handed a negative (hence huge) size, writing far past
+**				the buffer - the prefix length is now clamped before the append and a
+**				outsz < 1 guard was added. Caught by tests/test_log_overflow.c.
+**
+**	01-AUG-2026	RRL	V.01-15 : The p_cb_log_f diversion hook is honoured by the logging
+**				routines as well. It was consulted by __util$out(), __util$trace() and
+**				__util$dumphex() only, while __util$log(), __util$logd(), __util$putmsg()
+**				and __util$putmsgd() wrote to g_logoutput regardless - so an application
+**				that installed the hook could divert its tracing and its raw output but
+**				not its $LOG records, which kept landing on the standard output. That is
+**				a hazard for a utility whose standard output carries data.
+**
+**	01-AUG-2026	RRL	V.01-16 : Removed the p_cb_log_f diversion hook and its global pointer
+**				entirely; every logging routine now writes straight to g_logoutput.
+**				Output is redirected with __util$deflog() (file or SYSLOG host) instead.
+**
+**	01-AUG-2026	RRL	V.01-17 : Added __util$setlogfd(): point the logging at an already-
+**				open descriptor without opening a file or seizing stdout/stderr, as
+**				__util$deflog() does. Lets a utility whose standard output carries data
+**				send its log to the standard error with one call and no dup2() dance.
+**
+**	 3-AUG-2026	RRL	V.01-18 : Added the FAO variants of the message signalling:
+**				__util$putmsg_fao() and __util$putmsgd_fao(), reached through the
+**				$PUTMSG_FAO() macro. They look a catalogue record up by its
+**				condition value like __util$putmsg()/__util$putmsgd(), but format
+**				the record text as an FAO control string via __util$faol() (the
+**				starlet FAO service) rather than as a printf format - so a record
+**				may use !UL/!UQ/!AS/!AD and friends. starlet.h is now included by
+**				this module for the FAO API.
+**
+**	 3-AUG-2026	RRL	V.01-19 : $PUTMSG_FAO() now applies the (fao_prm_t) cast to each
+**				parameter itself (FAO$_EACH machinery in the header), so a caller writes
+**				the value plain - $PUTMSG_FAO(sts, 2, l_seq, l_disp) - and can no longer
+**				forget the cast, which was silent undefined behaviour. The explicit
+**				count is unchanged; 0..16 parameters are handled.
+**
+**	 3-AUG-2026	RRL	V.01-20 : Under NDEBUG the no-op $IFTRACE() now references its condition
+**				via sizeof (used, but not evaluated), so a trace-only local such as
+**				cli_routines' qlog no longer draws -Wunused-variable in a release build.
+**
+**	 3-AUG-2026	RRL	V.01-21 : $PUTMSG_FAO() now derives the parameter count from the list
+**				itself (FAO$_NARG), so the caller writes neither the count nor the casts:
+**				$PUTMSG_FAO(sts, l_seq, l_disp). A count that is never written by hand
+**				cannot disagree with the list beside it, nor send the routine reading
+**				parameters that were never passed.
+**
+**	 7-AUG-2026	RRL	V.01-22 : s_msgcmp() compared the whole condition value, so a record was
+**				found only when the signalled severity matched the registered one. It now
+**				compares the message number ($MSG, severity bits dropped), so one record
+**				serves any severity - a status may be signalled INFO in one place and
+**				WARNING in another. The severity shown/returned is the caller's ($SEV);
+**				a message number is expected once per facility catalogue.
+**
+**	 7-AUG-2026	RRL	V.01-23 : s_msgcmp() now compares facility then message number (still
+**				severity-independent), so records of different facilities cannot collide.
+**				__util$putmsg_fao()/__util$putmsgd_fao() prefix a found record with the
+**				caller's severity - %<S>- taken from $SEV(sts) - so one record shows its
+**				INFO/WARNING/... face.
+**
+**	 7-AUG-2026	RRL	V.01-24 : Restored the facname field in EMSG_RECORD_DESC (the field only,
+**				not __util$fmtmsg), so a signalled record is now framed with the full
+**				OpenVMS envelope %<facility>-<S>-<text>: s_util$facname() supplies the
+**				name (or NONAME), the severity is the caller's ($SEV).
+**
+**	13-AUG-2026	RRL	V.01-25 : The log-record prefix is now rendered by s_util$prefix() -
+**				byte-identical to the former snprintf of "%02u-%02u-%04u ..." but ~20x
+**				cheaper: the date-time is reformatted only when the second changes
+**				(a per-thread cache), the digits are laid out by hand, and the thread
+**				id is fetched once per thread instead of a syscall per record. All nine
+**				prefix sites (putmsg[d][_fao], logd, log, log2buf, trace, dumphex) use
+**				the helper; the suffixes ([mod:line], %<fac>-<S>-) stay as snprintf.
+**				End-to-end: putmsg_fao 1153 -> 259 ns, $LOG 1216 -> 302 ns. En passant:
+**				dumphex's WIN32 branch referenced _tm/now instead of l_tm/l_now (would
+**				not compile there) - gone with the block. NB: after a fork() the child
+**				inherits the cached tid - see s_util$prefix() notes.
+**
+**	14-AUG-2026	RRL	V.01-26 : __util$pattern_match() rewritten from the recursive matcher
+**				to the iterative one with a single backtrack point. Same semantics ('*'
+**				a run, '%' one octet; 500000 random cases agree with the old algorithm,
+**				see tests/test_pattern_match.c), but bounded by O(|s|*|p|): the pattern
+**				a*a*a*a*a*b over 200 octets of 'a' went from 8.6 SECONDS to 318 ns, and
+**				the typical cases got 1.6-3.6x faster (15-26 ns). No recursion - no
+**				stack hazard on hostile patterns from a config or the CLI.
 **
 */
 
@@ -150,6 +308,7 @@
 #endif
 
 #include	"utility_routines.h"
+#include	"starlet.h"					/* FAO service for the _FAO message variants	*/
 
 
 #ifndef	WIN32
@@ -180,57 +339,99 @@
 static int	g_logoutput = STDOUT_FILENO;				/* Default descriptor for default output device		*/
 
 
-void (*p_cb_log_f) (const char * buf, unsigned int olen) = NULL;	/* A reference to an exteranl routine to accept
-									   a has been formated message. It's is supposed to be used
-									   instead of write() to a STDOUT */
 
 struct sockaddr_in slogsock;						/* SYSLOG Host socket					*/
 
 
-static EMSG_RECORD_DESC	*emsg_record_desc_root;				/* A root to the message records descriptior		*/
+static EMSG_RECORD_DESC	*emsg_record_desc_root;				/* A root to the message records descriptor		*/
 
 /*
- *   DESCRIPTION: Message record compare routine
- *
- *   INPUT:
- *
- *   OUTPUT:
- *	NONE
- *
- *   RETURNS:
- *	a - b
- */
-static int __msgcmp (const void *a, const void *b)
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Best-effort write of a formatted record to the log descriptor.  The result
+**	is deliberately discarded - there is nothing sensible to do when the log
+**	write itself fails - but it is consumed so that write()'s warn_unused_result
+**	does not fire under -D_FORTIFY_SOURCE / -O2.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fd	The log file descriptor
+**	a_buf	The record to write
+**	a_len	Its length in octets
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	NONE.
+**--
+*/
+static	inline void	s_util$logwrite	(int a_fd, const void *a_buf, size_t a_len)
+{
+	if ( 0 > write (a_fd, a_buf, a_len) )
+		return;			/* best-effort: nothing to do on failure	*/
+}
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Comparison routine for the message catalogue. Orders two EMSG_RECORD
+**	entries by their condition/message code, so that qsort() can sort the
+**	catalogue and bsearch() can look a message up by that code.
+**
+**  FORMAL PARAMETERS:
+**
+**	a	Address of the first  EMSG_RECORD
+**	b	Address of the second EMSG_RECORD
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	Negative, zero or positive as a->sts is less than, equal to or
+**	greater than b->sts.
+**--
+*/
+static int s_msgcmp (const void *a, const void *b)
 {
 const EMSG_RECORD *m1 = a, *m2 = b;
+int	l_c;
 
 
-	return	( (int)m1->sts - (int)m2->sts);
+	/*
+	 * Compare by facility, then by message number, with the severity bits
+	 * dropped. A record is thus found regardless of the severity carried by the
+	 * signalled status - one status may be signalled INFO in one place and
+	 * WARNING in another from a single record - while records of different
+	 * facilities never collide. The severity shown is the caller's ($SEV of the
+	 * status). A message number is expected to appear once in a facility's catalogue.
+	 */
+	l_c = (int) $FAC(m1->sts) - (int) $FAC(m2->sts);
+	return	l_c ? l_c : ( (int) $MSG(m1->sts) - (int) $MSG(m2->sts) );
 }
 
 
 /*
- *   DESCRIPTION: Sorting message records according <sts> field as a key,
- *	link message records descriptor in to the global list.
- *	This routine is should be called once at task initialization time before any
- *	consecutive $GETMSG/$PUTMSG calls!
- *
- *   IMPLICITE INPUTS:
- *	emsg_record_desc_root
- *
- *   INPUTS:
- *	msgdsc:	Message Records Descriptor
- *
- *   OUTPUTS:
- *	NONE
- *
- *   IMPLICITE OUTPUTS:
- *	msgdsc:
- *
- *   RETURNS:
- *	STS$K_WARN	- non-principal error
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Initialise a message catalogue: sort the caller's array of message
+**	records by code so that __util$getmsg() can binary-search it, and link
+**	the descriptor into the active catalogue list.
+**
+**  FORMAL PARAMETERS:
+**
+**	msgdsc	Address of the message-records descriptor (array + count)
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Links <msgdsc> into the module-static emsg_record_desc_root list.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; STS$K_WARN / condition code otherwise.
+**--
+*/
 unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc)
 {
 EMSG_RECORD_DESC *md;
@@ -244,7 +445,7 @@ EMSG_RECORD_DESC *md;
 			return	STS$K_WARN;
 
 
-	qsort(msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), __msgcmp);
+	qsort(msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp);
 
 	msgdsc->link = emsg_record_desc_root;
 	emsg_record_desc_root = msgdsc;
@@ -254,21 +455,26 @@ EMSG_RECORD_DESC *md;
 
 
 /*
- *   DESCRIPTION: Retrieve message record by using message number code.
- *
- *   IMPLICITE INPUTS:
- *	emsg_record_desc_root
- *
- *   INPUTS:
- *	sts:	condition code/message number code
- *
- *   OUTPUTS:
- *	outmsg:	A found message record
- *
- *   RETURNS:
- *	STS$K_SUCCESS	- outmsg contains an address of the has been found mssage record
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Look up a message record by its condition/message code in the
+**	catalogue registered with __util$inimsg(). The facility number selects
+**	the descriptor, then the record is found by binary search.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition code / message number to find
+**	outmsg	Receives the address of the matching EMSG_RECORD
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the module-static emsg_record_desc_root list.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS - <outmsg> holds the found record;
+**	condition code otherwise.
+**--
+*/
 unsigned	__util$getmsg	(unsigned sts, EMSG_RECORD **outmsg )
 {
 unsigned	facno;
@@ -287,7 +493,7 @@ EMSG_RECORD *msgrec;
 	/* We found message records descriptor for the facility,
 	 * so we can try to find the message record with the given <msgno>
 	 */
-	if ( !(msgrec = bsearch(&sts, msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), __msgcmp)) )
+	if ( !(msgrec = bsearch(&sts, msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp)) )
 		return	STS$K_ERROR;		/* RNF */
 
 	*outmsg = msgrec;
@@ -296,24 +502,154 @@ EMSG_RECORD *msgrec;
 }
 
 /*
- *   DESCRIPTION: Format a message to be output on the SYS$OUTPUT by using a format from the message record
- *
- *   IMPLICITE INPUTS:
- *	emsg_record_desc_root
- *
- *   INPUTS:
- *	sts:	condition code/message number code
- *	...:	Additional parameters, according the FAO of the message
- *
- *   OUTPUTS:
- *	NONE
- *
- *   RETURNS:
- *	<sts>
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a catalogue message by its condition/message code (looked up via
+**	__util$getmsg()) together with any FAO/printf-style arguments, and write
+**	the result to the current log destination.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition/message code selecting the catalogue record
+**	...	Arguments for the message text, per its format
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the message catalogue; writes to the log destination.
+**
+**  RETURN VALUE:
+**	The <sts> argument, so the call may be used in a return statement.
+**--
+*/
 
-const char severity[STS$K_MAX]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
-const char defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: %#x/%d, sev: %#x/%d, msgno: %#x/%d]"};
+static const char s_severity[STS$K_MAX]= { 'W', 'S', 'E', 'I', 'F', '?', '?', '?'};
+static const char s_defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: %#x/%d, sev: %#x/%d, msgno: %#x/%d]"};
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format the standard log-record prefix - "DD-MM-YYYY HH:MM:SS.msc <tid> ",
+**	byte-identical to the former snprintf of
+**	"%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT - but at a fraction
+**	of the cost: the date-time part up to the '.' is reformatted only when the
+**	second changes (a per-thread cache), the digits are emitted by hand, and
+**	the thread id is fetched from the kernel once per thread instead of a
+**	syscall per record.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_out	- address of the output buffer, at least 48 octets
+**
+**  IMPLICIT INPUTS:
+**	Per-thread caches of the current second's text and of the thread id.
+**
+**  SIDE EFFECTS:
+**	NB: after a fork() the child inherits the parent's cached thread id;
+**	a process that forks after its first log record and cares about the tid
+**	column should reset it via pthread_atfork() or re-exec.
+**
+**  COMPLETION STATUS:
+**	Length of the prefix written to <a_out>, octets.
+**--
+*/
+#if defined(_WIN32)
+#define	UTIL$TLS	__declspec(thread)
+#else
+#define	UTIL$TLS	__thread
+#endif
+
+static int	s_util$prefix (char *a_out)
+{
+struct timespec l_now;
+unsigned l_val;
+int	l_n, l_k, l_pad;
+char	l_tmp [16];
+static UTIL$TLS time_t	s_sec = (time_t) -1;
+static UTIL$TLS char	s_datim [20];		/* "DD-MM-YYYY HH:MM:SS."	*/
+static UTIL$TLS unsigned s_tid;
+
+	s___time (&l_now);
+
+	if ( l_now.tv_sec != s_sec )		/* A new second - reformat the cached date-time part */
+		{
+		struct tm l_tm;
+
+#ifdef	WIN32
+		localtime_s (&l_tm, (time_t *) &l_now);
+#else
+		localtime_r ((time_t *) &l_now, &l_tm);
+#endif
+		s_datim[0] = (char) ('0' + l_tm.tm_mday / 10);
+		s_datim[1] = (char) ('0' + l_tm.tm_mday % 10);
+		s_datim[2] = '-';
+		s_datim[3] = (char) ('0' + (l_tm.tm_mon + 1) / 10);
+		s_datim[4] = (char) ('0' + (l_tm.tm_mon + 1) % 10);
+		s_datim[5] = '-';
+		l_val = (unsigned) (1900 + l_tm.tm_year);
+		s_datim[6] = (char) ('0' + l_val / 1000);
+		s_datim[7] = (char) ('0' + (l_val / 100) % 10);
+		s_datim[8] = (char) ('0' + (l_val / 10) % 10);
+		s_datim[9] = (char) ('0' + l_val % 10);
+		s_datim[10] = ' ';
+		s_datim[11] = (char) ('0' + l_tm.tm_hour / 10);
+		s_datim[12] = (char) ('0' + l_tm.tm_hour % 10);
+		s_datim[13] = ':';
+		s_datim[14] = (char) ('0' + l_tm.tm_min / 10);
+		s_datim[15] = (char) ('0' + l_tm.tm_min % 10);
+		s_datim[16] = ':';
+		s_datim[17] = (char) ('0' + l_tm.tm_sec / 10);
+		s_datim[18] = (char) ('0' + l_tm.tm_sec % 10);
+		s_datim[19] = '.';
+
+		s_sec = l_now.tv_sec;
+		}
+
+	memcpy (a_out, s_datim, 20);
+	l_n = 20;
+
+	/* The fraction, zero-filled to three digits as %03u did - the very same
+	** (unsigned) tv_nsec / TIMSPECDEVIDER value as before
+	*/
+	l_val = (unsigned) l_now.tv_nsec / TIMSPECDEVIDER;
+	l_k = 0;
+	do	{
+		l_tmp[l_k++] = (char) ('0' + l_val % 10);
+		l_val /= 10;
+		}
+	while ( l_val );
+	for ( ; l_k < 3; l_k++)
+		l_tmp[l_k] = '0';
+	while ( l_k )
+		a_out[l_n++] = l_tmp[--l_k];
+
+	a_out[l_n++] = ' ';
+
+	/* The thread id, right-aligned to six columns as "%6d " did - fetched once per thread */
+	if ( !s_tid )
+#ifdef	_WIN32
+		s_tid = (unsigned) gettid ();
+#else
+		s_tid = (unsigned) __gettid ();
+#endif
+
+	l_val = s_tid;
+	l_k = 0;
+	do	{
+		l_tmp[l_k++] = (char) ('0' + l_val % 10);
+		l_val /= 10;
+		}
+	while ( l_val );
+	for ( l_pad = 6 - l_k; l_pad > 0; l_pad--)
+		a_out[l_n++] = ' ';
+	while ( l_k )
+		a_out[l_n++] = l_tmp[--l_k];
+
+	a_out[l_n++] = ' ';
+
+	return	l_n;
+}
+
 
 unsigned	__util$putmsg
 			(
@@ -323,30 +659,16 @@ unsigned	__util$putmsg
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT;
 char	out[UTIL$SZ_OUTBUF + 8];
 int	olen, sev;
-struct tm _tm;
-struct timespec now;
 EMSG_RECORD *msgrec;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
 	*/
-	s___time(&now);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
 
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,			/* Format a prefix part of the message: time + PID ... */
-		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid());
-
-	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
+	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retrieve the message record */
 		{
 		va_start (arglist, sts);				/* Format text message */
 		olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, msgrec->text, arglist);
@@ -354,16 +676,18 @@ EMSG_RECORD *msgrec;
 		}
 	else	{							/* Format text message with the default FAO */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, defmsgfao, severity[sev], sts,
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
 			$FAC(sts), $FAC(sts), sev, sev, $MSG(sts), $MSG(sts));
 		}
 
+	/* (v)snprintf() returns the length it WOULD have written - clamp before appending */
+	olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen);
+	s_util$logwrite (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -373,6 +697,29 @@ EMSG_RECORD *msgrec;
 	return	sts;
 }
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a catalogue message by code, with the call-site module, function
+**	and line and any arguments, and write it to the log. Descriptor form
+**	behind __util$putmsg().
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition/message code
+**	__mod	Call-site module name
+**	__fi	Call-site function name
+**	__li	Call-site line number
+**	...	Message arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the message catalogue; writes to the log destination.
+**
+**  RETURN VALUE:
+**	The <sts> argument.
+**--
+*/
 unsigned	__util$putmsgd
 			(
 		unsigned	sts,
@@ -384,55 +731,42 @@ unsigned	__util$putmsgd
 
 {
 va_list arglist;
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "[%s:%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] "};
+const char	lfmt [] = {"[%s:%u] "},
+	mfmt [] = {"[%s\\%s:%u] "};
 char	out[UTIL$SZ_OUTBUF + 8];
-size_t olen, sev;
-struct tm _tm;
-struct timespec now;
+int	olen, sev;
 EMSG_RECORD *msgrec;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec <PID/TID> " prefix
 	*/
-	s___time(&now);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += __mod
+		? snprintf (out + olen, UTIL$SZ_OUTBUF - olen, mfmt, __mod, __fi, __li)
+		: snprintf (out + olen, UTIL$SZ_OUTBUF - olen, lfmt, __fi, __li);
 
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
 
-	olen = __mod
-		? snprintf (out, UTIL$SZ_OUTBUF, mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __mod, __fi, __li)
-		: snprintf (out, UTIL$SZ_OUTBUF, lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __fi, __li);
-
-	olen = $MIN(UTIL$SZ_OUTBUF, olen);
-
-	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retreive the message record */
+	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Retrieve the message record */
 		{
-		va_start (arglist, __li);				/* Fromat text message */
+		va_start (arglist, __li);				/* Format text message */
 		olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, msgrec->text, arglist);
 		va_end (arglist);
 		}
 	else	{							/* Format text message with the default FAO */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, defmsgfao, severity[sev], sts,
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
 			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
 		}
 
 
-	olen = $MIN(UTIL$SZ_OUTBUF, olen);
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen);
+	s_util$logwrite (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -443,10 +777,212 @@ EMSG_RECORD *msgrec;
 }
 
 
+/*
+**  Return the name registered for a status's facility, or "NONAME" when the
+**  facility carries none - used to frame a signalled record as %<facility>-<S>-.
+*/
+static const char *s_util$facname (unsigned sts)
+{
+EMSG_RECORD_DESC *md;
+
+	for ( md = emsg_record_desc_root; md; md = md->link )
+		if ( md->facno == $FAC(sts) )
+			return	(md->facname && *md->facname) ? md->facname : "NONAME";
+
+	return	"NONAME";
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO variant of __util$putmsg(): look the catalogue record up by its
+**	condition value and format its text as an FAO control string (via
+**	__util$faol()) rather than a printf format, then write it to the log
+**	destination with the usual timestamp/PID prefix. The record text may
+**	use the FAO directives (!UL, !UQ, !AS, !AD, !XL ...); each variadic
+**	parameter must be passed already cast to fao_prm_t.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts	Condition/message code selecting the catalogue record
+**	...	FAO parameters for the record text, each cast to fao_prm_t
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the message catalogue; writes to the log destination.
+**
+**  RETURN VALUE:
+**	sts
+**--
+*/
+unsigned	__util$putmsg_fao	(unsigned sts, int prmcnt, ...)
+{
+va_list	arglist;
+char	out [UTIL$SZ_OUTBUF + 8], body [UTIL$SZ_OUTBUF];
+fao_desc_t	bodydsc = $FAO_DESC(body);
+unsigned short	bodylen = 0;
+int	olen, sev, n;
+fao_prm_t	prm [16];
+EMSG_RECORD *msgrec;
+
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+
+	/*
+	**  Collect the FAO parameters into a list for __util$faol().  The
+	**  count is taken from the caller rather than assumed: reading more
+	**  arguments than were passed is undefined behaviour, and telling
+	**  __util$faol() there are sixteen of them defeats its own guard
+	**  against a control string with more directives than parameters -
+	**  a mismatch between a catalogue entry and its caller would then
+	**  format whatever the stack happened to hold.
+	*/
+	if ( prmcnt > (int) (sizeof(prm)/sizeof(prm[0])) )
+		prmcnt = (int) (sizeof(prm)/sizeof(prm[0]));
+
+	if ( prmcnt < 0 )
+		prmcnt = 0;
+
+	va_start (arglist, prmcnt);
+	for ( n = 0; n < prmcnt; n++ )
+		prm[n] = va_arg(arglist, fao_prm_t);
+	va_end (arglist);
+
+	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Format the record text through FAO */
+		{
+		/* Prefix the caller's severity - %<S>- - so one record can show its INFO/WARNING/... face */
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
+
+		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
+		if ( (int) bodylen > (UTIL$SZ_OUTBUF - olen - 1) )
+			bodylen = (unsigned short) (UTIL$SZ_OUTBUF - olen - 1);
+		memcpy (out + olen, body, (size_t) bodylen);
+		olen += (int) bodylen;
+		}
+	else	{							/* No record - the default diagnostic */
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
+			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
+		}
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+	out[olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, out, olen);
+
+	return	sts;
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO variant of __util$putmsgd(): as __util$putmsg_fao(), but with the
+**	module/function/line location prefix used by the debug $PUTMSG_FAO macro.
+**
+**  FORMAL PARAMETERS:
+**
+**	sts		Condition/message code selecting the catalogue record
+**	__mod,__fi,__li	Module, function and line of the call site
+**	...		FAO parameters for the record text, each cast to fao_prm_t
+**
+**  RETURN VALUE:
+**	sts
+**--
+*/
+unsigned	__util$putmsgd_fao	(unsigned sts, const char *__mod, const char *__fi, unsigned __li, int prmcnt, ...)
+{
+va_list	arglist;
+const char	lfmt [] = {"[%s:%u] "},
+	mfmt [] = {"[%s\\%s:%u] "};
+char	out [UTIL$SZ_OUTBUF + 8], body [UTIL$SZ_OUTBUF];
+fao_desc_t	bodydsc = $FAO_DESC(body);
+unsigned short	bodylen = 0;
+int	olen, sev, n;
+fao_prm_t	prm [16];
+EMSG_RECORD *msgrec;
+
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += __mod
+		? snprintf (out + olen, UTIL$SZ_OUTBUF - olen, mfmt, __mod, __fi, __li)
+		: snprintf (out + olen, UTIL$SZ_OUTBUF - olen, lfmt, __fi, __li);
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+
+	/*  The count is the caller's, see __util$putmsg_fao() above  */
+	if ( prmcnt > (int) (sizeof(prm)/sizeof(prm[0])) )
+		prmcnt = (int) (sizeof(prm)/sizeof(prm[0]));
+
+	if ( prmcnt < 0 )
+		prmcnt = 0;
+
+	va_start (arglist, prmcnt);
+	for ( n = 0; n < prmcnt; n++ )
+		prm[n] = va_arg(arglist, fao_prm_t);
+	va_end (arglist);
+
+	if ( 1 & __util$getmsg(sts, &msgrec) )
+		{
+		/* Prefix the caller's severity - %<S>- - as __util$putmsg_fao() does */
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
+
+		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
+		if ( (int) bodylen > (UTIL$SZ_OUTBUF - olen - 1) )
+			bodylen = (unsigned short) (UTIL$SZ_OUTBUF - olen - 1);
+		memcpy (out + olen, body, (size_t) bodylen);
+		olen += (int) bodylen;
+		}
+	else	{
+		sev = $SEV(sts);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, s_defmsgfao, s_severity[sev], sts,
+			$FAC(sts), $FAC(sts), (int) sev, (int) sev, $MSG(sts), $MSG(sts));
+		}
+
+	olen = $MIN(UTIL$SZ_OUTBUF - 1, olen);
+	out[olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, out, olen);
+
+	return	sts;
+}
 
 
 
 
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a record under a printf-style format and write it, with the
+**	timestamp / severity / location prefix, to the current log destination.
+**	This is the routine the $LOG macro expands to.
+**
+**  FORMAL PARAMETERS:
+**
+**	fac	Facility name for the prefix
+**	sev	Record severity (STS$K_*)
+**	fmt	printf-style format string
+**	__mod	Call-site module name
+**	__func	Call-site function name
+**	__line	Call-site line number
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination (and the SYSLOG socket, if set).
+**
+**  RETURN VALUE:
+**	The <sev> argument, so the call may be used in a return statement.
+**--
+*/
 unsigned	__util$logd
 			(
 		const char *	fac,
@@ -460,14 +996,12 @@ unsigned	__util$logd
 
 {
 va_list arglist;
-const char	__fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] %%%s-%c:  "};
+const char	__fmt [] = {"[%s\\%s:%u] %%%s-%c:  "};
 char	out[UTIL$SZ_OUTBUF + 8];
 unsigned olen, _sev = $SEV(sev);
 #ifdef	__SYSLOG__
 unsigned opcom = sev & STS$M_SYSLOG;
 #endif
-struct tm _tm = {0};
-struct timespec now = {0};
 
 
 	sev &= ~STS$M_SYSLOG;
@@ -475,17 +1009,8 @@ struct timespec now = {0};
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]-E-:" prefix
 	*/
-	s___time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = snprintf (out, UTIL$SZ_OUTBUF, __fmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __mod, __func, __line, fac, severity[_sev]);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += snprintf (out + olen, UTIL$SZ_OUTBUF - olen, __fmt, __mod, __func, __line, fac, s_severity[_sev]);
 
 	va_start (arglist, __line);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
@@ -497,7 +1022,7 @@ struct timespec now = {0};
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen );
+	s_util$logwrite (g_logoutput, out, olen);
 
 		/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -527,28 +1052,27 @@ struct timespec now = {0};
 
 
 /*
- *
- *  Description: a simplified analog of the C RTL syslog() routine is supposed to used to
- *	format and send a message directly to IP (has been defined by $deflog();
- *
- *  Usage:
- *	__util$deflog(NULL, "172.28.4.112");
- *	...
- *	char msg [] = "GAMEOVER, all your base are belong to us";
- *	__util$syslog(LOG_KERN, LOG_DEBUG, "NOXBIT", msg, sizeof(msg));
- *
- *  Input:
- *	fac:	SYSLOG Facility code, see LOG_* constants
- *	pri:	SYSLOG Severity code, see LOG_* constants
- *	tag:	A tag string - a part of the MSG part :-)
- *	msg:	message buffer to be send
- *	msglen:	message length
- *
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a record in RFC-3164 syslog form and send it as a UDP datagram to
+**	the SYSLOG host configured by __util$deflog(). A no-op if no host is set.
+**
+**  FORMAL PARAMETERS:
+**
+**	fac	Syslog facility code
+**	sev	Syslog severity code
+**	tag	Message tag (program/facility name)
+**	msg	Message text
+**	msglen	Length of <msg> in octets
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Sends a datagram on the module-static SYSLOG socket.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; a condition code otherwise.
+**--
+*/
 
 unsigned	__util$syslog
 		(
@@ -638,18 +1162,23 @@ struct	msghdr  msg_desc = {0};
 }
 
 /*
- *
- *  Description: out to the current SYS$OUTPUT option's name  and values.
- *
- *  Input:
- *
- *	opts:	options' table, address of array terminated by 'NUL' entry
- *
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Write the current value of every descriptor in an option table to the
+**	log destination. Password descriptors (OPTS$K_PWD) are shown masked.
+**
+**  FORMAL PARAMETERS:
+**
+**	opts	Option table: address of an OPTS array terminated by OPTS_NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS.
+**--
+*/
 int	__util$showparams	(
 			const OPTS *	opts
 			)
@@ -708,20 +1237,26 @@ OPTS	*optp;
 
 
 /*
- *
- *  Description: processing command line arguments to extract parameters according of options table;
- *		performs basic syntax checking, copy options values to local storage for using at run-time.
- *  Input:
- *	fconf:	A configuration file to be processed
- *	opts:	options' table, address of array terminated by 'NUL' entry
- *
- *  Output:
- *	fills the 'runparams' vector by option
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Fill a table of typed option descriptors from a text configuration
+**	file. Each line has the form -name=value; text after a '!' is a comment.
+**	The same OPTS table may be shared with __util$getparams().
+**
+**  FORMAL PARAMETERS:
+**
+**	fconf	Zero-terminated path of the configuration file
+**	opts	OPTS table terminated by OPTS_NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Reads the named file; updates the variables named by the descriptors.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; STS$K_ERROR on a bad file name, an
+**	unreadable file or an invalid value.
+**--
+*/
 int	__util$readconfig	(
 		const	char *	fconf,
 			OPTS *	opts
@@ -736,11 +1271,11 @@ OPTS	*optp, *optp2;
 	/*
 	 * Is the configuration file has been specified ?
 	 */
-	if ( fconf && (*fconf) )
-		{
-		if ( !(finp = fopen(fconf, "r")) )
-			return	$LOG(STS$K_ERROR, "Error open file '%s', errno = %d", fconf, errno);
-		}
+	if ( !fconf || !(*fconf) )
+		return	$LOG(STS$K_ERROR, "No configuration file is provided, check input");
+
+	if ( !(finp = fopen(fconf, "r")) )
+		return	$LOG(STS$K_ERROR, "Error open file '%s', errno = %d", fconf, errno);
 
 	/*
 	* We expect to see opts in form: -<options_name>=<options_value>
@@ -778,6 +1313,12 @@ OPTS	*optp, *optp2;
 		*/
 		for (optp2 = NULL, optp = opts; $ASCLEN(&optp->name); optp++)
 			{
+			/* Input longer than the option name can not be an abbreviation of it - skip to avoid false matches
+			 * (e.g. "NSERVERXYZ" must not match "NSERVER")
+			 */
+			if ( (unsigned) argslen > $ASCLEN(&optp->name) )
+				continue;
+
 #if _WIN32
 			if ( !(_strnicmp (argp, $ASCPTR(&optp->name), $MIN(argslen, $ASCLEN(&optp->name)))) )
 #else
@@ -820,7 +1361,11 @@ OPTS	*optp, *optp2;
 		switch ( optp->type )
 			{
 			case	OPTS$K_PORT:
-				* ((unsigned short  *) optp->ptr) = (unsigned short) atoi(valp);
+				{
+				char *l_endptr = NULL;
+
+				*((unsigned short *) optp->ptr) = (unsigned short) strtoul(valp, &l_endptr, 0);
+				}
 				break;
 
 			case	OPTS$K_IP4:
@@ -876,21 +1421,28 @@ OPTS	*optp, *optp2;
 
 
 /*
- *
- *  Description: processing command line arguments to extract parameters according of options table;
- *		performs basic syntax checking, copy options values to local storage for using at run-time.
- *  Input:
- *	argc:	an argument count
- *	argv:	an array of command line options
- *	opts:	options' table, address of array terminated by 'NUL' entry
- *
- *  Output:
- *	fills the 'runparams' vector by option
- *
- *  Return:
- *	STS$K_SUCCESS
- *
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Parse the program argument vector against a table of typed option
+**	descriptors. Accepts -name=value, /name=value and --name=value; names
+**	may be abbreviated to any unambiguous prefix. An OPTS$K_CONF option
+**	triggers an immediate read of the named file via __util$readconfig().
+**
+**  FORMAL PARAMETERS:
+**
+**	argc	Argument count, as passed to main()
+**	argv	Argument vector
+**	opts	OPTS table terminated by OPTS_NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Updates the variables named by the descriptors.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS if all options parsed; STS$K_ERROR on a bad value or a
+**	missing mandatory option.
+**--
+*/
 int	__util$getparams	(
 			int	argc,
 			char *	argv[],
@@ -941,7 +1493,7 @@ OPTS	*optp;
 		* Compare a given from command line option name against options list,
 		* we expect that options list is terminated by zero-length entry.
 		*
-		* We allow an shortened keywords but it can be a reao of conflicts.
+		* We allow an shortened keywords but it can be a reason of conflicts.
 		*/
 		for (optp = (OPTS *) opts; $ASCLEN(&optp->name); optp++)
 			{
@@ -982,7 +1534,11 @@ OPTS	*optp;
 				break;
 
 			case	OPTS$K_PORT:
-				* ((unsigned short  *) optp->ptr) = (unsigned short) atoi(valp);
+				{
+				char *l_endptr = NULL;
+
+				*((unsigned short *) optp->ptr) = (unsigned short) strtoul(valp, &l_endptr, 0);
+				}
 				break;
 
 			case	OPTS$K_IP4:
@@ -1033,22 +1589,27 @@ OPTS	*optp;
 
 
 /*
- *++
- *  Description: dump byte array to sys$output in hex, is supposed to be called indirectly by $DUMPHEX macro.
- *
- * Input:
- *	__fi:	A file name or module name string
- *	__li:	Line number in the sourve file
- *	src:	A pointer to source buffer  do be dumped
- *	srclen:	A Length of the source buffer
- *
- * Output:
- *	NONE
- * Return:
- *	NONE
- *
- *--
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Write a formatted hexadecimal/ASCII dump of a memory region to the log
+**	destination, laid out sixteen octets per line as 'offset: hex ... ascii'.
+**	Normally invoked through the $DUMPHEX macro, which supplies the call site.
+**
+**  FORMAL PARAMETERS:
+**
+**	a__fi	Call-site function name (from $DUMPHEX)
+**	a__li	Call-site line number (from $DUMPHEX)
+**	a_src	Address of the region to dump
+**	a_srclen	Number of octets to dump
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	NONE.
+**--
+*/
 
 void	__util$dumphex	(
 		const char *	a__fi,
@@ -1057,39 +1618,24 @@ void	__util$dumphex	(
 		unsigned short	a_srclen
 			)
 {
-const char	l_fmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s:%u] Dump of %u octets follows:"};
+const char	l_fmt [] = {"[%s:%u] Dump of %u octets follows:"};
 #define		UTILS$SZ_HEXWIDTH	80
 char	l_out[256];
 unsigned char *l_src = (unsigned char *) a_src, l_low, l_high;
 unsigned l_olen = 0, i, j;
-struct tm l_tm;
-struct timespec l_now;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]" prefix
 	*/
-	s___time(&l_now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&l_now, &l_tm);
-#endif
-
-	l_olen = snprintf (l_out, sizeof(l_out) - 1, l_fmt,
-		l_tm.tm_mday, l_tm.tm_mon + 1, 1900 + l_tm.tm_year,
-		l_tm.tm_hour, l_tm.tm_min, l_tm.tm_sec, (unsigned) l_now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(),
-		a__fi, a__li, a_srclen);
+	l_olen = s_util$prefix (l_out);			/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	l_olen += snprintf (l_out + l_olen, sizeof(l_out) - 1 - l_olen, l_fmt, a__fi, a__li, a_srclen);
 
 
 	/* Add <LF> at end of record*/
 	l_olen = $MIN(sizeof(l_out) - 1, l_olen);
 	l_out[l_olen++] = '\n';
 
-	if ( p_cb_log_f )
-		p_cb_log_f(l_out, l_olen);
-	else	write (g_logoutput, l_out, l_olen );
+	s_util$logwrite (g_logoutput, l_out, l_olen );
 
 	memset(l_out, ' ', UTILS$SZ_HEXWIDTH);
 
@@ -1118,9 +1664,7 @@ struct timespec l_now;
 		l_out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
-		if ( p_cb_log_f )
-			p_cb_log_f(l_out, UTILS$SZ_HEXWIDTH);
-		else	write (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
+		s_util$logwrite (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
 		}
 
 	if ( a_srclen % 16 )
@@ -1145,29 +1689,34 @@ struct timespec l_now;
 		l_out[UTILS$SZ_HEXWIDTH - 1] = '\n';
 
 		/* Write to file and flush buffer depending on severity level */
-		if ( p_cb_log_f )
-			p_cb_log_f(l_out, UTILS$SZ_HEXWIDTH);
-		else	write (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
+		s_util$logwrite (g_logoutput, l_out, UTILS$SZ_HEXWIDTH );
 		}
 }
 
 
 /*
- *++
- *  Description: dump byte array to sys$output in hex, is supposed to be called indirectly by $DUMPHEX macro.
- *
- * Input:
- *	src:	A pointer to source buffer  do be dumped
- *	srclen:	A Length of the source buffer
- *	dst:
- *	dstsz:
- *	dstlen:
- *
- * Return:
- *	NONE
- *
- *--
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format up to sixteen octets as a single hex-and-ASCII dump line of the
+**	form 'XX XX ... XX  ....ascii....'. Unused columns are space-padded and
+**	non-printable octets are shown as a dot. Does not read past <a_src>.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_src	Address of the octets to format
+**	a_srclen	Number of octets; values above 16 are clamped to 16
+**	a_out	Destination buffer
+**	a_outsz	Size of <a_out>; must be at least 67 bytes or the routine returns 0
+**	a_outlen	Receives the number of bytes written
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	Number of bytes written; 0 indicates <a_outsz> was too small.
+**--
+*/
 int	__util$faohex	(
 	const void *	a_src,
 	unsigned short	a_srclen,
@@ -1176,27 +1725,31 @@ int	__util$faohex	(
 	unsigned short	*a_outlen
 			)
 {
-unsigned char *l_src = (unsigned char *) a_src, low, high;
-unsigned j;
+unsigned char *l_src = (unsigned char *) a_src, l_low, l_high;
+unsigned l_j;
+
+	/* Required room: 16*3 (hex) + 2 (gap) + 16 (ascii) + 1 (NUL) = 67 octets */
+	if ( a_outsz < (16*3 + 2 + 16 + 1) )
+		return	(*a_outlen = 0);
 
 	memset(a_out, ' ', a_outsz);
 	a_srclen = $MIN(16, a_srclen);
 
-	for (j = 0; j < 16; j++, l_src++)
+	/* Iterate only over the actually supplied octets - do not read past <a_src> */
+	for (l_j = 0; l_j < a_srclen; l_j++, l_src++)
 		{
-		high = (*l_src) >> 4;
-		low = (*l_src) & 0x0f;
+		l_high = (*l_src) >> 4;
+		l_low = (*l_src) & 0x0f;
 
-		a_out[j * 3] = high + ((high < 10) ? '0' : 'a' - 10);
-		a_out[j * 3 + 1] = low + ((low < 10) ? '0' : 'a' - 10);
+		a_out[l_j * 3] = l_high + ((l_high < 10) ? '0' : 'a' - 10);
+		a_out[l_j * 3 + 1] = l_low + ((l_low < 10) ? '0' : 'a' - 10);
 
-		a_out[16*3 + 2 + j] = isprint(*l_src) ? *l_src : '.';
-
+		a_out[16*3 + 2 + l_j] = isprint(*l_src) ? *l_src : '.';
 		}
 
-	a_out[16*3 + 2 + j] = '\0';
+	a_out[16*3 + 2 + 16] = '\0';
 
-	return (*a_outlen = (16*3 + 2 + j));
+	return (*a_outlen = (16*3 + 2 + 16));
 }
 
 
@@ -1208,22 +1761,29 @@ unsigned j;
 
 
 /*
- *++
- *  Description: print to sys$output a programm trace information, supposed to be called from
- *		$TRACE 	macro.
- *
- * Input:
- *	fmt:	A format string
- *	__fi:	A file name or module name string
- *	__li:	Line number in the source file
- *	...	Format string arguments
- * Output:
- *	NONE
- * Return:
- *	NONE
- *
- *--
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Emit a diagnostic trace record carrying the call-site module, function
+**	and line. Reached through the $TRACE macro (and $IFTRACE, which guards
+**	the record on a condition). Compiles to nothing under -DNDEBUG.
+**
+**  FORMAL PARAMETERS:
+**
+**	cond	Emit the record only when non-zero (from $IFTRACE)
+**	fmt	A format string
+**	__mod	Module name string
+**	__fi	Function name string
+**	__li	Line number in the source file
+**	...	Format string arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	NONE.
+**--
+*/
 static const	char spaces[64] = {"                                                                "};
 
 void	__util$trace	(
@@ -1237,12 +1797,10 @@ void	__util$trace	(
 {
 va_list arglist;
 
-const char	lfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s:%u] "},
-	mfmt [] = {"%02u-%02u-%04u %02u:%02u:%02u.%03u "  UTIL$T_PID_FMT "[%s\\%s:%u] "};
+const char	lfmt [] = {"[%s:%u] "},
+	mfmt [] = {"[%s\\\\%s:%u] "};
 char	out[1024];
 int	olen, len;
-struct tm _tm;
-struct timespec now;
 
 	if ( !cond )
 		return;
@@ -1251,21 +1809,10 @@ struct timespec now;
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]" prefix
 	*/
-	s___time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = __mod
-		? snprintf (out, sizeof(out), mfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __mod, __fi, __li)
-		: snprintf (out, sizeof(out), lfmt, _tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-			(unsigned) __gettid(), __fi, __li);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += __mod
+		? snprintf (out + olen, sizeof(out) - olen, mfmt, __mod, __fi, __li)
+		: snprintf (out + olen, sizeof(out) - olen, lfmt, __fi, __li);
 
 	if ( 0 < (len = (72 - olen)) )
 		{
@@ -1286,9 +1833,7 @@ struct timespec now;
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer */
-	if ( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen );
+	s_util$logwrite (g_logoutput, out, olen );
 
 
 
@@ -1312,6 +1857,27 @@ struct timespec now;
 }
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Like __util$logd() but without an explicit call-site descriptor: format
+**	a record and write it to the current log destination.
+**
+**  FORMAL PARAMETERS:
+**
+**	fac	Facility name
+**	sev	Record severity
+**	fmt	printf-style format string
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	The <sev> argument.
+**--
+*/
 unsigned	__util$log
 			(
 		const char *	fac,
@@ -1322,45 +1888,34 @@ unsigned	__util$log
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "%%%s-%C: ";
+const char lfmt [] = "%%%s-%C: ";
 char	out[UTIL$SZ_OUTBUF + 8];
 unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
-struct tm _tm;
-struct timespec now;
 
 	/*
 	** Some sanity check
 	*/
-	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_ERROR)) )
+	/* BATCH: STS$K_FATAL is 4 and was clamped to STS$K_UNDEF, which is odd and so reads as success */
+	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_FATAL)) )
 		sev = STS$K_UNDEF;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]<FAC>-E:" prefix
 	*/
-	s___time(&now);
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
-
-	olen = snprintf (out, UTIL$SZ_OUTBUF, lfmt,
-		_tm.tm_mday, _tm.tm_mon + 1, 1900 + _tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(), fac, severity[_sev]);
+	olen = s_util$prefix (out);				/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
+	olen += snprintf (out + olen, UTIL$SZ_OUTBUF - olen, lfmt, fac, s_severity[_sev]);
 
 	va_start (arglist, fmt);
 	olen += vsnprintf(out + olen, UTIL$SZ_OUTBUF - olen, fmt, arglist);
 	va_end (arglist);
 
-	olen = $MIN(olen, sizeof(out) - 1);
+	olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);			/* Not sizeof(out): the padding is uninitialized	*/
 
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	write (g_logoutput, out, olen );
+	s_util$logwrite (g_logoutput, out, olen);
 
 	/* ARL - for android logcat */
 	#ifdef ANDROID_LOGCAT
@@ -1382,15 +1937,31 @@ struct timespec now;
 	return	sev;
 }
 
-/**
- * @brief __util$log2buf - format a message into the given output buffer
- * @param out
- * @param outsz
- * @param outlen
- * @param fac
- * @param sev
- * @param fmt
- */
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Format a log record exactly as $LOG would, but deliver it into a caller-
+**	supplied buffer instead of the log destination - handy when the text is
+**	needed as a string (a protocol field, a UI element, and so on).
+**
+**  FORMAL PARAMETERS:
+**
+**	out	Address of the output buffer
+**	outsz	Size of <out> in bytes
+**	outlen	Receives the number of bytes written
+**	fac	Facility name
+**	sev	Record severity
+**	fmt	printf-style format string
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	The <sev> argument.
+**--
+*/
 unsigned	__util$log2buf
 			(
 		void	*	out,
@@ -1404,39 +1975,48 @@ unsigned	__util$log2buf
 
 {
 va_list arglist;
-const char lfmt [] = "%02u-%02u-%04u %02u:%02u:%02u.%03u " UTIL$T_PID_FMT "%%%s-%C:";
+const char lfmt [] = "%%%s-%C:";
 char	*__outbuf = (char *) out;
 unsigned	_sev = sev;
-struct tm _tm;
-struct timespec now;
+char	l_pfx [48];
+int	l_pl;
 
 	/*
 	** Some sanity check
 	*/
-	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_ERROR)) )
+	/* BATCH: STS$K_FATAL is 4 and was clamped to STS$K_UNDEF, which is odd and so reads as success */
+	if ( !($ISINRANGE(sev, STS$K_WARN, STS$K_FATAL)) )
 		sev = STS$K_UNDEF;
 
 	/*
 	** Out to buffer "DD-MM-YYYY HH:MM:SS.msec [<function>\<line>]<FAC>-E:" prefix
 	*/
-	s___time(&now);
+	l_pl = s_util$prefix (l_pfx);			/* "DD-MM-YYYY HH:MM:SS.msc <tid> " */
 
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&now, &_tm);
-#endif
+	if ( outsz < 1 )				/* no usable room in the caller buffer	*/
+		{
+		*outlen = 0;
+		return	_sev;
+		}
 
-	*outlen = snprintf (__outbuf, outsz, lfmt,
-		_tm.tm_mday, _tm.tm_mon + 1, 1900+_tm.tm_year,
-		_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (unsigned) now.tv_nsec/TIMSPECDEVIDER,
-		(unsigned) __gettid(), fac, severity[sev]);
+	*outlen = $MIN(l_pl, outsz - 1);		/* the prefix, clamped to the caller buffer */
+	memcpy (__outbuf, l_pfx, (size_t) *outlen);
+	*outlen += snprintf (__outbuf + *outlen, outsz - *outlen, lfmt, fac, s_severity[sev]);
+
+	/* snprintf() returns the length it WOULD have written; clamp before reusing
+	** it as an offset, so the append below never gets a negative (huge) size when
+	** the prefix alone already fills the buffer.
+	*/
+	*outlen = $MIN(*outlen, outsz - 1);
 
 	va_start (arglist, fmt);
 	*outlen += vsnprintf(__outbuf + *outlen, outsz - *outlen, fmt, arglist);
 	va_end (arglist);
 
-	*outlen = $MIN(*outlen, outsz);
+	/* outsz-1, not outsz: the explicit terminator below writes __outbuf[*outlen],
+	** so *outlen == outsz would land one byte past the caller's buffer.
+	*/
+	*outlen = $MIN(*outlen, outsz - 1);
 
 	/* Add NIL at end of record*/
 	__outbuf[*outlen] = '\0';
@@ -1445,18 +2025,25 @@ struct timespec now;
 }
 
 /*
- * Description: Open a file to be used as default output file for $TRACE/$LOG/$DUMPHEX routines.
- *		File will be open in shared for read and append mode!
- *
- *  Input:
- *	logfile:	a log file name string, ASCIZ
- *	sloghost:	a SYSLOG Host IP address, ASCIZ
- *
- *  Implicit output:	global logoutput variable
- *
- *  Return:
- *	condition status, see STS$ constants
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Redirect subsequent log output to a file and, optionally, forward each
+**	record as a UDP datagram to a SYSLOG host. Called once at start-up,
+**	before the first $LOG.
+**
+**  FORMAL PARAMETERS:
+**
+**	logfile	Zero-terminated log file path to append to, or NULL for stdout
+**	sloghost	Zero-terminated IPv4 address of a SYSLOG server, or NULL
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Sets the global g_logoutput descriptor (and the SYSLOG socket).
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; the file could not be opened otherwise.
+**--
+*/
 int	__util$deflog	(
 		const char *	logfile,
 		const char *	sloghost
@@ -1484,7 +2071,7 @@ int	fd = -1;
 	if ( !*logfile)
 		return	STS$K_SUCCESS;
 
-	if ( 0 > (fd = open(logfile, O_RDWR | O_CREAT | O_APPEND, mode)) )
+	if ( 0 > (fd = open(logfile, O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, mode)) )
 		return	$LOG(STS$K_ERROR, "Error opening log file '%s', errno = %d.", logfile, errno);
 
 	lseek(fd, 0L, SEEK_END);
@@ -1500,11 +2087,60 @@ int	fd = -1;
 
 
 /*
- * Description: compare a current file size with the 'limit' and rewind a current file pointer at begining of file.
- *
- *  Return:
- *	condition status, see STS$ constants
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Point the logging at an already-open descriptor, without opening a file
+**	or touching the standard streams.  The companion to __util$deflog(),
+**	which takes a file NAME and seizes both stdout and stderr with dup2() -
+**	right for a daemon, wrong for a utility whose standard output carries
+**	the data it was run to produce.  Such a utility calls
+**	__util$setlogfd(STDERR_FILENO) once, keeping its output clean while its
+**	$LOG / $TRACE records go to the standard error.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fd	An already-open descriptor to receive the log records
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Sets the global g_logoutput descriptor.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS; STS$K_ERROR if a_fd is negative.
+**--
+*/
+int	__util$setlogfd	(
+		int	a_fd
+			)
+{
+	if ( a_fd < 0 )
+		return	STS$K_ERROR;
+
+	g_logoutput = a_fd;
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Truncate and rewind the current log file once it grows past a limit, so
+**	that a long-running process cannot fill the disk. A no-op when the log
+**	goes to standard output or the limit is zero.
+**
+**  FORMAL PARAMETERS:
+**
+**	limit	Maximum log-file size in bytes before it is rewound
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	May truncate the file behind the global g_logoutput descriptor.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS.
+**--
+*/
 int	__util$rewindlogfile	(
 			size_t	limit
 				)
@@ -1570,7 +2206,7 @@ int	status;
  *    If the current character in the magic string is not a wild card
  *    and they are different, then declare it a mismatch.  If they
  *    point to identical characters, then advance each pointer by one
- *    and go aroung the loop again.
+ *    and go around the loop again.
  *
  *    If the magic string pointer points at a WILD_PERCENT, then advance
  *    both pointers, regardless of what's in the test string.
@@ -1607,7 +2243,7 @@ int	status;
  *      (1) ANSI-ized declaration.
  *
  *
- *	27-NOV-2015	RRL	Some reformating.
+ *	27-NOV-2015	RRL	Some reformatting.
  */
 /*--***********************************************************************/
 
@@ -1623,52 +2259,67 @@ int	status;
 #endif
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Test whether a string matches a wildcard pattern, recursively. '*'
+**	matches any run of characters and '%' matches exactly one character.
+**	The comparison is case-sensitive.
+**
+**  FORMAL PARAMETERS:
+**
+**	str$		Zero-terminated subject string
+**	pattern$	Zero-terminated pattern, with '*' and '%' wildcards
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	Non-zero if the string matches the pattern, zero otherwise.
+**--
+*/
 int	__util$pattern_match	(
 		char	*	str$,        /* A LITERAL string to match */
 		char	*	pattern$     /* Pattern, with potential wildcards (*,%) to * match the string.*/
 				)
 {
-int done = FALSE, matched_to_eos = FALSE;
+const char *l_s = str$, *l_p = pattern$,
+	*l_sbk = NULL, *l_pbk = NULL;	/* The single backtrack point of the last '*' seen */
 
-	while( (*pattern$ != '\0') && (!done) && ( ((*str$=='\0') && ( (*pattern$==WILD_STAR)) ) || (*str$!='\0')) )
+	/*
+	 * The iterative matcher: advance both cursors on a literal or a '%' hit;
+	 * on a '*' remember the backtrack point and try the shortest run first;
+	 * on a mismatch fall back to the last '*' and let it swallow one more
+	 * octet. One live backtrack point suffices for the star semantics, which
+	 * bounds the work by O(|str| * |pattern|) - the recursive predecessor
+	 * exploded combinatorially on several stars (a*a*a*a*b against a run of
+	 * 'a' took seconds); this one is linear in practice.
+	 */
+	while ( *l_s )
 		{
-		switch (*pattern$)
-			{
-			case WILD_STAR:
-				pattern$++;
-				matched_to_eos = FALSE;
-				while ( (*str$ != '\0') && (! ( matched_to_eos = __util$pattern_match( str$++, pattern$))));
-
-				if ( matched_to_eos )
-					{
-					while (*str$ != '\0') str$++;
-					while (*pattern$ != '\0') pattern$++;
-					}
-				break;
-
-			case WILD_PERCENT:
-				pattern$++;
-				str$++;
-				break;
-
-			/* case '\\':*/
-			/* pattern$++;*/
-
-			default:
-				if (*str$ == *pattern$)
-					{
-					str$++;
-					pattern$++;
-					}
-				else done = TRUE;
+		if ( (*l_p == WILD_PERCENT) || (*l_p == *l_s) )
+			{			/* '%' takes exactly one octet; a literal must equal */
+			l_p++;
+			l_s++;
 			}
+		else if ( *l_p == WILD_STAR )
+			{			/* Remember the star; first try it empty	*/
+			l_pbk = l_p++;
+			l_sbk = l_s;
+			}
+		else if ( l_pbk )
+			{			/* Mismatch: the last star swallows one more octet */
+			l_p = l_pbk + 1;
+			l_s = ++l_sbk;
+			}
+		else	return	FALSE;		/* Mismatch with no star to fall back to	*/
 		}
 
-	while (*pattern$ == WILD_STAR) pattern$++;
+	while ( *l_p == WILD_STAR )		/* Trailing stars match the empty tail		*/
+		l_p++;
 
-	return ( (*str$ == '\0') && (*pattern$ == '\0') );
-
-
+	return	( *l_p == '\0' );
 }
 /******************* end of C_STR$pattern_match *******************/
 
@@ -1710,16 +2361,70 @@ char **	strings;
 
 
 
-#ifdef	__CRC32_TAB__
+/*
+ *  NOTE: despite the "crc32c" name, this routine computes the standard IEEE 802.3 / zlib
+ *  CRC-32 (reflected polynomial 0xEDB88320), NOT Castagnoli CRC-32C. The check value
+ *  __util$crc32c(0, "123456789", 9) == 0xCBF43926 confirms IEEE. The name is kept as-is
+ *  for backward compatibility with existing callers.
+ */
 
-extern unsigned int crc32c_tab[];
+#if defined(__ARM_FEATURE_CRC32)
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Compute the standard IEEE 802.3 / zlib CRC-32 (reflected polynomial
+**	0xEDB88320) over a memory region. Despite the name this is NOT
+**	Castagnoli CRC-32C. On ARMv8 the hardware crc32 instructions are used;
+**	elsewhere a portable slice-by-eight table. The result is identical on
+**	every platform and byte order; check value for "123456789" is 0xCBF43926.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_crc	Initial value: 0 to start, or a previous result to continue
+**	a_buf	Address of the data
+**	a_buflen	Number of octets
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	The 32-bit checksum (this routine does not use the condition-value
+**	convention).
+**--
+*/
+#include	<arm_acle.h>
 
+unsigned int	__util$crc32c (unsigned int a_crc, const void *a_buf, size_t a_buflen)
+{
+const unsigned char *l_p = (const unsigned char *) a_buf;
+unsigned int	l_crc = a_crc ^ ~0U;
+uint64_t	l_w;
 
-#else
-#define	__CRC32_TAB__	1
+	while ( a_buflen && ((uintptr_t) l_p & 7) )			/* Reach an 8-byte boundary first */
+		{ l_crc = __crc32b(l_crc, *l_p++); a_buflen--; }
 
-/*	CRC32-C	*/
-static const  unsigned int __crc32c_tab__[] = {
+	for ( ; a_buflen >= 8; l_p += 8, a_buflen -= 8 )		/* Eat 8 octets per step */
+		{
+		memcpy(&l_w, l_p, sizeof(l_w));
+		l_crc = __crc32d(l_crc, l_w);
+		}
+
+	while ( a_buflen-- )						/* Tail */
+		l_crc = __crc32b(l_crc, *l_p++);
+
+	return	l_crc ^ ~0U;
+}
+
+#else	/* Portable software: slice-by-8 (~4x the classic byte-at-a-time loop) */
+
+/*
+ *  Slice-by-8 tables. Slice 0 is the classic reflected CRC-32 (0xEDB88320) byte table;
+ *  slices 1..7 are derived from it. The bytes are composed little-endian explicitly in the
+ *  loop below, so the routine is endian-neutral (verified on MIPS big-endian).
+ */
+static const unsigned int s_crc_tab8 [8][256] = {
+	{
 	0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
 	0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
 	0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91, 0x1db71064, 0x6ab020f2,
@@ -1763,32 +2468,373 @@ static const  unsigned int __crc32c_tab__[] = {
 	0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693,
 	0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
 	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
+	},
+	{
+	0x00000000, 0x191b3141, 0x32366282, 0x2b2d53c3, 0x646cc504, 0x7d77f445,
+	0x565aa786, 0x4f4196c7, 0xc8d98a08, 0xd1c2bb49, 0xfaefe88a, 0xe3f4d9cb,
+	0xacb54f0c, 0xb5ae7e4d, 0x9e832d8e, 0x87981ccf, 0x4ac21251, 0x53d92310,
+	0x78f470d3, 0x61ef4192, 0x2eaed755, 0x37b5e614, 0x1c98b5d7, 0x05838496,
+	0x821b9859, 0x9b00a918, 0xb02dfadb, 0xa936cb9a, 0xe6775d5d, 0xff6c6c1c,
+	0xd4413fdf, 0xcd5a0e9e, 0x958424a2, 0x8c9f15e3, 0xa7b24620, 0xbea97761,
+	0xf1e8e1a6, 0xe8f3d0e7, 0xc3de8324, 0xdac5b265, 0x5d5daeaa, 0x44469feb,
+	0x6f6bcc28, 0x7670fd69, 0x39316bae, 0x202a5aef, 0x0b07092c, 0x121c386d,
+	0xdf4636f3, 0xc65d07b2, 0xed705471, 0xf46b6530, 0xbb2af3f7, 0xa231c2b6,
+	0x891c9175, 0x9007a034, 0x179fbcfb, 0x0e848dba, 0x25a9de79, 0x3cb2ef38,
+	0x73f379ff, 0x6ae848be, 0x41c51b7d, 0x58de2a3c, 0xf0794f05, 0xe9627e44,
+	0xc24f2d87, 0xdb541cc6, 0x94158a01, 0x8d0ebb40, 0xa623e883, 0xbf38d9c2,
+	0x38a0c50d, 0x21bbf44c, 0x0a96a78f, 0x138d96ce, 0x5ccc0009, 0x45d73148,
+	0x6efa628b, 0x77e153ca, 0xbabb5d54, 0xa3a06c15, 0x888d3fd6, 0x91960e97,
+	0xded79850, 0xc7cca911, 0xece1fad2, 0xf5facb93, 0x7262d75c, 0x6b79e61d,
+	0x4054b5de, 0x594f849f, 0x160e1258, 0x0f152319, 0x243870da, 0x3d23419b,
+	0x65fd6ba7, 0x7ce65ae6, 0x57cb0925, 0x4ed03864, 0x0191aea3, 0x188a9fe2,
+	0x33a7cc21, 0x2abcfd60, 0xad24e1af, 0xb43fd0ee, 0x9f12832d, 0x8609b26c,
+	0xc94824ab, 0xd05315ea, 0xfb7e4629, 0xe2657768, 0x2f3f79f6, 0x362448b7,
+	0x1d091b74, 0x04122a35, 0x4b53bcf2, 0x52488db3, 0x7965de70, 0x607eef31,
+	0xe7e6f3fe, 0xfefdc2bf, 0xd5d0917c, 0xcccba03d, 0x838a36fa, 0x9a9107bb,
+	0xb1bc5478, 0xa8a76539, 0x3b83984b, 0x2298a90a, 0x09b5fac9, 0x10aecb88,
+	0x5fef5d4f, 0x46f46c0e, 0x6dd93fcd, 0x74c20e8c, 0xf35a1243, 0xea412302,
+	0xc16c70c1, 0xd8774180, 0x9736d747, 0x8e2de606, 0xa500b5c5, 0xbc1b8484,
+	0x71418a1a, 0x685abb5b, 0x4377e898, 0x5a6cd9d9, 0x152d4f1e, 0x0c367e5f,
+	0x271b2d9c, 0x3e001cdd, 0xb9980012, 0xa0833153, 0x8bae6290, 0x92b553d1,
+	0xddf4c516, 0xc4eff457, 0xefc2a794, 0xf6d996d5, 0xae07bce9, 0xb71c8da8,
+	0x9c31de6b, 0x852aef2a, 0xca6b79ed, 0xd37048ac, 0xf85d1b6f, 0xe1462a2e,
+	0x66de36e1, 0x7fc507a0, 0x54e85463, 0x4df36522, 0x02b2f3e5, 0x1ba9c2a4,
+	0x30849167, 0x299fa026, 0xe4c5aeb8, 0xfdde9ff9, 0xd6f3cc3a, 0xcfe8fd7b,
+	0x80a96bbc, 0x99b25afd, 0xb29f093e, 0xab84387f, 0x2c1c24b0, 0x350715f1,
+	0x1e2a4632, 0x07317773, 0x4870e1b4, 0x516bd0f5, 0x7a468336, 0x635db277,
+	0xcbfad74e, 0xd2e1e60f, 0xf9ccb5cc, 0xe0d7848d, 0xaf96124a, 0xb68d230b,
+	0x9da070c8, 0x84bb4189, 0x03235d46, 0x1a386c07, 0x31153fc4, 0x280e0e85,
+	0x674f9842, 0x7e54a903, 0x5579fac0, 0x4c62cb81, 0x8138c51f, 0x9823f45e,
+	0xb30ea79d, 0xaa1596dc, 0xe554001b, 0xfc4f315a, 0xd7626299, 0xce7953d8,
+	0x49e14f17, 0x50fa7e56, 0x7bd72d95, 0x62cc1cd4, 0x2d8d8a13, 0x3496bb52,
+	0x1fbbe891, 0x06a0d9d0, 0x5e7ef3ec, 0x4765c2ad, 0x6c48916e, 0x7553a02f,
+	0x3a1236e8, 0x230907a9, 0x0824546a, 0x113f652b, 0x96a779e4, 0x8fbc48a5,
+	0xa4911b66, 0xbd8a2a27, 0xf2cbbce0, 0xebd08da1, 0xc0fdde62, 0xd9e6ef23,
+	0x14bce1bd, 0x0da7d0fc, 0x268a833f, 0x3f91b27e, 0x70d024b9, 0x69cb15f8,
+	0x42e6463b, 0x5bfd777a, 0xdc656bb5, 0xc57e5af4, 0xee530937, 0xf7483876,
+	0xb809aeb1, 0xa1129ff0, 0x8a3fcc33, 0x9324fd72
+	},
+	{
+	0x00000000, 0x01c26a37, 0x0384d46e, 0x0246be59, 0x0709a8dc, 0x06cbc2eb,
+	0x048d7cb2, 0x054f1685, 0x0e1351b8, 0x0fd13b8f, 0x0d9785d6, 0x0c55efe1,
+	0x091af964, 0x08d89353, 0x0a9e2d0a, 0x0b5c473d, 0x1c26a370, 0x1de4c947,
+	0x1fa2771e, 0x1e601d29, 0x1b2f0bac, 0x1aed619b, 0x18abdfc2, 0x1969b5f5,
+	0x1235f2c8, 0x13f798ff, 0x11b126a6, 0x10734c91, 0x153c5a14, 0x14fe3023,
+	0x16b88e7a, 0x177ae44d, 0x384d46e0, 0x398f2cd7, 0x3bc9928e, 0x3a0bf8b9,
+	0x3f44ee3c, 0x3e86840b, 0x3cc03a52, 0x3d025065, 0x365e1758, 0x379c7d6f,
+	0x35dac336, 0x3418a901, 0x3157bf84, 0x3095d5b3, 0x32d36bea, 0x331101dd,
+	0x246be590, 0x25a98fa7, 0x27ef31fe, 0x262d5bc9, 0x23624d4c, 0x22a0277b,
+	0x20e69922, 0x2124f315, 0x2a78b428, 0x2bbade1f, 0x29fc6046, 0x283e0a71,
+	0x2d711cf4, 0x2cb376c3, 0x2ef5c89a, 0x2f37a2ad, 0x709a8dc0, 0x7158e7f7,
+	0x731e59ae, 0x72dc3399, 0x7793251c, 0x76514f2b, 0x7417f172, 0x75d59b45,
+	0x7e89dc78, 0x7f4bb64f, 0x7d0d0816, 0x7ccf6221, 0x798074a4, 0x78421e93,
+	0x7a04a0ca, 0x7bc6cafd, 0x6cbc2eb0, 0x6d7e4487, 0x6f38fade, 0x6efa90e9,
+	0x6bb5866c, 0x6a77ec5b, 0x68315202, 0x69f33835, 0x62af7f08, 0x636d153f,
+	0x612bab66, 0x60e9c151, 0x65a6d7d4, 0x6464bde3, 0x662203ba, 0x67e0698d,
+	0x48d7cb20, 0x4915a117, 0x4b531f4e, 0x4a917579, 0x4fde63fc, 0x4e1c09cb,
+	0x4c5ab792, 0x4d98dda5, 0x46c49a98, 0x4706f0af, 0x45404ef6, 0x448224c1,
+	0x41cd3244, 0x400f5873, 0x4249e62a, 0x438b8c1d, 0x54f16850, 0x55330267,
+	0x5775bc3e, 0x56b7d609, 0x53f8c08c, 0x523aaabb, 0x507c14e2, 0x51be7ed5,
+	0x5ae239e8, 0x5b2053df, 0x5966ed86, 0x58a487b1, 0x5deb9134, 0x5c29fb03,
+	0x5e6f455a, 0x5fad2f6d, 0xe1351b80, 0xe0f771b7, 0xe2b1cfee, 0xe373a5d9,
+	0xe63cb35c, 0xe7fed96b, 0xe5b86732, 0xe47a0d05, 0xef264a38, 0xeee4200f,
+	0xeca29e56, 0xed60f461, 0xe82fe2e4, 0xe9ed88d3, 0xebab368a, 0xea695cbd,
+	0xfd13b8f0, 0xfcd1d2c7, 0xfe976c9e, 0xff5506a9, 0xfa1a102c, 0xfbd87a1b,
+	0xf99ec442, 0xf85cae75, 0xf300e948, 0xf2c2837f, 0xf0843d26, 0xf1465711,
+	0xf4094194, 0xf5cb2ba3, 0xf78d95fa, 0xf64fffcd, 0xd9785d60, 0xd8ba3757,
+	0xdafc890e, 0xdb3ee339, 0xde71f5bc, 0xdfb39f8b, 0xddf521d2, 0xdc374be5,
+	0xd76b0cd8, 0xd6a966ef, 0xd4efd8b6, 0xd52db281, 0xd062a404, 0xd1a0ce33,
+	0xd3e6706a, 0xd2241a5d, 0xc55efe10, 0xc49c9427, 0xc6da2a7e, 0xc7184049,
+	0xc25756cc, 0xc3953cfb, 0xc1d382a2, 0xc011e895, 0xcb4dafa8, 0xca8fc59f,
+	0xc8c97bc6, 0xc90b11f1, 0xcc440774, 0xcd866d43, 0xcfc0d31a, 0xce02b92d,
+	0x91af9640, 0x906dfc77, 0x922b422e, 0x93e92819, 0x96a63e9c, 0x976454ab,
+	0x9522eaf2, 0x94e080c5, 0x9fbcc7f8, 0x9e7eadcf, 0x9c381396, 0x9dfa79a1,
+	0x98b56f24, 0x99770513, 0x9b31bb4a, 0x9af3d17d, 0x8d893530, 0x8c4b5f07,
+	0x8e0de15e, 0x8fcf8b69, 0x8a809dec, 0x8b42f7db, 0x89044982, 0x88c623b5,
+	0x839a6488, 0x82580ebf, 0x801eb0e6, 0x81dcdad1, 0x8493cc54, 0x8551a663,
+	0x8717183a, 0x86d5720d, 0xa9e2d0a0, 0xa820ba97, 0xaa6604ce, 0xaba46ef9,
+	0xaeeb787c, 0xaf29124b, 0xad6fac12, 0xacadc625, 0xa7f18118, 0xa633eb2f,
+	0xa4755576, 0xa5b73f41, 0xa0f829c4, 0xa13a43f3, 0xa37cfdaa, 0xa2be979d,
+	0xb5c473d0, 0xb40619e7, 0xb640a7be, 0xb782cd89, 0xb2cddb0c, 0xb30fb13b,
+	0xb1490f62, 0xb08b6555, 0xbbd72268, 0xba15485f, 0xb853f606, 0xb9919c31,
+	0xbcde8ab4, 0xbd1ce083, 0xbf5a5eda, 0xbe9834ed
+	},
+	{
+	0x00000000, 0xb8bc6765, 0xaa09c88b, 0x12b5afee, 0x8f629757, 0x37def032,
+	0x256b5fdc, 0x9dd738b9, 0xc5b428ef, 0x7d084f8a, 0x6fbde064, 0xd7018701,
+	0x4ad6bfb8, 0xf26ad8dd, 0xe0df7733, 0x58631056, 0x5019579f, 0xe8a530fa,
+	0xfa109f14, 0x42acf871, 0xdf7bc0c8, 0x67c7a7ad, 0x75720843, 0xcdce6f26,
+	0x95ad7f70, 0x2d111815, 0x3fa4b7fb, 0x8718d09e, 0x1acfe827, 0xa2738f42,
+	0xb0c620ac, 0x087a47c9, 0xa032af3e, 0x188ec85b, 0x0a3b67b5, 0xb28700d0,
+	0x2f503869, 0x97ec5f0c, 0x8559f0e2, 0x3de59787, 0x658687d1, 0xdd3ae0b4,
+	0xcf8f4f5a, 0x7733283f, 0xeae41086, 0x525877e3, 0x40edd80d, 0xf851bf68,
+	0xf02bf8a1, 0x48979fc4, 0x5a22302a, 0xe29e574f, 0x7f496ff6, 0xc7f50893,
+	0xd540a77d, 0x6dfcc018, 0x359fd04e, 0x8d23b72b, 0x9f9618c5, 0x272a7fa0,
+	0xbafd4719, 0x0241207c, 0x10f48f92, 0xa848e8f7, 0x9b14583d, 0x23a83f58,
+	0x311d90b6, 0x89a1f7d3, 0x1476cf6a, 0xaccaa80f, 0xbe7f07e1, 0x06c36084,
+	0x5ea070d2, 0xe61c17b7, 0xf4a9b859, 0x4c15df3c, 0xd1c2e785, 0x697e80e0,
+	0x7bcb2f0e, 0xc377486b, 0xcb0d0fa2, 0x73b168c7, 0x6104c729, 0xd9b8a04c,
+	0x446f98f5, 0xfcd3ff90, 0xee66507e, 0x56da371b, 0x0eb9274d, 0xb6054028,
+	0xa4b0efc6, 0x1c0c88a3, 0x81dbb01a, 0x3967d77f, 0x2bd27891, 0x936e1ff4,
+	0x3b26f703, 0x839a9066, 0x912f3f88, 0x299358ed, 0xb4446054, 0x0cf80731,
+	0x1e4da8df, 0xa6f1cfba, 0xfe92dfec, 0x462eb889, 0x549b1767, 0xec277002,
+	0x71f048bb, 0xc94c2fde, 0xdbf98030, 0x6345e755, 0x6b3fa09c, 0xd383c7f9,
+	0xc1366817, 0x798a0f72, 0xe45d37cb, 0x5ce150ae, 0x4e54ff40, 0xf6e89825,
+	0xae8b8873, 0x1637ef16, 0x048240f8, 0xbc3e279d, 0x21e91f24, 0x99557841,
+	0x8be0d7af, 0x335cb0ca, 0xed59b63b, 0x55e5d15e, 0x47507eb0, 0xffec19d5,
+	0x623b216c, 0xda874609, 0xc832e9e7, 0x708e8e82, 0x28ed9ed4, 0x9051f9b1,
+	0x82e4565f, 0x3a58313a, 0xa78f0983, 0x1f336ee6, 0x0d86c108, 0xb53aa66d,
+	0xbd40e1a4, 0x05fc86c1, 0x1749292f, 0xaff54e4a, 0x322276f3, 0x8a9e1196,
+	0x982bbe78, 0x2097d91d, 0x78f4c94b, 0xc048ae2e, 0xd2fd01c0, 0x6a4166a5,
+	0xf7965e1c, 0x4f2a3979, 0x5d9f9697, 0xe523f1f2, 0x4d6b1905, 0xf5d77e60,
+	0xe762d18e, 0x5fdeb6eb, 0xc2098e52, 0x7ab5e937, 0x680046d9, 0xd0bc21bc,
+	0x88df31ea, 0x3063568f, 0x22d6f961, 0x9a6a9e04, 0x07bda6bd, 0xbf01c1d8,
+	0xadb46e36, 0x15080953, 0x1d724e9a, 0xa5ce29ff, 0xb77b8611, 0x0fc7e174,
+	0x9210d9cd, 0x2aacbea8, 0x38191146, 0x80a57623, 0xd8c66675, 0x607a0110,
+	0x72cfaefe, 0xca73c99b, 0x57a4f122, 0xef189647, 0xfdad39a9, 0x45115ecc,
+	0x764dee06, 0xcef18963, 0xdc44268d, 0x64f841e8, 0xf92f7951, 0x41931e34,
+	0x5326b1da, 0xeb9ad6bf, 0xb3f9c6e9, 0x0b45a18c, 0x19f00e62, 0xa14c6907,
+	0x3c9b51be, 0x842736db, 0x96929935, 0x2e2efe50, 0x2654b999, 0x9ee8defc,
+	0x8c5d7112, 0x34e11677, 0xa9362ece, 0x118a49ab, 0x033fe645, 0xbb838120,
+	0xe3e09176, 0x5b5cf613, 0x49e959fd, 0xf1553e98, 0x6c820621, 0xd43e6144,
+	0xc68bceaa, 0x7e37a9cf, 0xd67f4138, 0x6ec3265d, 0x7c7689b3, 0xc4caeed6,
+	0x591dd66f, 0xe1a1b10a, 0xf3141ee4, 0x4ba87981, 0x13cb69d7, 0xab770eb2,
+	0xb9c2a15c, 0x017ec639, 0x9ca9fe80, 0x241599e5, 0x36a0360b, 0x8e1c516e,
+	0x866616a7, 0x3eda71c2, 0x2c6fde2c, 0x94d3b949, 0x090481f0, 0xb1b8e695,
+	0xa30d497b, 0x1bb12e1e, 0x43d23e48, 0xfb6e592d, 0xe9dbf6c3, 0x516791a6,
+	0xccb0a91f, 0x740cce7a, 0x66b96194, 0xde0506f1
+	},
+	{
+	0x00000000, 0x3d6029b0, 0x7ac05360, 0x47a07ad0, 0xf580a6c0, 0xc8e08f70,
+	0x8f40f5a0, 0xb220dc10, 0x30704bc1, 0x0d106271, 0x4ab018a1, 0x77d03111,
+	0xc5f0ed01, 0xf890c4b1, 0xbf30be61, 0x825097d1, 0x60e09782, 0x5d80be32,
+	0x1a20c4e2, 0x2740ed52, 0x95603142, 0xa80018f2, 0xefa06222, 0xd2c04b92,
+	0x5090dc43, 0x6df0f5f3, 0x2a508f23, 0x1730a693, 0xa5107a83, 0x98705333,
+	0xdfd029e3, 0xe2b00053, 0xc1c12f04, 0xfca106b4, 0xbb017c64, 0x866155d4,
+	0x344189c4, 0x0921a074, 0x4e81daa4, 0x73e1f314, 0xf1b164c5, 0xccd14d75,
+	0x8b7137a5, 0xb6111e15, 0x0431c205, 0x3951ebb5, 0x7ef19165, 0x4391b8d5,
+	0xa121b886, 0x9c419136, 0xdbe1ebe6, 0xe681c256, 0x54a11e46, 0x69c137f6,
+	0x2e614d26, 0x13016496, 0x9151f347, 0xac31daf7, 0xeb91a027, 0xd6f18997,
+	0x64d15587, 0x59b17c37, 0x1e1106e7, 0x23712f57, 0x58f35849, 0x659371f9,
+	0x22330b29, 0x1f532299, 0xad73fe89, 0x9013d739, 0xd7b3ade9, 0xead38459,
+	0x68831388, 0x55e33a38, 0x124340e8, 0x2f236958, 0x9d03b548, 0xa0639cf8,
+	0xe7c3e628, 0xdaa3cf98, 0x3813cfcb, 0x0573e67b, 0x42d39cab, 0x7fb3b51b,
+	0xcd93690b, 0xf0f340bb, 0xb7533a6b, 0x8a3313db, 0x0863840a, 0x3503adba,
+	0x72a3d76a, 0x4fc3feda, 0xfde322ca, 0xc0830b7a, 0x872371aa, 0xba43581a,
+	0x9932774d, 0xa4525efd, 0xe3f2242d, 0xde920d9d, 0x6cb2d18d, 0x51d2f83d,
+	0x167282ed, 0x2b12ab5d, 0xa9423c8c, 0x9422153c, 0xd3826fec, 0xeee2465c,
+	0x5cc29a4c, 0x61a2b3fc, 0x2602c92c, 0x1b62e09c, 0xf9d2e0cf, 0xc4b2c97f,
+	0x8312b3af, 0xbe729a1f, 0x0c52460f, 0x31326fbf, 0x7692156f, 0x4bf23cdf,
+	0xc9a2ab0e, 0xf4c282be, 0xb362f86e, 0x8e02d1de, 0x3c220dce, 0x0142247e,
+	0x46e25eae, 0x7b82771e, 0xb1e6b092, 0x8c869922, 0xcb26e3f2, 0xf646ca42,
+	0x44661652, 0x79063fe2, 0x3ea64532, 0x03c66c82, 0x8196fb53, 0xbcf6d2e3,
+	0xfb56a833, 0xc6368183, 0x74165d93, 0x49767423, 0x0ed60ef3, 0x33b62743,
+	0xd1062710, 0xec660ea0, 0xabc67470, 0x96a65dc0, 0x248681d0, 0x19e6a860,
+	0x5e46d2b0, 0x6326fb00, 0xe1766cd1, 0xdc164561, 0x9bb63fb1, 0xa6d61601,
+	0x14f6ca11, 0x2996e3a1, 0x6e369971, 0x5356b0c1, 0x70279f96, 0x4d47b626,
+	0x0ae7ccf6, 0x3787e546, 0x85a73956, 0xb8c710e6, 0xff676a36, 0xc2074386,
+	0x4057d457, 0x7d37fde7, 0x3a978737, 0x07f7ae87, 0xb5d77297, 0x88b75b27,
+	0xcf1721f7, 0xf2770847, 0x10c70814, 0x2da721a4, 0x6a075b74, 0x576772c4,
+	0xe547aed4, 0xd8278764, 0x9f87fdb4, 0xa2e7d404, 0x20b743d5, 0x1dd76a65,
+	0x5a7710b5, 0x67173905, 0xd537e515, 0xe857cca5, 0xaff7b675, 0x92979fc5,
+	0xe915e8db, 0xd475c16b, 0x93d5bbbb, 0xaeb5920b, 0x1c954e1b, 0x21f567ab,
+	0x66551d7b, 0x5b3534cb, 0xd965a31a, 0xe4058aaa, 0xa3a5f07a, 0x9ec5d9ca,
+	0x2ce505da, 0x11852c6a, 0x562556ba, 0x6b457f0a, 0x89f57f59, 0xb49556e9,
+	0xf3352c39, 0xce550589, 0x7c75d999, 0x4115f029, 0x06b58af9, 0x3bd5a349,
+	0xb9853498, 0x84e51d28, 0xc34567f8, 0xfe254e48, 0x4c059258, 0x7165bbe8,
+	0x36c5c138, 0x0ba5e888, 0x28d4c7df, 0x15b4ee6f, 0x521494bf, 0x6f74bd0f,
+	0xdd54611f, 0xe03448af, 0xa794327f, 0x9af41bcf, 0x18a48c1e, 0x25c4a5ae,
+	0x6264df7e, 0x5f04f6ce, 0xed242ade, 0xd044036e, 0x97e479be, 0xaa84500e,
+	0x4834505d, 0x755479ed, 0x32f4033d, 0x0f942a8d, 0xbdb4f69d, 0x80d4df2d,
+	0xc774a5fd, 0xfa148c4d, 0x78441b9c, 0x4524322c, 0x028448fc, 0x3fe4614c,
+	0x8dc4bd5c, 0xb0a494ec, 0xf704ee3c, 0xca64c78c
+	},
+	{
+	0x00000000, 0xcb5cd3a5, 0x4dc8a10b, 0x869472ae, 0x9b914216, 0x50cd91b3,
+	0xd659e31d, 0x1d0530b8, 0xec53826d, 0x270f51c8, 0xa19b2366, 0x6ac7f0c3,
+	0x77c2c07b, 0xbc9e13de, 0x3a0a6170, 0xf156b2d5, 0x03d6029b, 0xc88ad13e,
+	0x4e1ea390, 0x85427035, 0x9847408d, 0x531b9328, 0xd58fe186, 0x1ed33223,
+	0xef8580f6, 0x24d95353, 0xa24d21fd, 0x6911f258, 0x7414c2e0, 0xbf481145,
+	0x39dc63eb, 0xf280b04e, 0x07ac0536, 0xccf0d693, 0x4a64a43d, 0x81387798,
+	0x9c3d4720, 0x57619485, 0xd1f5e62b, 0x1aa9358e, 0xebff875b, 0x20a354fe,
+	0xa6372650, 0x6d6bf5f5, 0x706ec54d, 0xbb3216e8, 0x3da66446, 0xf6fab7e3,
+	0x047a07ad, 0xcf26d408, 0x49b2a6a6, 0x82ee7503, 0x9feb45bb, 0x54b7961e,
+	0xd223e4b0, 0x197f3715, 0xe82985c0, 0x23755665, 0xa5e124cb, 0x6ebdf76e,
+	0x73b8c7d6, 0xb8e41473, 0x3e7066dd, 0xf52cb578, 0x0f580a6c, 0xc404d9c9,
+	0x4290ab67, 0x89cc78c2, 0x94c9487a, 0x5f959bdf, 0xd901e971, 0x125d3ad4,
+	0xe30b8801, 0x28575ba4, 0xaec3290a, 0x659ffaaf, 0x789aca17, 0xb3c619b2,
+	0x35526b1c, 0xfe0eb8b9, 0x0c8e08f7, 0xc7d2db52, 0x4146a9fc, 0x8a1a7a59,
+	0x971f4ae1, 0x5c439944, 0xdad7ebea, 0x118b384f, 0xe0dd8a9a, 0x2b81593f,
+	0xad152b91, 0x6649f834, 0x7b4cc88c, 0xb0101b29, 0x36846987, 0xfdd8ba22,
+	0x08f40f5a, 0xc3a8dcff, 0x453cae51, 0x8e607df4, 0x93654d4c, 0x58399ee9,
+	0xdeadec47, 0x15f13fe2, 0xe4a78d37, 0x2ffb5e92, 0xa96f2c3c, 0x6233ff99,
+	0x7f36cf21, 0xb46a1c84, 0x32fe6e2a, 0xf9a2bd8f, 0x0b220dc1, 0xc07ede64,
+	0x46eaacca, 0x8db67f6f, 0x90b34fd7, 0x5bef9c72, 0xdd7beedc, 0x16273d79,
+	0xe7718fac, 0x2c2d5c09, 0xaab92ea7, 0x61e5fd02, 0x7ce0cdba, 0xb7bc1e1f,
+	0x31286cb1, 0xfa74bf14, 0x1eb014d8, 0xd5ecc77d, 0x5378b5d3, 0x98246676,
+	0x852156ce, 0x4e7d856b, 0xc8e9f7c5, 0x03b52460, 0xf2e396b5, 0x39bf4510,
+	0xbf2b37be, 0x7477e41b, 0x6972d4a3, 0xa22e0706, 0x24ba75a8, 0xefe6a60d,
+	0x1d661643, 0xd63ac5e6, 0x50aeb748, 0x9bf264ed, 0x86f75455, 0x4dab87f0,
+	0xcb3ff55e, 0x006326fb, 0xf135942e, 0x3a69478b, 0xbcfd3525, 0x77a1e680,
+	0x6aa4d638, 0xa1f8059d, 0x276c7733, 0xec30a496, 0x191c11ee, 0xd240c24b,
+	0x54d4b0e5, 0x9f886340, 0x828d53f8, 0x49d1805d, 0xcf45f2f3, 0x04192156,
+	0xf54f9383, 0x3e134026, 0xb8873288, 0x73dbe12d, 0x6eded195, 0xa5820230,
+	0x2316709e, 0xe84aa33b, 0x1aca1375, 0xd196c0d0, 0x5702b27e, 0x9c5e61db,
+	0x815b5163, 0x4a0782c6, 0xcc93f068, 0x07cf23cd, 0xf6999118, 0x3dc542bd,
+	0xbb513013, 0x700de3b6, 0x6d08d30e, 0xa65400ab, 0x20c07205, 0xeb9ca1a0,
+	0x11e81eb4, 0xdab4cd11, 0x5c20bfbf, 0x977c6c1a, 0x8a795ca2, 0x41258f07,
+	0xc7b1fda9, 0x0ced2e0c, 0xfdbb9cd9, 0x36e74f7c, 0xb0733dd2, 0x7b2fee77,
+	0x662adecf, 0xad760d6a, 0x2be27fc4, 0xe0beac61, 0x123e1c2f, 0xd962cf8a,
+	0x5ff6bd24, 0x94aa6e81, 0x89af5e39, 0x42f38d9c, 0xc467ff32, 0x0f3b2c97,
+	0xfe6d9e42, 0x35314de7, 0xb3a53f49, 0x78f9ecec, 0x65fcdc54, 0xaea00ff1,
+	0x28347d5f, 0xe368aefa, 0x16441b82, 0xdd18c827, 0x5b8cba89, 0x90d0692c,
+	0x8dd55994, 0x46898a31, 0xc01df89f, 0x0b412b3a, 0xfa1799ef, 0x314b4a4a,
+	0xb7df38e4, 0x7c83eb41, 0x6186dbf9, 0xaada085c, 0x2c4e7af2, 0xe712a957,
+	0x15921919, 0xdececabc, 0x585ab812, 0x93066bb7, 0x8e035b0f, 0x455f88aa,
+	0xc3cbfa04, 0x089729a1, 0xf9c19b74, 0x329d48d1, 0xb4093a7f, 0x7f55e9da,
+	0x6250d962, 0xa90c0ac7, 0x2f987869, 0xe4c4abcc
+	},
+	{
+	0x00000000, 0xa6770bb4, 0x979f1129, 0x31e81a9d, 0xf44f2413, 0x52382fa7,
+	0x63d0353a, 0xc5a73e8e, 0x33ef4e67, 0x959845d3, 0xa4705f4e, 0x020754fa,
+	0xc7a06a74, 0x61d761c0, 0x503f7b5d, 0xf64870e9, 0x67de9cce, 0xc1a9977a,
+	0xf0418de7, 0x56368653, 0x9391b8dd, 0x35e6b369, 0x040ea9f4, 0xa279a240,
+	0x5431d2a9, 0xf246d91d, 0xc3aec380, 0x65d9c834, 0xa07ef6ba, 0x0609fd0e,
+	0x37e1e793, 0x9196ec27, 0xcfbd399c, 0x69ca3228, 0x582228b5, 0xfe552301,
+	0x3bf21d8f, 0x9d85163b, 0xac6d0ca6, 0x0a1a0712, 0xfc5277fb, 0x5a257c4f,
+	0x6bcd66d2, 0xcdba6d66, 0x081d53e8, 0xae6a585c, 0x9f8242c1, 0x39f54975,
+	0xa863a552, 0x0e14aee6, 0x3ffcb47b, 0x998bbfcf, 0x5c2c8141, 0xfa5b8af5,
+	0xcbb39068, 0x6dc49bdc, 0x9b8ceb35, 0x3dfbe081, 0x0c13fa1c, 0xaa64f1a8,
+	0x6fc3cf26, 0xc9b4c492, 0xf85cde0f, 0x5e2bd5bb, 0x440b7579, 0xe27c7ecd,
+	0xd3946450, 0x75e36fe4, 0xb044516a, 0x16335ade, 0x27db4043, 0x81ac4bf7,
+	0x77e43b1e, 0xd19330aa, 0xe07b2a37, 0x460c2183, 0x83ab1f0d, 0x25dc14b9,
+	0x14340e24, 0xb2430590, 0x23d5e9b7, 0x85a2e203, 0xb44af89e, 0x123df32a,
+	0xd79acda4, 0x71edc610, 0x4005dc8d, 0xe672d739, 0x103aa7d0, 0xb64dac64,
+	0x87a5b6f9, 0x21d2bd4d, 0xe47583c3, 0x42028877, 0x73ea92ea, 0xd59d995e,
+	0x8bb64ce5, 0x2dc14751, 0x1c295dcc, 0xba5e5678, 0x7ff968f6, 0xd98e6342,
+	0xe86679df, 0x4e11726b, 0xb8590282, 0x1e2e0936, 0x2fc613ab, 0x89b1181f,
+	0x4c162691, 0xea612d25, 0xdb8937b8, 0x7dfe3c0c, 0xec68d02b, 0x4a1fdb9f,
+	0x7bf7c102, 0xdd80cab6, 0x1827f438, 0xbe50ff8c, 0x8fb8e511, 0x29cfeea5,
+	0xdf879e4c, 0x79f095f8, 0x48188f65, 0xee6f84d1, 0x2bc8ba5f, 0x8dbfb1eb,
+	0xbc57ab76, 0x1a20a0c2, 0x8816eaf2, 0x2e61e146, 0x1f89fbdb, 0xb9fef06f,
+	0x7c59cee1, 0xda2ec555, 0xebc6dfc8, 0x4db1d47c, 0xbbf9a495, 0x1d8eaf21,
+	0x2c66b5bc, 0x8a11be08, 0x4fb68086, 0xe9c18b32, 0xd82991af, 0x7e5e9a1b,
+	0xefc8763c, 0x49bf7d88, 0x78576715, 0xde206ca1, 0x1b87522f, 0xbdf0599b,
+	0x8c184306, 0x2a6f48b2, 0xdc27385b, 0x7a5033ef, 0x4bb82972, 0xedcf22c6,
+	0x28681c48, 0x8e1f17fc, 0xbff70d61, 0x198006d5, 0x47abd36e, 0xe1dcd8da,
+	0xd034c247, 0x7643c9f3, 0xb3e4f77d, 0x1593fcc9, 0x247be654, 0x820cede0,
+	0x74449d09, 0xd23396bd, 0xe3db8c20, 0x45ac8794, 0x800bb91a, 0x267cb2ae,
+	0x1794a833, 0xb1e3a387, 0x20754fa0, 0x86024414, 0xb7ea5e89, 0x119d553d,
+	0xd43a6bb3, 0x724d6007, 0x43a57a9a, 0xe5d2712e, 0x139a01c7, 0xb5ed0a73,
+	0x840510ee, 0x22721b5a, 0xe7d525d4, 0x41a22e60, 0x704a34fd, 0xd63d3f49,
+	0xcc1d9f8b, 0x6a6a943f, 0x5b828ea2, 0xfdf58516, 0x3852bb98, 0x9e25b02c,
+	0xafcdaab1, 0x09baa105, 0xfff2d1ec, 0x5985da58, 0x686dc0c5, 0xce1acb71,
+	0x0bbdf5ff, 0xadcafe4b, 0x9c22e4d6, 0x3a55ef62, 0xabc30345, 0x0db408f1,
+	0x3c5c126c, 0x9a2b19d8, 0x5f8c2756, 0xf9fb2ce2, 0xc813367f, 0x6e643dcb,
+	0x982c4d22, 0x3e5b4696, 0x0fb35c0b, 0xa9c457bf, 0x6c636931, 0xca146285,
+	0xfbfc7818, 0x5d8b73ac, 0x03a0a617, 0xa5d7ada3, 0x943fb73e, 0x3248bc8a,
+	0xf7ef8204, 0x519889b0, 0x6070932d, 0xc6079899, 0x304fe870, 0x9638e3c4,
+	0xa7d0f959, 0x01a7f2ed, 0xc400cc63, 0x6277c7d7, 0x539fdd4a, 0xf5e8d6fe,
+	0x647e3ad9, 0xc209316d, 0xf3e12bf0, 0x55962044, 0x90311eca, 0x3646157e,
+	0x07ae0fe3, 0xa1d90457, 0x579174be, 0xf1e67f0a, 0xc00e6597, 0x66796e23,
+	0xa3de50ad, 0x05a95b19, 0x34414184, 0x92364a30
+	},
+	{
+	0x00000000, 0xccaa009e, 0x4225077d, 0x8e8f07e3, 0x844a0efa, 0x48e00e64,
+	0xc66f0987, 0x0ac50919, 0xd3e51bb5, 0x1f4f1b2b, 0x91c01cc8, 0x5d6a1c56,
+	0x57af154f, 0x9b0515d1, 0x158a1232, 0xd92012ac, 0x7cbb312b, 0xb01131b5,
+	0x3e9e3656, 0xf23436c8, 0xf8f13fd1, 0x345b3f4f, 0xbad438ac, 0x767e3832,
+	0xaf5e2a9e, 0x63f42a00, 0xed7b2de3, 0x21d12d7d, 0x2b142464, 0xe7be24fa,
+	0x69312319, 0xa59b2387, 0xf9766256, 0x35dc62c8, 0xbb53652b, 0x77f965b5,
+	0x7d3c6cac, 0xb1966c32, 0x3f196bd1, 0xf3b36b4f, 0x2a9379e3, 0xe639797d,
+	0x68b67e9e, 0xa41c7e00, 0xaed97719, 0x62737787, 0xecfc7064, 0x205670fa,
+	0x85cd537d, 0x496753e3, 0xc7e85400, 0x0b42549e, 0x01875d87, 0xcd2d5d19,
+	0x43a25afa, 0x8f085a64, 0x562848c8, 0x9a824856, 0x140d4fb5, 0xd8a74f2b,
+	0xd2624632, 0x1ec846ac, 0x9047414f, 0x5ced41d1, 0x299dc2ed, 0xe537c273,
+	0x6bb8c590, 0xa712c50e, 0xadd7cc17, 0x617dcc89, 0xeff2cb6a, 0x2358cbf4,
+	0xfa78d958, 0x36d2d9c6, 0xb85dde25, 0x74f7debb, 0x7e32d7a2, 0xb298d73c,
+	0x3c17d0df, 0xf0bdd041, 0x5526f3c6, 0x998cf358, 0x1703f4bb, 0xdba9f425,
+	0xd16cfd3c, 0x1dc6fda2, 0x9349fa41, 0x5fe3fadf, 0x86c3e873, 0x4a69e8ed,
+	0xc4e6ef0e, 0x084cef90, 0x0289e689, 0xce23e617, 0x40ace1f4, 0x8c06e16a,
+	0xd0eba0bb, 0x1c41a025, 0x92cea7c6, 0x5e64a758, 0x54a1ae41, 0x980baedf,
+	0x1684a93c, 0xda2ea9a2, 0x030ebb0e, 0xcfa4bb90, 0x412bbc73, 0x8d81bced,
+	0x8744b5f4, 0x4beeb56a, 0xc561b289, 0x09cbb217, 0xac509190, 0x60fa910e,
+	0xee7596ed, 0x22df9673, 0x281a9f6a, 0xe4b09ff4, 0x6a3f9817, 0xa6959889,
+	0x7fb58a25, 0xb31f8abb, 0x3d908d58, 0xf13a8dc6, 0xfbff84df, 0x37558441,
+	0xb9da83a2, 0x7570833c, 0x533b85da, 0x9f918544, 0x111e82a7, 0xddb48239,
+	0xd7718b20, 0x1bdb8bbe, 0x95548c5d, 0x59fe8cc3, 0x80de9e6f, 0x4c749ef1,
+	0xc2fb9912, 0x0e51998c, 0x04949095, 0xc83e900b, 0x46b197e8, 0x8a1b9776,
+	0x2f80b4f1, 0xe32ab46f, 0x6da5b38c, 0xa10fb312, 0xabcaba0b, 0x6760ba95,
+	0xe9efbd76, 0x2545bde8, 0xfc65af44, 0x30cfafda, 0xbe40a839, 0x72eaa8a7,
+	0x782fa1be, 0xb485a120, 0x3a0aa6c3, 0xf6a0a65d, 0xaa4de78c, 0x66e7e712,
+	0xe868e0f1, 0x24c2e06f, 0x2e07e976, 0xe2ade9e8, 0x6c22ee0b, 0xa088ee95,
+	0x79a8fc39, 0xb502fca7, 0x3b8dfb44, 0xf727fbda, 0xfde2f2c3, 0x3148f25d,
+	0xbfc7f5be, 0x736df520, 0xd6f6d6a7, 0x1a5cd639, 0x94d3d1da, 0x5879d144,
+	0x52bcd85d, 0x9e16d8c3, 0x1099df20, 0xdc33dfbe, 0x0513cd12, 0xc9b9cd8c,
+	0x4736ca6f, 0x8b9ccaf1, 0x8159c3e8, 0x4df3c376, 0xc37cc495, 0x0fd6c40b,
+	0x7aa64737, 0xb60c47a9, 0x3883404a, 0xf42940d4, 0xfeec49cd, 0x32464953,
+	0xbcc94eb0, 0x70634e2e, 0xa9435c82, 0x65e95c1c, 0xeb665bff, 0x27cc5b61,
+	0x2d095278, 0xe1a352e6, 0x6f2c5505, 0xa386559b, 0x061d761c, 0xcab77682,
+	0x44387161, 0x889271ff, 0x825778e6, 0x4efd7878, 0xc0727f9b, 0x0cd87f05,
+	0xd5f86da9, 0x19526d37, 0x97dd6ad4, 0x5b776a4a, 0x51b26353, 0x9d1863cd,
+	0x1397642e, 0xdf3d64b0, 0x83d02561, 0x4f7a25ff, 0xc1f5221c, 0x0d5f2282,
+	0x079a2b9b, 0xcb302b05, 0x45bf2ce6, 0x89152c78, 0x50353ed4, 0x9c9f3e4a,
+	0x121039a9, 0xdeba3937, 0xd47f302e, 0x18d530b0, 0x965a3753, 0x5af037cd,
+	0xff6b144a, 0x33c114d4, 0xbd4e1337, 0x71e413a9, 0x7b211ab0, 0xb78b1a2e,
+	0x39041dcd, 0xf5ae1d53, 0x2c8e0fff, 0xe0240f61, 0x6eab0882, 0xa201081c,
+	0xa8c40105, 0x646e019b, 0xeae10678, 0x264b06e6
+	}
 };
-#endif	/* __CRC32_TAB__ */
 
-unsigned int	__util$crc32c (unsigned int crc, const void *buf, size_t buflen)
+unsigned int	__util$crc32c (unsigned int a_crc, const void *a_buf, size_t a_buflen)
 {
-const unsigned char  *p = (unsigned char *) buf;
+const unsigned char *l_p = (const unsigned char *) a_buf;
+unsigned int	l_crc = a_crc ^ ~0U;
 
-	crc = crc ^ ~0U;
+	for ( ; a_buflen >= 8; l_p += 8, a_buflen -= 8 )
+		{
+		l_crc ^= (unsigned) l_p[0] | ((unsigned) l_p[1] << 8) | ((unsigned) l_p[2] << 16) | ((unsigned) l_p[3] << 24);
 
-	while (buflen--)
-		crc = __crc32c_tab__[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
+		l_crc = s_crc_tab8[7][ l_crc        & 0xFF]
+		      ^ s_crc_tab8[6][(l_crc >>  8) & 0xFF]
+		      ^ s_crc_tab8[5][(l_crc >> 16) & 0xFF]
+		      ^ s_crc_tab8[4][(l_crc >> 24) & 0xFF]
+		      ^ s_crc_tab8[3][ l_p[4] ]
+		      ^ s_crc_tab8[2][ l_p[5] ]
+		      ^ s_crc_tab8[1][ l_p[6] ]
+		      ^ s_crc_tab8[0][ l_p[7] ];
+		}
 
-	return crc ^ ~0U;
+	while ( a_buflen-- )						/* Tail, classic byte-at-a-time */
+		l_crc = s_crc_tab8[0][(l_crc ^ *l_p++) & 0xFF] ^ (l_crc >> 8);
+
+	return	l_crc ^ ~0U;
 }
+
+#endif	/* __ARM_FEATURE_CRC32 */
 
 
 /*
-**  STRSTR/_STRSTR64
+**++
+**  FUNCTIONAL DESCRIPTION:
 **
-**  The 'strstr' function locates the first occurrence in the string pointed
-**  to by 's1' of the sequence of characters in the string pointed to by 's2'.
+**	Locate the first occurrence in the counted region <s1> of the counted
+**	sequence <s2>, without relying on NUL termination. Both operands may
+**	contain embedded NUL octets.
 **
-**  Return values:
+**  FORMAL PARAMETERS:
 **
-**	non-NULL    the address of the located string
-**	NULL	    indicates that the string was not found
+**	s1	Address of the region to search
+**	s1len	Length of the region
+**	s2	Address of the pattern
+**	s2len	Length of the pattern
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	Address of the first occurrence, or NULL if not found.
+**--
 */
 char *	__util$strstr
 			(
@@ -1845,6 +2891,25 @@ size_t	p1len = s1len, cmplen = s2len - 1;
 
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Write a printf-formatted line to the log destination WITHOUT the
+**	timestamp/severity prefix - for banners, tables and similar output.
+**
+**  FORMAL PARAMETERS:
+**
+**	fmt	printf-style format string
+**	...	Format arguments
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	A status code.
+**--
+*/
 unsigned	__util$out
 			(
 		char *	fmt,
@@ -1860,13 +2925,14 @@ int	olen = 0;
 	olen += vsnprintf(out, sizeof(out) - 1, fmt, arglist);
 	va_end (arglist);
 
+	/* vsnprintf() returns the length it WOULD have written - clamp before appending */
+	olen = $MIN(olen, (int) sizeof(out) - 1);
+
 	/* Add <LF> at end of record*/
 	out[olen++] = '\n';
 
 	/* Write to file and flush buffer depending on severity level */
-	if( p_cb_log_f )
-		p_cb_log_f(out, olen);
-	else	write (g_logoutput, out, olen);
+	s_util$logwrite (g_logoutput, out, olen);
 
 	return	STS$K_SUCCESS;
 }
@@ -1880,977 +2946,26 @@ int	olen = 0;
 
 
 
-/*
- * stc_msg_vformat
- *
- * The core formatting routine.
- * Do NOT use sprintf-style formatting codes in
- * message strings! Use the formatting directives
- * below:
- * !A{D, Z, C}
- * !U{Q, L, W, B} = unsigned quad\int64, int32, short, byte
- * !S{Q, L, W, B} = signed quad\int64, int32, short, byte
- * !X{Q, L, W, B} = hexadecimal quad\int64, int32, short, byte
- * !P = pointer
- * !T = time (DD-MMM-YYYY HH:MM:SS)
- * !D = date (DD-MMM-YYYY)
- * !! = exclamation point
- */
-#ifdef	WIN32
-#define	snprintf(buf, len, format,...)	_snprintf_s(buf, len, len, format, __VA_ARGS__)
-#endif
-
-static int	__util$vfao (char *a_fmt, char *a_buf, size_t a_bufsz, va_list a_ap)
-{
-int	l_len;
-char	l_tmpbuf[256], *outp = a_buf;
-
-	for ( ; (a_bufsz && *a_fmt); )
-		{
-		if (*a_fmt != '!')
-			{
-			*outp++ = *a_fmt++;
-			a_bufsz--;
-
-			continue;
-			}
-
-		if ( !(*(++a_fmt)) )
-			break;
-
-		/* !!
-		*/
-		if (*a_fmt == '!')
-			{
-			*outp++ = *a_fmt++;
-			a_bufsz--;
-
-			continue;
-			}
-
-		/* !X{L, W, B}, U{L, W, B}, S{L, W, B}, Q{L, W, B}
-		*/
-		if (*a_fmt == 'U' || *a_fmt == 'X' || *a_fmt == 'S' )
-			{
-			uint64_t l_val = 0;
-
-			if (*(a_fmt+1) == 'B')
-				{
-				l_val = va_arg(a_ap, int);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%02X" : (*a_fmt == 'U') ? "%3u" : "%3d"),
-					(unsigned char) l_val);
-				}
-			else if (*(a_fmt + 1) == 'W')
-				{
-				l_val = va_arg(a_ap, int);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%04X" : ( *a_fmt == 'U') ? "%5u" : "%6d"),
-					(uint16_t) l_val);
-				}
-			else if (*(a_fmt + 1) == 'L')
-				{
-				l_val = va_arg(a_ap, uint32_t);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%08X": ( *a_fmt == 'U') ? "%u" : "%d"),
-					( *a_fmt == 'U') ? (uint32_t) l_val : (int32_t) l_val);
-
-				}
-			else if (*(a_fmt + 1) == 'Q')
-				{
-				l_val = va_arg(a_ap, uint64_t);
-				l_len = snprintf(outp, a_bufsz,  ((*a_fmt == 'X') ?  "0x%016llx": ( *a_fmt == 'U') ? "%llu" : "%lld"),
-					( *a_fmt == 'U') ? (unsigned long long) l_val : (int64_t) l_val);
-
-				}
-			else	continue;
-
-			if ( l_len < 0 )
-				break;
-
-			if (l_len >= a_bufsz)
-				l_len = a_bufsz - 1;
-
-			outp	+= l_len;
-			a_bufsz	-= l_len;
-			a_fmt	+= 2;
-
-			continue;
-			}
-
-
-
-
-		/* !P
-		*/
-		if (*a_fmt == 'P')
-			{
-			if ( 0 > (l_len = snprintf(outp, a_bufsz, "@%p", va_arg(a_ap, void *))) )
-				break;
-
-			if (l_len >= a_bufsz)
-				l_len = a_bufsz - 1;
-
-			outp	+= l_len;
-			a_bufsz	-= l_len;
-			a_fmt	+= 1;
-
-			continue;
-			}
-
-		/* !AD, !AC, !AZ ...	*/
-		if (*a_fmt == 'A')
-			{
-			unsigned int l_slen = 0;
-			char *l_ptr;
-
-			if (*(a_fmt+1) == 'D')
-				{
-				l_slen	= va_arg(a_ap, unsigned int);
-				l_ptr	= va_arg(a_ap, char *);
-
-				}
-			else if (*(a_fmt+1) == 'Z')
-				{
-				l_ptr	= va_arg(a_ap, char *);
-				l_slen	= (unsigned int) strnlen(l_ptr, a_bufsz);
-				}
-			else if (*(a_fmt+1) == 'C')
-				{
-				l_ptr	= va_arg(a_ap, char *);
-				l_slen	= *(l_ptr++);
-				}
-			else	continue;
-
-			if (l_slen >= (unsigned int) a_bufsz)
-				l_slen = (unsigned int)a_bufsz - 1;
-
-			memcpy(outp, l_ptr, l_slen);
-
-			outp	+= l_slen;
-			a_bufsz	-= l_slen;
-			a_fmt	+= 2;
-
-			continue;
-			}
-
-		// Unrecognized directive here, just loop back up to the top
-		} /* while bufsz > 0 && *fmt != null char */
-
-	*outp = '\0';
-
-	return (outp - a_buf);
-}
-
-
-
-int	__util$fao (void *a_fmt, void *a_buf, size_t a_bufsz, ...)
-{
-va_list l_ap;
-int l_result;
-
-	va_start(l_ap, a_bufsz);
-	l_result = __util$vfao((char *) a_fmt, (char*) a_buf, a_bufsz, l_ap);
-	va_end(l_ap);
-
-	return l_result;
-}
-
-
-
-
-
-
-
-/*
- * Emulate VMS system services SYS$FAOL and SYS$NUMTIM (as SYS_FAOL and
- * SYS_NUMTIM)
- *
- * The following FAO directives are supported:
- *     !Sx !Ux !Zx !Ox !%S !%D !%T !AS !AZ !AC !AD !AF !n*c
- *
- * Times are represented as pointers to time_t values rather than
- * pointers to VMS time structures.
- *
- * Revised:	1-NOV-1995		Fix bug in !XL processing.
- * Revised:	3-JAN-1995		Fix bug in NUMTIM emulation (month #).
- * Revised:	15-FEB-2024	RRL	Reorganizing code to be more readable, removed SYS_NUMTIM.
- */
-
-
-
-#ifndef VMS
-typedef struct tm tm_t;
-#endif
-
-
-#define SS$_BUFFEROVF 1537
-#define STS$K_SUCCESS 1
-#define SS$_BADPARAM 20
-
-#define MIN_INT 0x80000000
-#define MIN_INT_STR "-2147483648"
-#define MIN_INT_STR_L 11
-
-#define LONG unsigned long
-#define APPEND_C(c) if (j<ctx->outsize) ctx->out[j++]=c; else \
-	{ ctx->outused=j; return SS$_BUFFEROVF; }
-
-typedef struct { unsigned short l; char *a; } decsriptor_s;
-typedef struct ctl_buf_t {
-    char *out;				/* Output buffer */
-    LONG *prmlst;			/* Parameter list */
-    int ctloffset;
-    int outused;			/* Output position */
-    int outsize;			/* Size of output buffer */
-    int width_type;
-    int width;
-    int value;				/* last value formatted for !%s */
-} CTL$_BUF;
-
-static int s_output_directive ( int d1, int d2, CTL$_BUF *ctx );
-static int s_fmt_signed ( int value, CTL$_BUF *ctx );
-static int s_fmt_unsigned ( LONG value, int base, char fill, CTL$_BUF *ctx );
-static int s_fmt_pad ( char fill, int cur, CTL$_BUF *ctx );
-
-/************************************************************************/
-static int s_fmt_time (
-			int	date_flag,
-		struct timespec	*a_now,
-		CTL$_BUF	*ctx
-			)
-{
-int	i, j;
-char	*out, buf[32];
-tm_t	*local_time;
-struct tm l_tm;
-struct timespec l_now;
-
-	if ( !a_now )
-		s___time(&l_now);
-	else	l_now = *a_now;
-
-#ifdef	WIN32
-	localtime_s(&_tm, (time_t *)&now);
-#else
-	localtime_r((time_t *)&l_now, &l_tm);
-#endif
-
-
-
-
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-
-
-
-
-int	__util$faol (
-	const decsriptor_s	*a_ctlstr,
-			int	*a_outlen,
-		decsriptor_s	*a_outbuf,
-			LONG	*a_prmlst
-		)
-{
-char	*l_ctl, *l_out;
-CTL$_BUF l_ctx;
-int	i, j, k, l_len, l_outsize, l_repcnt, l_rc;
-char	l_d1, l_d2;
-
-	/*
-	* Setup for scanning string.
-	*/
-	l_len = a_ctlstr->l;
-	l_ctl = a_ctlstr->a;
-	l_ctx.outsize = l_outsize = a_outbuf->l;
-	l_ctx.out = l_out = a_outbuf->a;
-	l_ctx.prmlst = a_prmlst;
-	l_ctx.value = 0;
-
-	/*
-	* Main loop, i is position in control string, j = output point.
-	*/
-	for (j = i = 0;  i < l_len; )
-		{
-		/*
-		 * Copy characters until a directive encountered.
-		 */
-		while ( l_ctl[i] != '!' )
-			{
-			if ( j < l_outsize )
-				{
-				l_out[j++] = l_ctl[i++];
-
-				if ( i >= l_len )
-					return *a_outlen = j, STS$K_SUCCESS;		/* All done */
-				}
-			else	return	*a_outlen = l_outsize, SS$_BUFFEROVF;		/* Output buffer full */
-			}
-
-
-		/*
-		* Parse directive, first parse field length/repeat count
-		*/
-		l_ctx.width = l_ctx.width_type = 0;
-		l_repcnt = 0;
-
-		for ( i++; i < l_len; i++ )
-			{
-			if ( l_ctl[i] == '#' )
-				{
-				l_ctx.width_type = 2;
-				break;
-				}
-			else if ( (l_ctl[i] >= '0') && (l_ctl[i] <= '9') )
-				{
-				l_ctx.width_type = 1;
-				l_ctx.width = (l_ctx.width * 10) + (int) l_ctl[i] - (int) '0';
-
-				if ( l_ctx.width > 0x0ffff )
-					return SS$_BADPARAM + 2;
-				}
-			else if ( l_ctl[i] == '(' )
-				{
-				/* Width field is really repeat count */
-				l_repcnt = l_ctx.width;
-				l_ctx.width = 0;
-
-				for ( i++; i < l_len; i++ )
-					{
-					if ( l_ctl[i] == ')' )
-						break;
-
-					if ( l_ctl[i] == '#' )
-						{
-						l_ctx.width_type = 2;
-						break;
-						}
-					else if ( (l_ctl[i] >= '0') && (l_ctl[i] <= '9') )
-						{
-						l_ctx.width_type = 1;
-						l_ctx.width = (l_ctx.width * 10) + (int) l_ctl[i] - (int) '0';
-
-						if ( l_ctx.width > 0x0ffff )
-							return SS$_BADPARAM+4;
-						}
-					}
-				}
-			else	break;	/* end of numerics */
-			}
-
-		if ( i >= l_len )
-			return SS$_BADPARAM + 6;
-
-		if ( l_repcnt == 0 )
-			l_repcnt = 1;
-		else if (l_repcnt < 0)
-			l_repcnt = *l_ctx.prmlst++;
-
-		if ( l_ctx.width_type == 2 )
-			l_ctx.width = *l_ctx.prmlst++;
-
-		/*
-		* Interpret directive.
-		*/
-		l_d1 = l_ctl[i++];
-		l_d2 =  ( i < l_len ) ? l_ctl[i] : '\0';
-
-		l_ctx.outused = j;
-
-		for ( k = 0; k < l_repcnt; k++ )
-			{
-			if ( 1 != (l_rc = s_output_directive ( l_d1, l_d2, &l_ctx )) )
-				return	*a_outlen = l_ctx.outused, l_rc;
-			}
-
-		j = l_ctx.outused;
-		i += l_ctx.ctloffset;
-		}
-
-	return	*a_outlen = j, STS$K_SUCCESS;
-}
-/************************************************************************/
-/* Process single directive.
- */
-static int s_output_directive ( int d1, int d2, CTL$_BUF *ctx )
-{
-int	j, value, l_rc;
-LONG	uvalue;
-char	*out;
-
-	j = ctx->outused;
-	ctx->ctloffset = 1;
-
-	/* printf("output directive d1: %d(%c), d2: %d(%c)\n", d1, d1, d2, d2 ); */
-	switch ( d1 )
-		{
-		case 'A':
-			{	/* Ascii output */
-			int	srclen;
-			char	*src;
-
-			if ( d2 == 'Z' )
-				{
-				for ( src = (char *) *ctx->prmlst++; *src; src++ )
-					{APPEND_C ( *src );}
-				break;
-
-				}
-			else if ( d2 == 'D' )
-				{
-				srclen = *ctx->prmlst++;
-				src = (char *) *ctx->prmlst++;
-				}
-			else if ( d2 == 'C' )
-				{
-				src = (char *) *ctx->prmlst++;
-				srclen = (unsigned char) *src++;
-				}
-			else if ( d2 == 'S' )
-				{
-				decsriptor_s *desc = (decsriptor_s *) *ctx->prmlst++;
-				srclen = desc->l; src = desc->a;
-				}
-			else if ( d2 == 'F' )
-				{
-				srclen = *ctx->prmlst++;
-
-				for ( src = (char *) *ctx->prmlst++; srclen > 0; srclen-- )
-					{
-					if ( isprint(*src) )
-						{ APPEND_C(*src); }
-					else	{ APPEND_C('.'); }
-
-					src++;
-					}
-
-				break;
-
-				}
-			else	return SS$_BADPARAM + 8;
-
-			if ( srclen > (ctx->outsize-j) )
-				{
-				for ( ; srclen > 0; srclen-- )
-					{ APPEND_C(*src); (void) *src++; }
-				}
-			else	{
-				for ( out = ctx->out; srclen > 0; srclen-- )
-					out[j++] = *src++;
-				}
-			}
-
-			break;
-
-
-		case 'S':
-			{	/* Blank filled signed decimal */
-			value = (int) *ctx->prmlst++;
-
-			if ( d2 == 'L' )
-				{
-				}
-			else if ( d2 == 'B' )
-				{
-				value = (value & 255);
-				if ( value > 127 ) value |= 0xffffff00;
-				}
-			else if ( d2 == 'W' )
-				{
-				value = (value & 0x0ffff);
-				if ( value > 0x7fff )
-					value |= 0xffff0000;
-				}
-			else	{ return SS$_BADPARAM + 10; }
-
-			ctx->value = value;
-			return	l_rc = s_fmt_signed ( value, ctx );
-			}
-
-		case 'U':
-		case 'Z':
-		case 'O':
-		case 'X':
-			{
-			int	l_base = 10;
-			char	l_fill = '0';
-
-			uvalue = *ctx->prmlst++;
-
-			if ( d1 == 'U' )
-				l_fill = ' ';
-			else if  ( d1 == 'X' )
-				l_base = 16;
-			else if ( d1 == 'O' )
-				l_base = 8;
-
-			if ( d2 == 'B' )
-				uvalue = (uvalue & 255);
-			else if ( d2 == 'W' )
-				uvalue = (uvalue & 0x0ffff);
-			else	return SS$_BADPARAM + 12;
-
-			ctx->value = (uvalue == 1) ? 1 : 0;
-			return	l_rc = s_fmt_unsigned ( uvalue, l_base, l_fill, ctx );
-			}
-
-		case '/':	/* newline */
-			ctx->ctloffset = 0;
-			APPEND_C ( '\r' )
-			APPEND_C ( '\n' )
-			break;
-
-		case '_':	/* tab */
-			ctx->ctloffset = 0;
-			APPEND_C ( '\t' );
-			break;
-
-		case '^': 	/* form feed */
-			ctx->ctloffset = 0;
-			APPEND_C ( '\014' );
-			break;
-
-		case '!':	/* exclamation mark */
-			ctx->ctloffset = 0;
-			APPEND_C ( '!' );
-			break;
-
-		case '%':	/* system call, date-time */
-			{
-			if ( d2 == 'D' || d2 == 'T' )
-				return	l_rc = s_fmt_time ( (d2=='D') ? 1 : 0, (struct timespec *) *ctx->prmlst++, ctx );
-			else if ( d2 == 'S' )
-				{
-				if ( (j > 0) && (ctx->value != 1) )
-					{
-					char	l_prev = ctx->out[j-1];
-
-					if ( _tolower(l_prev) == l_prev )
-						{APPEND_C('s');}
-					else	{ APPEND_C('S'); }
-					}
-				}
-			else	return SS$_BADPARAM + 14;
-			}
-			break;
-
-		case '*': 	/* Repeat character */
-			return l_rc = s_fmt_pad ( (char) d2, j, ctx );
-		default:
-
-			return SS$_BADPARAM+16;
-		}
-
-	if ( ctx->width_type )
-		return l_rc = s_fmt_pad ( ' ', j, ctx );
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-/************************************************************************/
-static int s_fmt_pad ( char fill, int cur, CTL$_BUF *ctx )
-{
-char * out;
-int j, limit;
-
-	if ( cur >= 0 )
-		{
-		limit = ctx->width + ctx->outused;
-
-		if ( limit < cur )
-			{ cur = ctx->outused; fill = '*'; ctx->width_type =  (-1); }
-		}
-	else	{
-		/* Right justify, fil field to (-cur) spaces */
-		limit = ctx->width + ctx->outused + cur;
-
-		if ( limit < ctx->outused )
-			{ limit = limit-cur; fill = '*'; ctx->width_type = (-1); }
-
-		cur = ctx->outused;
-		}
-
-	if ( limit <= ctx->outsize )
-		{
-		out = ctx->out;
-		ctx->outused = limit;
-
-		for ( j = cur; j < limit; )
-			out[j++] = fill;
-
-		return STS$K_SUCCESS;
-		}
-
-
-	ctx->outused = ctx->outsize;
-
-	for ( j = cur; j < ctx->outused; )
-		out[j++] = fill;
-
-	return SS$_BUFFEROVF;
-
-}
-
-/************************************************************************/
-static int s_fmt_signed ( int value, CTL$_BUF *ctx )
-{
-int	j, length, status, negative, digit_stack[12];
-
-	/*
-	* Test for zero case (algorithm below results in null string on zero).
-	* If not zero, normalize negative number (should test for MIN_INT).
-	*/
-	j = ctx->outused;
-
-	if ( !value )
-		{
-		if ( ctx->width_type )
-			{
-			status = s_fmt_pad ( ' ', -1, ctx );
-
-			if ( status != 1 )
-				return status;
-
-			j = ctx->outused;
-
-			if ( ctx->width_type == -1 )
-				return STS$K_SUCCESS;
-			}
-
-		APPEND_C ( '0' );
-		return	ctx->outused = j, STS$K_SUCCESS;
-		}
-	else if ( value < 0 )
-		{
-		/* In 2's complement format, the negative of the min. integer can
-		* not be represented in the same number of bits, check for that case.
-		*/
-		if ( value == MIN_INT )
-			{
-			char *str;
-
-			if ( ctx->width_type )
-				{
-				if ( 1 != (status = s_fmt_pad ( ' ', -MIN_INT_STR_L, ctx )) )
-					return status;
-
-				if ( ctx->width_type == -1 )
-					return STS$K_SUCCESS;
-
-				j = ctx->outused;
-				}
-
-			for ( str = MIN_INT_STR; *str; str++ )
-				{APPEND_C ( *str );}
-
-			return	ctx->outused = j, STS$K_SUCCESS;
-			}
-
-		negative = 1;
-		value = -value;
-		}
-	else	negative = 0;
-
-
-	/*
-	*  Build stack of successively higher order digits.
-	*/
-	for (length = 0; value > 0; value = value / 10)
-		digit_stack[length++] = value;
-
-	if ( ctx->width_type )
-		{
-		if ( 1 != (status = s_fmt_pad ( ' ', -(length+negative), ctx )) )
-			return status;
-
-		if ( ctx->width_type == -1 )
-			return STS$K_SUCCESS;
-
-		j = ctx->outused;
-		}
-
-	/*
-	* pop stack and make lowest digit an ascii char in output buffer.
-	*/
-	if ( negative )
-		{APPEND_C('-');}
-
-	for ( digit_stack[length] = 0; length > 0; length-- )
-		{APPEND_C( (char) ((digit_stack[length - 1] - (digit_stack[length] * 10)) + 48) );}
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-/************************************************************************/
-static int s_fmt_unsigned ( LONG value, int base, char fill, CTL$_BUF *ctx )
-{
-int j, status, digit_stack[12], length;
-const char *ascdigit = "0123456789ABCDEF";
-
-	/*
-	* Test for zero case (algorithm below results in null string on zero).
-	*/
-	j = ctx->outused;
-
-	if ( !value )
-		{
-		if ( ctx->width_type )
-			{
-			if ( 1 != (status = s_fmt_pad ( fill, -1, ctx )) )
-				return status;
-
-			if ( ctx->width_type == -1 )
-				return STS$K_SUCCESS;
-
-			j = ctx->outused;
-			}
-
-		APPEND_C ( '0' );
-		ctx->outused = j;
-		return 1;
-		}
-
-	/*
-	*  Build stack of successively higher order digits.
-	*/
-	for (length=0; value > 0; value = value/base)
-		digit_stack[length++] = value;
-
-	if ( ctx->width_type )
-		{
-		if ( 1 != (status = s_fmt_pad ( fill, -(length), ctx )) )
-			return status;
-
-		if ( ctx->width_type == -1 )
-			return STS$K_SUCCESS;
-
-		j = ctx->outused;
-		}
-
-
-	/*
-	* pop stack and make lowest digit an ascii char in output buffer.
-	*/
-	for ( digit_stack[length] = 0; length > 0; length-- )
-		{
-		int l_num = digit_stack[length - 1] -(digit_stack[length] * base);
-
-		APPEND_C ( ascdigit[l_num] );
-		/* APPEND_C( (char)
-		((digit_stack[length-1]-(digit_stack[length]*base)) + 48) ); */
-		}
-
-	return	ctx->outused = j, STS$K_SUCCESS;
-}
-
-
-
-
-
-
-#if __util_DEBUG__
-
-int	main (int argc, char *argv[])
-{
-int count, bcnt;
-char	buf[1024];
-
-
-	bcnt  = __util$fao("!UL, !UW, !UB", buf, sizeof(buf), 1, 2, 3);
-
-	for (bcnt = 0; bcnt < 32; bcnt++)
-		$INSQTAIL(&free_bufs, &_stm_buf_area[bcnt], &count);
-
-	return	1;
-}
-
-
-
-
-#if	0
-// Factory macros
-#undef	$DEFMSG
-
-#define $DEFMSGLIST \
-	$DEFMSG(util,  0, S, NORMAL,	"normal successful completion") \
-	$DEFMSG(util,  1, W, WARNING,	"unknown warning") \
-	$DEFMSG(util,  2, E, ERROR,	"unknown error") \
-	$DEFMSG(util,  3, F, FATALERR,	"unknown fatal error") \
-	$DEFMSG(util, 13, E, NUMCNVERR,	"numeric conversion error: !SL") \
-
-#define	$DEFMSG(fac, num, sev, nam, txt) #nam,
-static const char *__$msgmnemonics[] = {
-	$DEFMSGLIST
-};
-#undef	$DEFMSG
-
-#define $DEFMSG(fac, num, sev,nam, txt) txt,
-static const char *__$msgtexts[] = {
-	$DEFMSGLIST
-};
-#undef	$DEFMSG
-
-#define $DEFMSG(fac, num, sev, nam, txt) #define fac##txt num
-static const char *__$msgtexts[] = {
-	$DEFMSGLIST
-};
-
-#define	$DEFMSG(fac, num, sev, nam, txt) fac##__##nam =  STC_CODE_##typ(msg),
-typedef enum {
-STATCODES
-} statcode_t;
-#undef STATCODE
-
-
-
-//#define	$MSGCOUNT (sizeof(__$##fac##msgmnemonics)/sizeof(__$##fac##msgmnemonics))
-
-#endif
-
-
-
-#if	0
-OPTS	opts [] = {
-		OPTS_NULL
-};
-
-
-#define	IOBUFSZ		4096		/* A size of single buffer			*/
-#define	IOBUFCNT	4096		/* A total number of buffers			*/
-
-struct _stm_buf				/* One item of Stream buffer			*/
-{
-	ENTRY	links;			/* Left, right links, used by queue macros	*/
-	int	len;			/* Actual length of data in the buffer		*/
-	int	ref;			/* Count of reference				*/
-	char buf[IOBUFSZ];		/* Buffer itself				*/
-} _stm_buf_area[IOBUFCNT];		/* We declare a static buffers area		*/
-
-QUEUE	free_bufs = QUEUE_INITIALIZER,
-	busy_bufs = QUEUE_INITIALIZER;
-
-
-DWORD WINAPI worker_f2b (void *arg)
-{
-int	status, count, i;
-struct _stm_buf	* sbuf;
-
-	$LOG(STS$K_INFO, "tid :%d running ...", GetCurrentThreadId());
-
-	for (i = 0; i < 10000 * 500; i++)
-		{
-		if ( !(i %  10000) )
-			$LOG(STS$K_INFO, "tid:%d, iteration %d", GetCurrentThreadId(), i);
-
-		if ( !(1 & (status = $REMQHEAD(&free_bufs, &sbuf, &count))) )
-			{
-			$LOG(STS$K_ERROR, "$REMQHEAD() ->  %d, count = %d", status, count);
-			continue;
-			}
-
-		if ( !sbuf )
-			$LOG(STS$K_ERROR, "sbuf == NULL");
-
-
-		if ( !(1 & (status = status = $INSQTAIL(&busy_bufs, sbuf, &count))) )
-			$LOG(STS$K_ERROR, "$INSQTAIL() ->  %d", status);
-		}
-
-	return	status;
-}
-
-DWORD WINAPI worker_b2f (void *arg)
-{
-	int	status, count, i;
-	struct _stm_buf	* sbuf;
-
-	$LOG(STS$K_INFO, "tid :%d running ...", GetCurrentThreadId());
-
-	for (i = 0; i < 10000 * 500; i++)
-		{
-		if ( !(i %  10000) )
-			$LOG(STS$K_INFO, "tid:%d, iteration %d", GetCurrentThreadId(), i);
-
-		if ( !(1 & (status = $REMQHEAD(&busy_bufs, &sbuf, &count))) )
-			{
-			$LOG(STS$K_ERROR, "$REMQHEAD() ->  %d, count = %d", status, count);
-			continue;
-			}
-
-
-		if ( !sbuf )
-			$LOG(STS$K_ERROR, "sbuf == NULL");
-
-
-		if ( !(1 & (status = status = $INSQTAIL(&free_bufs, sbuf, &count))) )
-			$LOG(STS$K_ERROR, "$INSQTAIL() ->  %d", status);
-		}
-
-	return	status;
-}
-
-
-
-int	main (int argc, char *argv[])
-{
-int count, i;
-HANDLE scan_tid;
-char	buf[1024];
-
-
-	i = __util$fao("!UL, !UW, !UB", buf, sizeof(buf), 1, 2, 3);
-
-
-	/*
-	**
-	*/
-	i = __util$pattern_match("ch33---0010904935.torrent", "*.torrent");
-
-	i = __util$pattern_match("Hello World!!!", "*llo*");
-
-
-
-
-	__util$getparams(argc, argv, opts);
-//	__util$setlogfile("logfile2.log");
-
-
-	//InitializeSRWLock(&free_bufs.lock);
-
-
-
-
-	for (i = 0; i < IOBUFCNT; i++)
-		$INSQTAIL(&free_bufs, &_stm_buf_area[i], &count);
-
-
-
-	for (i = 0; i <  32; i++)
-		{
-		if ( (scan_tid = CreateThread(NULL, 0, worker_f2b, NULL, 0, NULL)) == NULL )
-			return $LOG(STS$K_ERROR, "Creation streaming thread was failed :%d", GetLastError());
-		}
-
-
-	for (i = 0; i <  32; i++)
-		{
-		if ( (scan_tid = CreateThread(NULL, 0, worker_b2f, NULL, 0, NULL)) == NULL )
-			return $LOG(STS$K_ERROR, "Creation streaming thread was failed :%d", GetLastError());
-		}
-
-	WaitForSingleObject(scan_tid, INFINITE);
-
-	return STS$K_SUCCESS;
-}
-#endif
-#endif
-
-
-
-
-
-
-
-
-
 #ifdef	__MAIN_FOR_DEBUG__
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__MAIN_FOR_DEBUG__ demo harness - not part of the library API.]
+**
+**	Entry point of the demo: declare an option table, parse the command
+**	line with __util$getparams() and print the result with __util$showparams().
+**
+**  FORMAL PARAMETERS:
+**
+**	argc	Argument count
+**	argv	Argument vector
+**
+**  RETURN VALUE:
+**	Process exit status.
+**--
+*/
 int	main (int argc, char *argv[])
 {
 ASC	l_logfspec = {0}, l_confspec = {0}, l_settings = {0};

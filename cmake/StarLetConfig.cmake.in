@@ -1,0 +1,12 @@
+#
+#  CMake package configuration for StarLet (the Utility Routines set).
+#
+#  A consumer does:
+#      find_package(StarLet REQUIRED)
+#      target_link_libraries(app PRIVATE StarLet::starlet)
+#
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/StarLetTargets.cmake")
+
+check_required_components(StarLet)

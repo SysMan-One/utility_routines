@@ -1,0 +1,17 @@
+# Keep the whole tree in LF in the repository and the working copy.
+# Prevents spurious CRLF/LF diffs when checked out on different platforms.
+
+*               text=auto eol=lf
+
+*.c             text eol=lf
+*.h             text eol=lf
+*.md            text eol=lf
+*.txt           text eol=lf
+CMakeLists.txt  text eol=lf
+LICENSE         text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# Never normalise binary artifacts.
+*.pdf           binary
+*.tar           binary

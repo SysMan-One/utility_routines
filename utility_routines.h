@@ -109,7 +109,6 @@ extern "C" {
 /*
  * For bagent logging
 */
-extern void (*p_cb_log_f)(const char * buf, unsigned int olen);
 
 
 
@@ -399,7 +398,7 @@ enum	{
 #define	STS$C__UNDEF	"?"
 
 
-#define $STS_ERROR(code) 	( ((code) & STS$K_ERROR ) || ((code) & STS$K_ERROR) )
+#define	$STS_ERROR(code)	( ($SEV(code) == STS$K_ERROR) || ($SEV(code) == STS$K_FATAL) )
 
 /*
  * +---------------------+--------------------------+-------------------+
@@ -412,7 +411,7 @@ enum	{
 
 
 #define	$DEFFAC(code)		((code) << 16)
-#define	$DEFMSG(code)		(0xFFff0000UL & ((code) << 3)))
+#define	$DEFMSG(code)		( ((code) << 3) & 0x0000FFF8UL )		/* message number -> bits 3..15 */
 #define	$DEFSEV(code)		((code) & 0x7)
 
 
@@ -437,6 +436,7 @@ typedef struct __emsg_record_desc__ {
 		unsigned		msgnr;			/* A number of messages in the msgs[] */
 		unsigned		facno;			/* A facility number */
 		struct __emsg_record__	*msgrec;		/* An address of the message records */
+		const char		*facname;		/* A facility name, "HELP" - see __util$putmsg_fao() */
 } EMSG_RECORD_DESC;
 
 
@@ -444,6 +444,8 @@ unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc);
 unsigned	__util$getmsg	(unsigned sts, EMSG_RECORD **outmsg);
 unsigned	__util$putmsg	(unsigned sts, ...);
 unsigned	__util$putmsgd	(unsigned sts, const char *__mod, const char *__fi, unsigned __li, ...);
+unsigned	__util$putmsg_fao	(unsigned sts, int prmcnt, ...);
+unsigned	__util$putmsgd_fao	(unsigned sts, const char *__mod, const char *__fi, unsigned __li, int prmcnt, ...);
 
 
 unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
@@ -452,12 +454,58 @@ unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, un
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
 unsigned	__util$out	(char *fmt, ...);
 
+
+/*
+**  $PUTMSG_FAO() casts each FAO parameter to fao_prm_t for the caller, so a
+**  value is written plain: $PUTMSG_FAO(sts, l_seq, l_disp).  The cast is
+**  mandatory - the parameters travel through varargs and __util$faol() reads
+**  each as a 64-bit fao_prm_t, so an un-cast 32-bit value would be read wrong -
+**  and folding it in here means it can never be forgotten.  The leading comma
+**  lives inside FAO$_C(), so a zero-parameter call still expands cleanly.
+**  fao_prm_t comes from starlet.h, which a $PUTMSG_FAO() caller already needs.
+**
+**  The count is not written either: FAO$_NARG() below derives it from the
+**  same list, so it cannot disagree with what follows it.
+*/
+#define	FAO$_C(x)	, ((fao_prm_t)(x))
+#define	FAO$_E0()
+#define	FAO$_E1(a)	FAO$_C(a)
+#define	FAO$_E2(a,b)	FAO$_C(a) FAO$_C(b)
+#define	FAO$_E3(a,b,c)	FAO$_C(a) FAO$_C(b) FAO$_C(c)
+#define	FAO$_E4(a,b,c,d)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d)
+#define	FAO$_E5(a,b,c,d,e)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e)
+#define	FAO$_E6(a,b,c,d,e,f)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f)
+#define	FAO$_E7(a,b,c,d,e,f,g)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g)
+#define	FAO$_E8(a,b,c,d,e,f,g,h)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h)
+#define	FAO$_E9(a,b,c,d,e,f,g,h,i)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i)
+#define	FAO$_E10(a,b,c,d,e,f,g,h,i,j)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j)
+#define	FAO$_E11(a,b,c,d,e,f,g,h,i,j,k)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k)
+#define	FAO$_E12(a,b,c,d,e,f,g,h,i,j,k,l)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l)
+#define	FAO$_E13(a,b,c,d,e,f,g,h,i,j,k,l,m)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m)
+#define	FAO$_E14(a,b,c,d,e,f,g,h,i,j,k,l,m,n)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m) FAO$_C(n)
+#define	FAO$_E15(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m) FAO$_C(n) FAO$_C(o)
+#define	FAO$_E16(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m) FAO$_C(n) FAO$_C(o) FAO$_C(p)
+#define	FAO$_GET(_0,_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,NAME,...)	NAME
+
+/*
+**  The same selection used to count rather than to name: FAO$_NARG()
+**  yields how many parameters were written, 0 to 16.  It exists so that
+**  $PUTMSG_FAO() need not be told a number the compiler can see for
+**  itself - a number written by hand is a number that can disagree with
+**  the list beside it, and a count larger than the list sends
+**  __util$putmsg_fao() reading arguments that were never passed.
+*/
+#define	FAO$_NARG(...)	FAO$_GET(_0, ##__VA_ARGS__, 16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+#define	FAO$_EACH(...)	FAO$_GET(_0, ##__VA_ARGS__, FAO$_E16,FAO$_E15,FAO$_E14,FAO$_E13,FAO$_E12,FAO$_E11,FAO$_E10,FAO$_E9,FAO$_E8,FAO$_E7,FAO$_E6,FAO$_E5,FAO$_E4,FAO$_E3,FAO$_E2,FAO$_E1,FAO$_E0)(__VA_ARGS__)
+
 #ifndef	NDEBUG
 	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
+	#define $PUTMSG_FAO(sts, ...)		__util$putmsgd_fao(sts, __MODULE__, __FUNCTION__ , __LINE__ , FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : severity
 #else
 	#define $PUTMSG(sts, ...)		__util$putmsg(sts, ## __VA_ARGS__)
+	#define $PUTMSG_FAO(sts, ...)		__util$putmsg_fao(sts, FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$log(__FAC__, severity, fmt, ## __VA_ARGS__)
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)	: severity
 
@@ -707,7 +755,7 @@ ENTRY *	_entold, *_entnew = (ENTRY *) ent;
 inline static int __util$remqent (void * que, void *ent, unsigned * count)
 {
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	_ent = (ENTRY *) ent, *_entleft;
+ENTRY *	_ent = (ENTRY *) ent, *_entleft, *_entright;
 
 	/*
 	 * Sanity check
@@ -734,8 +782,21 @@ ENTRY *	_ent = (ENTRY *) ent, *_entleft;
 	/*
 	** Main work ...
 	*/
-	_entleft = _ent->left;
-	_entleft->right = _ent->right;
+	/*
+	**  Either neighbour may be absent: the entry being removed can stand at the head of the queue,
+	**  at its tail, or be the only one there. Where a neighbour is absent it is the queue itself
+	**  that has to be re-pointed.
+	*/
+	_entleft  = _ent->left;
+	_entright = _ent->right;
+
+	if ( _entleft )
+		_entleft->right = _entright;
+	else	_que->head	= _entright;
+
+	if ( _entright )
+		_entright->left = _entleft;
+	else	_que->tail	= _entleft;
 
 	/*
 	 * Reset head & tail if queue is empty
@@ -1209,13 +1270,15 @@ int	left = $MIN(__min__, __max__) , right = $MAX(__min__, __max__);
  *	SS$_NORMAL	- the buffer is zero filled
  *	STS$K_WARN	- the buffer is not zero filled
  */
-/**
- * @brief __util$iszero	- check buffer for consecutive zero octets
- * @param bufp	:	buffer to check, address
- * @param bufsz	:	a length of data in the buffer
- * @return -
- * *	SS$_NORMAL	- the buffer is zero filled
- *	STS$K_WARN	- the buffer is not zero filled
+/*
+ *  DESCRIPTION: __util$iszero	- check buffer for consecutive zero octets
+ *
+ *  INPUT:
+ *	bufp:	buffer to check, address
+ *	bufsz:	a length of data in the buffer
+ *
+ *  RETURN:
+ *	condition code
  */
 inline static int __util$iszero	(
 		void *	bufp,
@@ -1267,13 +1330,15 @@ unsigned char *__bufp = (unsigned char *) bufp;
 }
 
 
-/**
- * @brief __util$bzero	- zeroing memory block
- * @param bufp	:	buffer to check, address
- * @param bufsz	:	a length of data in the buffer
- * @return -
- * 	SS$_NORMAL	- the buffer is zero filled
+/*
+ *  DESCRIPTION: __util$bzero	- zeroing memory block
  *
+ *  INPUT:
+ *	bufp:	buffer to check, address
+ *	bufsz:	a length of data in the buffer
+ *
+ *  RETURN:
+ *	condition code
  */
 inline static int __util$bzero	(
 		void *	bufp,
@@ -1344,7 +1409,7 @@ static inline void __util$nope (void) {}
 
 
 	#define $TRACE(fmt, ...)		__util$nope()
-	#define $IFTRACE(cond, fmt, ...)	__util$nope()
+	#define $IFTRACE(cond, fmt, ...)	((void) sizeof(cond), __util$nope())
 
 #endif
 
@@ -1392,29 +1457,36 @@ inline	static int __util$uint32_2_dec
 		size_t	*a_retlen
 		)
 {
-size_t	l_retlen;
-char	*l_dstp;
+size_t		l_retlen;
+char		l_tmp[16], *l_p;						/* 10 digits is the max for uint32 - 16 is enough */
 
 	assert(a_dstsz);								/* Check for non-zero buffer */
-	l_retlen = 0;									/* Preset length of result string to zero */
-	l_dstp = a_dst + a_dstsz;							/* Set <l_dstp> to end of the output buffer */
 
-	for (; a_src && a_dstsz;
-		l_dstp--, a_dstsz--, l_retlen++)					/* Adjust counters and pointers .... */
-		{
-		*l_dstp = '0' + a_src % 10;						/* Put reminder of deivision to the currect output buffer */
-		a_src /= 10;								/* <a_src> keep a result of devision */
+	/*
+	 * Build the decimal digits right-to-left into a scratch buffer. A do/while is
+	 * used so that the value 0 is rendered as the single character "0".
+	 */
+	l_retlen = 0;
+	l_p = l_tmp + sizeof(l_tmp);
+
+	do	{
+		*(--l_p) = (char) ('0' + (a_src % 10));				/* Remainder of the division is the current digit */
+		a_src /= 10;							/* <a_src> keeps the result of the division */
+		l_retlen++;
 		}
+	while ( a_src );
 
-	if ( a_retlen )									/* Do we need to return a length of the decimal string ? */
+	/* Truncate to the destination capacity, always keeping room for the terminating NUL */
+	if ( l_retlen > (a_dstsz - 1) )
+		l_retlen = a_dstsz - 1;
+
+	memcpy(a_dst, l_p, l_retlen);						/* Copy the (possibly truncated) result to the caller's buffer */
+	a_dst[l_retlen] = '\0';
+
+	if ( a_retlen )								/* Do we need to return the length of the decimal string ? */
 		*a_retlen = l_retlen;
 
-	if ( l_dstp != a_dst )
-		memmove(a_dst, l_dstp, l_retlen);					/* Move result string to begin of the <a_dst> buffer */
-
-	a_dst[l_retlen] = '\0';								/* Esspesialy for snaike oil mothefukkerzzzz */
-
-	return	l_retlen;
+	return	(int) l_retlen;
 }
 
 
@@ -1452,8 +1524,8 @@ inline static int	__util$asc2str
 
 
 
-/**
- *  @brief:	Retreive a substring with a given index
+/*
+ *  DESCRIPTION: Retrieve a substring with a given index
  */
 inline static int	__util$strelem
 			(
@@ -1496,9 +1568,9 @@ int	l_i, l_len;
 
 
 
-/**
- *  @brief: Comparing two ASCIC
-*/
+/*
+ *  DESCRIPTION: Comparing two ASCIC
+ */
 inline static int	__util$cmpasc
 			(
 		ASC *	s1,
@@ -1515,9 +1587,9 @@ int	status;
 
 
 
-/**
- * @brief: Comparing two ASCIC
-*/
+/*
+ *  DESCRIPTION: Comparing two ASCIC
+ */
 inline static int	__util$cmpasc_blind
 			(
 		const ASC *	s1,
@@ -1662,6 +1734,7 @@ int	__util$readconfig	(const char *, OPTS *);
 int	__util$showparams	(const OPTS *opts);
 
 int	__util$deflog		(const char *, const char *);
+int	__util$setlogfd	(int);
 int	__util$rewindlogfile	(size_t);
 int	__util$pattern_match	(char * str$, char * pattern$);
 
@@ -1669,17 +1742,18 @@ char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
 
 unsigned	__util$crc32c	(unsigned int crc, const void *buf, size_t buflen);
 
-/**
- * @brief __util$hex2bin - convert a hexdecimal string in binary representative.
- *		It's expected that output buffer have enough space to accept
- *		 <(source_length + 1) / 2> octets.
+int	__util$faohex		(const void *src, unsigned short srclen, char *out, unsigned short outsz, unsigned short *outlen);
+
+/*
+ *  DESCRIPTION: __util$hex2bin - convert a hexadecimal string in binary representative.
  *
- * @param a_srchex	-	An address of source data buffer to convert from
- * @param a_\dstbin	-	An address of the output buffer to accept converted octets
- * @param a_srchexlen	-	A length of the source data
+ *  INPUT:
+ *	a_srchex:	An address of source data buffer to convert from
+ *	a_dstbin:	An address of the output buffer to accept converted octets
+ *	a_srchexlen:	A length of the source data
  *
- * @return	-	A length of the data in the output buffer
- *
+ *  RETURN:
+ *	A length of the data in the output buffer
  */
 inline	static int __util$hex2bin
 		(
@@ -1722,17 +1796,16 @@ int	retlen = (a_srchexlen + 1) / 2, i;
 	return	retlen;
 }
 
-/**
- * @brief __util$bin2hex - convert a sequence of bytes from binary from
- *		to a hexadecimal string. It's expected that output buffer have
- *		enough space to accept <source_length * 2> characters.
+/*
+ *  DESCRIPTION: __util$bin2hex - convert a sequence of bytes from binary form
  *
- * @param a_srcbin	-	An address of source data buffer to convert from
- * @param a_dsthex	-	An address of the output buffer to accept hex-string
- * @param a_srcbinlen	-	A length of the source data
+ *  INPUT:
+ *	a_srcbin:	An address of source data buffer to convert from
+ *	a_dsthex:	An address of the output buffer to accept hex-string
+ *	a_srcbinlen:	A length of the source data
  *
- * @return	-	A length of the data in the output buffer
- *
+ *  RETURN:
+ *	A length of the data in the output buffer
  */
 inline	static int __util$bin2hex
 		(
@@ -1762,17 +1835,16 @@ int	retlen = a_srcbinlen * 2;
 
 
 
-/**
- * @brief __util$bin2dec - convert a sequence of bytes from binary from
- *		to a hexadecimal string. It's expected that output buffer have
- *		enough space to accept <source_length * 2> characters.
+/*
+ *  DESCRIPTION: __util$bin2dec - convert a sequence of bytes from binary form
  *
- * @param srcbin	-	An address of source data buffer to convert from
- * @param dsthex	-	An address of the output buffer to accept hex-string
- * @param srcbinlen	-	A length of the source data
+ *  INPUT:
+ *	srcbin:	An address of source data buffer to convert from
+ *	dsthex:	An address of the output buffer to accept hex-string
+ *	srcbinlen:	A length of the source data
  *
- * @return	-	A length of the data in the output buffer
- *
+ *  RETURN:
+ *	A length of the data in the output buffer
  */
 
 
@@ -1908,15 +1980,16 @@ char *	cp;
 	return	count;
 }
 
-/**
- * @brief __UTIL$STRCAT_RX - concatenates given list of strings into the single area.
+/*
+ *  DESCRIPTION: __UTIL$STRCAT_RX - concatenates given list of strings into the single area.
  *
- * @param dst :	a pointer to area to accept concatenation of the strings
- * @param dstsz : destination area size
- * @param dstlen : a returned actual data length
+ *  INPUT:
+ *	dst:	a pointer to area to accept concatenation of the strings
+ *	dstsz:	destination area size
+ *	dstlen:	a returned actual data length
  *
- * @return -	STS$K_SUCCESS
- *		STS$K_ERROR - output buffer is overflow
+ *  RETURN:
+ *	STS$K_SUCCESS
  */
 inline static	int	__util$strcat_rx	(
 	void	*	dst,
@@ -2047,15 +2120,16 @@ KWDENT *	l_ktbl = a_ktbl;
 
 
 
-/**
- * @brief __UTIL$UUID2STR - convert UUID from binary form to the human readable text string.
- *		implied zero byte (NIL, '\0') at end of the string.
+/*
+ *  DESCRIPTION: __UTIL$UUID2STR - convert UUID from binary form to the human readable text string.
  *
- * @param uuid: UUID to be converted
- * @param buf:	a buffer to accept text string
- * @param bufsz:a size of the output buffer
+ *  INPUT:
+ *	uuid:	UUID to be converted
+ *	buf:	a buffer to accept text string
+ *	bufsz:	a size of the output buffer
  *
- * @return -	length of the data in the output buffer.
+ *  RETURN:
+ *	length of the data in the output buffer.
  */
 inline static int	__util$uuid2str	(
 		void *	uuid,
@@ -2079,14 +2153,17 @@ int	len;
 
 
 
-/**
- * @brief __UTIL$FILL - Fill destination buffer with a pattern data.
+/*
+ *  DESCRIPTION: __UTIL$FILL - Fill destination buffer with a pattern data.
  *
- * @param dst	- destination buffer to be filled
- * @param dstsz	- a size of the destination buffer
- * @param src	- a buffer with the pattern data
- * @param srcsz	- a size of the pattern data
- * @return
+ *  INPUT:
+ *	dst:	destination buffer to be filled
+ *	dstsz:	a size of the destination buffer
+ *	src:	a buffer with the pattern data
+ *	srcsz:	a size of the pattern data
+ *
+ *  RETURN:
+ *	condition code
  */
 static inline	int	__util$fill	(
 		void	*	dst,
@@ -2114,18 +2191,20 @@ char *	_dst = (char *) dst;
 
 
 
-/**
- * @brief __UTIL$STRXOR - XORing octet source string with a given key , result is in destination buffer.
- *	<ctx> - keep context between consecutive calls. Should be set to -1 at first call.
+/*
+ *  DESCRIPTION: __UTIL$STRXOR - XORing octet source string with a given key , result is in destination buffer.
  *
- * @param key	- a buffer with the key
- * @param keysz	- a length of the key
- * @param src	- a buffer with the data to be XOR-ed
- * @param srcsz	- a lenth of the source data
- * @param dst	- a buffer to accept XOR-ed data
- * @param dstsz	- a size of the output buffer
- * @param ctx	- an internal context , can be NULL if it is not used
- * @return
+ *  INPUT:
+ *	key:	a buffer with the key
+ *	keysz:	a length of the key
+ *	src:	a buffer with the data to be XOR-ed
+ *	srcsz:	a length of the source data
+ *	dst:	a buffer to accept XOR-ed data
+ *	dstsz:	a size of the output buffer
+ *	ctx:	an internal context , can be NULL if it is not used
+ *
+ *  RETURN:
+ *	condition code
  */
 static inline	int	__util$strxor	(
 		void	*	key,
