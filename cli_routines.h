@@ -61,11 +61,19 @@ extern "C" {
 #define	CLI$K_DEVICE	0xa	/* A device in the /dev/	*/
 
 #define	CLI$K_KWD	0xb	/* A predefined keyword		*/
+#define	CLI$K_TIME	0xc	/* Absolute/delta time (__util$bintim)	*/
+#define	CLI$K_MAC	0xd	/* MAC address aa:bb:cc:dd:ee:ff	*/
 
 
-#define	CLI$M_NEGATABLE	1	/* Qualifier can be negatable	*/
-#define	CLI$M_LIST	2
-#define	CLI$M_PRESENT	4
+/* Descriptor flags (CLI_PQDESC.flag) - describe how a qualifier behaves.	*/
+#define	CLI$M_NEGATABLE	1	/* Qualifier accepts a /NO<name> form		*/
+#define	CLI$M_LIST	2	/* Accepts a value list: /Q=(a,b,c) or repeats	*/
+#define	CLI$M_REQUIRED	0x10	/* Must be supplied, else the parse fails	*/
+
+/* Item state flags (CLI_ITEM.state) - reported by __cli$present().	*/
+#define	CLI$M_PRESENT	4	/* The item was given on the command line	*/
+#define	CLI$M_NEGATED	8	/* Given in the negated form (/NO<name>)		*/
+#define	CLI$M_CONSUMED	0x20	/* Already returned by __cli$get_value()		*/
 
 #define	CLI$SSZ_MAXVERB	32	/* Maximum verb's length	*/
 
@@ -96,6 +104,8 @@ typedef	struct __cli_pqdesc__	{
 
 } CLI_PQDESC;
 
+struct __cli_ctx__;		/* forward reference for the action prototype	*/
+
 typedef	struct __cli__verb__	{
 	ASC		name;
 
@@ -104,7 +114,7 @@ typedef	struct __cli__verb__	{
 	CLI_PQDESC	*params;
 	CLI_PQDESC	*quals;
 
-	int	(*act_rtn) (__unknown_params);
+	int	(*act_rtn) (struct __cli_ctx__ *clictx, void *act_arg);
 	void	*act_arg;
 
 } CLI_VERB;
@@ -113,6 +123,7 @@ typedef	struct	__cli_item__{
 	struct	__cli_item__ *next;/* Linked list stuff	*/
 
 	unsigned	type;	/* 0 - verb, P1 - P8, QUAL	*/
+	unsigned char	state;	/* Runtime: CLI$M_PRESENT/_NEGATED/_CONSUMED */
 
 	union	{
 		CLI_VERB	*verb;
@@ -154,6 +165,8 @@ int	__cli$parse	(CLI_VERB *verbs, int opts, int	argc, char ** argv, void **clict
 int	__cli$dispatch	(CLI_CTX *clictx);
 int	__cli$cleanup	(CLI_CTX *clictx);
 int	__cli$get_value	(CLI_CTX *clictx, CLI_PQDESC *pq, ASC *val);
+int	__cli$present	(CLI_CTX *clictx, CLI_PQDESC *pq, unsigned *state);
+int	__cli$help	(CLI_VERB *verbs, CLI_VERB *verb);
 
 #ifdef __cplusplus
     }

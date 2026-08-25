@@ -33,7 +33,7 @@
 **		  !AF  - as !AD, non-printables are replaced with '.'
 **
 **		Numeric (B - byte, W - word, L - longword, Q - quadword;
-**		quadword parameter is passed BY REFERENCE as on OpenVMS):
+**		the quadword parameter is passed BY VALUE):
 **		  !UB !UW !UL !UQ - unsigned decimal
 **		  !SB !SW !SL !SQ - signed   decimal
 **		  !XB !XW !XL !XQ - hexadecimal, zero-filled to 2/4/8/16
@@ -46,6 +46,11 @@
 **		  !%S - 's' if the last converted number != 1
 **		  !%T - time,  hh:mm:ss.cc  (UTC + FAO$K_TZOFFSET)
 **		  !%D - date,  dd-MMM-yyyy hh:mm:ss.cc
+**		  !%M - MAC / hardware address, aa:bb:cc:dd:ee:ff (ptr to 6 octets)
+**		  !%I - IPv4 address, d.d.d.d               (ptr to 4 octets)
+**		  !%6 - IPv6 address, RFC 5952 canonical; an IPv4-mapped one
+**		        in the mixed ::ffff:a.b.c.d notation (ptr to 16 octets)
+**		  !%U - UUID, xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (ptr to 16 octets)
 **			(parameter: 0 - current time, else time_t *)
 **
 **		Width / repetition (n - decimal number or '#' to take
@@ -82,11 +87,62 @@
 **		  - the !n<...!> sub-field shares the parameter state by
 **		    reference, no context copying.
 **
-**  AUTHOR:	Claude (Anthropic) for D.Novikov
+**  AUTHOR:	StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  CREATION DATE:  24-JUL-2026
 **
 **  MODIFICATION HISTORY:
+**
+**	X.01-15		13-AUG-2026	RRL
+**		An IPv4-mapped address under !%6 is shown in the RFC 5952 par.5
+**		mixed notation - ::ffff:192.168.1.10 - byte-identical to
+**		inet_ntop(AF_INET6); the parity is pinned by tests/test_fao_addr.c,
+**		which renders the vectors through both and compares. The engine
+**		stays freestanding - no <arpa/inet.h> is pulled in. En passant the
+**		stale __REV__ (1.06) is brought back in step with __IDENT__.
+**
+**	X.01-14		13-AUG-2026	RRL
+**		The !%6 directive now emits the RFC 5952 canonical form: the
+**		longest run of two or more zero groups is compressed to "::"
+**		(the leftmost on a tie), a lone zero group stays. See
+**		tests/test_fao_addr.c.
+**
+**	X.01-13		07-AUG-2026	RRL
+**		Added the FAO address directives !%M (MAC/hardware address, six
+**		octets, aa:bb:cc:dd:ee:ff), !%I (IPv4, four octets, d.d.d.d),
+**		!%6 (IPv6, sixteen octets) and !%U (UUID, sixteen octets). Each
+**		takes a pointer to the raw octets; a NULL pointer yields "(null)".
+**		See s_fao$put_hwaddr/ipv4/ipv6/uuid() and tests/test_fao_addr.c.
+**
+**	X.01-12		01-AUG-2026	RRL
+**		time-string helpers are now checked by the odd/even condition
+**		convention (!(1 & status)) rather than by comparison to
+**		STS$K_SUCCESS, for consistency across the module.
+**
+**	X.01-11		01-AUG-2026	RRL
+**		__util$asctim() passed the address of its time to s_fao$put_time()
+**		while the latter, since X.01-09, takes the time BY VALUE; asctim
+**		therefore formatted a pointer instead of the time.  Pass the value.
+**
+**	X.01-10		01-AUG-2026	RRL
+**		Fixed the severity of two FAO status codes that had an odd
+**		value and therefore read as success under the '1 & status'
+**		convention: FAO$K_BUFOVF 5 -> 0xA and FAO$K_IVTIME 7 -> 0xC.
+**		Internal time routines compare against STS$K_SUCCESS, so they
+**		are unaffected; external callers using '1 & __util$bintim(...)'
+**		now correctly detect an invalid time.
+**
+**	X.01-09		30-JUL-2026	RRL
+**		FAO now passes 64-bit parameters BY VALUE: fao_prm_t is
+**		uint64_t, and the !xQ quadword and !%D/!%T time directives
+**		read the value directly instead of dereferencing a pointer.
+**
+**	X.01-08		27-JUL-2026	RRL
+**		FAO routines renamed util$fao/util$faol -> __util$fao/
+**		__util$faol.
+**
+**	X.01-07		27-JUL-2026	RRL
+**		Time routines renamed util$ -> __util$ for consistency.
 **
 **	X.01-06		27-JUL-2026	CLAUDE
 **		avproto declaration style: routine locals declared at
@@ -129,8 +185,8 @@
 */
 
 #define	__MODULE__	"STARLET"
-#define	__IDENT__	"X.01-08"
-#define	__REV__		"1.06"
+#define	__IDENT__	"X.01-15"
+#define	__REV__		"1.15.0"
 
 #include	<stdarg.h>
 #include	<stdint.h>
@@ -676,7 +732,7 @@ static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
-**	a_prm	- FAO parameter: 0 - current time, else time_t *
+**	a_prm	- FAO parameter (by value): 0 - current time, else a fao_time_t
 **	a_date	- non-zero: !%D (dd-MMM-yyyy hh:mm:ss.cc),
 **		  zero: !%T (hh:mm:ss.cc)
 **
@@ -692,8 +748,9 @@ static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 int64_t	l_now, l_days, l_secs, l_year;
 unsigned l_hh, l_mm, l_ss, l_mon, l_day;
 
+	/* Time is passed BY VALUE; 0 selects the current time (as on OpenVMS). */
 	if ( a_prm )
-		l_now = (int64_t) * (const fao_time_t *) a_prm;
+		l_now = (int64_t) a_prm;
 	else	l_now = (int64_t) FAO$GETTIME ();
 
 	l_now += FAO$K_TZOFFSET;
@@ -742,8 +799,7 @@ unsigned l_hh, l_mm, l_ss, l_mon, l_day;
 **
 **	B/W/L operands are passed by value in the parameter list and
 **	are masked/sign-extended to the requested size.  A quadword (Q)
-**	operand, exactly as on OpenVMS, is passed BY REFERENCE: the
-**	parameter is the address of an int64_t/uint64_t.
+**	operand is passed BY VALUE (fao_prm_t is 64-bit wide).
 **
 **  INPUT:
 **	a_prm	- address of the shared parameter state
@@ -774,9 +830,7 @@ fao_prm_t l_prm = s_fao$get_prm (a_prm);
 			return	a_signed ? (uint64_t)(int64_t)(int32_t) l_prm
 					: (uint64_t)(uint32_t) l_prm;
 		case 'Q':
-			if ( ! l_prm )
-				return	0;
-			return	* (const uint64_t *) l_prm;
+			return	(uint64_t) l_prm;		/* passed BY VALUE - no dereference */
 		}
 
 	return	0;
@@ -832,6 +886,144 @@ const char *l_ptr = a_ctl;
 
 	return	NULL;
 }
+
+
+static const char s_fao$hexlc[16] = "0123456789abcdef";
+
+
+/*
+**  s_fao$put_hwaddr()/ipv4()/ipv6()/uuid() - format a fixed-length binary
+**  address, taken by pointer, into text and emit it through s_fao$put_str().
+**  A NULL pointer yields "(null)" rather than a fault. Used by the !%M, !%I,
+**  !%6 and !%U directives.
+*/
+static void s_fao$put_hwaddr (fao_ctx_t *a_ctx, const void *a_addr)	/* aa:bb:cc:dd:ee:ff (6 octets) */
+{
+const unsigned char *l_p = a_addr;
+char	l_buf [18];
+int	l_i, l_n = 0;
+
+	if ( !l_p )
+		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+
+	for ( l_i = 0; l_i < 6; l_i++ )
+		{
+		if ( l_i )
+			l_buf[l_n++] = ':';
+		l_buf[l_n++] = s_fao$hexlc[(l_p[l_i] >> 4) & 0xF];
+		l_buf[l_n++] = s_fao$hexlc[ l_p[l_i]       & 0xF];
+		}
+	s_fao$put_str (a_ctx, l_buf, (size_t) l_n, FAO$K_WIDTHAUTO, 0);
+}
+
+static void s_fao$put_ipv4 (fao_ctx_t *a_ctx, const void *a_addr)	/* d.d.d.d (4 octets) */
+{
+const unsigned char *l_p = a_addr;
+char	l_buf [16];
+int	l_i, l_n = 0;
+unsigned l_v;
+
+	if ( !l_p )
+		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+
+	for ( l_i = 0; l_i < 4; l_i++ )
+		{
+		if ( l_i )
+			l_buf[l_n++] = '.';
+		l_v = l_p[l_i];
+		if ( l_v >= 100 )
+			l_buf[l_n++] = (char)('0' + l_v / 100);
+		if ( l_v >= 10 )
+			l_buf[l_n++] = (char)('0' + (l_v / 10) % 10);
+		l_buf[l_n++] = (char)('0' + l_v % 10);
+		}
+	s_fao$put_str (a_ctx, l_buf, (size_t) l_n, FAO$K_WIDTHAUTO, 0);
+}
+
+static void s_fao$put_ipv6 (fao_ctx_t *a_ctx, const void *a_addr)	/* RFC 5952 canonical form (16 octets) */
+{
+const unsigned char *l_p = a_addr;
+char	l_buf [46];
+int	l_i, l_j, l_n = 0, l_seen;
+int	l_run, l_runlen, l_best, l_bestlen;
+unsigned l_g [8], l_d;
+
+	if ( !l_p )
+		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+
+	/*
+	 * RFC 5952 par.5: an IPv4-mapped address is shown in the mixed notation -
+	 * ::ffff:192.168.1.10 - the very form inet_ntop() gives it.
+	 */
+	for ( l_i = 0; (l_i < 10) && !l_p[l_i]; l_i++);
+	if ( (l_i == 10) && (l_p[10] == 0xFF) && (l_p[11] == 0xFF) )
+		{
+		s_fao$put_str (a_ctx, "::ffff:", 7, FAO$K_WIDTHAUTO, 0);
+		s_fao$put_ipv4 (a_ctx, l_p + 12);
+		return;
+		}
+
+	for ( l_i = 0; l_i < 8; l_i++ )
+		l_g[l_i] = ((unsigned) l_p[l_i * 2] << 8) | l_p[l_i * 2 + 1];
+
+	/*
+	 * RFC 5952: the longest run of two or more all-zero groups is compressed
+	 * to "::"; on a tie the leftmost run wins; a lone zero group is not
+	 * compressed. l_best = the run's first group, l_bestlen = its length.
+	 */
+	l_best = -1; l_bestlen = 1;
+	for ( l_i = 0; l_i < 8; )
+		{
+		if ( l_g[l_i] )
+			{ l_i++; continue; }
+		for ( l_run = l_i, l_runlen = 0; (l_i < 8) && !l_g[l_i]; l_i++ )
+			l_runlen++;
+		if ( l_runlen > l_bestlen )
+			{ l_best = l_run; l_bestlen = l_runlen; }
+		}
+
+	for ( l_i = 0; l_i < 8; l_i++ )
+		{
+		if ( (l_best >= 0) && (l_i == l_best) )
+			{			/* The compressed run: "::", then continue past it */
+			l_buf[l_n++] = ':';
+			l_buf[l_n++] = ':';
+			l_i += l_bestlen - 1;	/* The for's l_i++ steps onto the group after the run */
+			continue;
+			}
+		if ( l_n && (l_buf[l_n - 1] != ':') )
+			l_buf[l_n++] = ':';
+		if ( !l_g[l_i] )
+			l_buf[l_n++] = '0';
+		else	for ( l_j = 12, l_seen = 0; l_j >= 0; l_j -= 4 )
+				{
+				l_d = (l_g[l_i] >> l_j) & 0xF;
+				if ( l_d || l_seen )
+					{ l_buf[l_n++] = s_fao$hexlc[l_d]; l_seen = 1; }
+				}
+		}
+	s_fao$put_str (a_ctx, l_buf, (size_t) l_n, FAO$K_WIDTHAUTO, 0);
+}
+
+static void s_fao$put_uuid (fao_ctx_t *a_ctx, const void *a_addr)	/* 8-4-4-4-12 (16 octets) */
+{
+const unsigned char *l_p = a_addr;
+char	l_buf [37];
+int	l_i, l_n = 0;
+
+	if ( !l_p )
+		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+
+	for ( l_i = 0; l_i < 16; l_i++ )
+		{
+		if ( (l_i == 4) || (l_i == 6) || (l_i == 8) || (l_i == 10) )
+			l_buf[l_n++] = '-';
+		l_buf[l_n++] = s_fao$hexlc[(l_p[l_i] >> 4) & 0xF];
+		l_buf[l_n++] = s_fao$hexlc[ l_p[l_i]       & 0xF];
+		}
+	s_fao$put_str (a_ctx, l_buf, (size_t) l_n, FAO$K_WIDTHAUTO, 0);
+}
+
 
 /*
 **++
@@ -957,6 +1149,26 @@ char	l_fldbuf [FAO$K_FLDBUF];
 					case 'D':
 						s_fao$put_time (a_ctx,
 							s_fao$get_prm (l_prm), 1);
+						break;
+
+					case 'M':	/* !%M - MAC / hardware address	*/
+						s_fao$put_hwaddr (a_ctx,
+							(const void *)(uintptr_t) s_fao$get_prm (l_prm));
+						break;
+
+					case 'I':	/* !%I - IPv4 address		*/
+						s_fao$put_ipv4 (a_ctx,
+							(const void *)(uintptr_t) s_fao$get_prm (l_prm));
+						break;
+
+					case '6':	/* !%6 - IPv6 address		*/
+						s_fao$put_ipv6 (a_ctx,
+							(const void *)(uintptr_t) s_fao$get_prm (l_prm));
+						break;
+
+					case 'U':	/* !%U - UUID			*/
+						s_fao$put_uuid (a_ctx,
+							(const void *)(uintptr_t) s_fao$get_prm (l_prm));
 						break;
 
 					default:
@@ -1163,7 +1375,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 **  system service, varargs form.
 **
 **	NOTE: every variadic parameter MUST be explicitly cast by the
-**	caller to fao_prm_t (integers) or be a pointer; a quadword
+**	caller to fao_prm_t (a 64-bit value); a quadword
 **	(!..Q) parameter is the ADDRESS of a 64-bit integer.
 **
 **  INPUT:
@@ -1477,7 +1689,7 @@ int	l_numdig, l_sts;
 		while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
 			l_ptr++;
 
-		if ( (l_sts = s_fao$tim_hms (&l_ptr, &l_secs)) != STS$K_SUCCESS )
+		if ( !(1 & (l_sts = s_fao$tim_hms (&l_ptr, &l_secs))) )
 			return	l_sts;
 
 		while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
@@ -1508,7 +1720,7 @@ int	l_numdig, l_sts;
 
 		l_ptr++;
 
-		if ( (l_sts = s_fao$tim_month (&l_ptr, &l_mon)) != STS$K_SUCCESS )
+		if ( !(1 & (l_sts = s_fao$tim_month (&l_ptr, &l_mon))) )
 			return	l_sts;
 
 		if ( *l_ptr++ != '-' )
@@ -1521,8 +1733,7 @@ int	l_numdig, l_sts;
 			l_ptr++;
 
 		if ( *l_ptr )
-			if ( (l_sts = s_fao$tim_hms (&l_ptr, &l_secs))
-				!= STS$K_SUCCESS )
+			if ( !(1 & (l_sts = s_fao$tim_hms (&l_ptr, &l_secs))) )
 				return	l_sts;
 		}
 	else if ( l_numdig || (*l_ptr == ':') )
@@ -1533,7 +1744,7 @@ int	l_numdig, l_sts;
 		while ( (*l_ptr == ' ') || (*l_ptr == '\t') )
 			l_ptr++;
 
-		if ( (l_sts = s_fao$tim_hms (&l_ptr, &l_secs)) != STS$K_SUCCESS )
+		if ( !(1 & (l_sts = s_fao$tim_hms (&l_ptr, &l_secs))) )
 			return	l_sts;
 		}
 	else	return	FAO$K_IVTIME;
@@ -1652,7 +1863,8 @@ char	*l_dig;
 	l_ctx.sts	= STS$K_SUCCESS;
 
 	if ( l_val >= 0 )			/* Absolute time	*/
-		s_fao$put_time (&l_ctx, (fao_prm_t) &l_tim, ! a_cvtflg);
+		/* BATCH: by value - S_FAO$PUT_TIME takes the time itself, not its address */
+		s_fao$put_time (&l_ctx, (fao_prm_t) l_tim, ! a_cvtflg);
 	else	{				/* Delta time		*/
 		l_mag	= - l_val;
 		l_secs	= l_mag % 86400;

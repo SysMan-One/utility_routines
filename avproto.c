@@ -1,5 +1,6 @@
 #define	__MODULE__	"AVPROTO"
-#define	__IDENT__	"X.94-09"
+#define	__IDENT__	"X.94-11ECO1"
+#define	__REV__		"94.11.1"
 
 
 /*
@@ -49,11 +50,15 @@
 **		#include	"avproto.h"
 **		add avproto.c module into project
 **
-**  AUTHORS: Ruslan R. (The BadAss Sysman) Laishev
+**  AUTHORS: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  CREATION DATE:  20-JUL-2018
 **
 **  MODIFICATION HISTORY:
+**
+**	14-AUG-2026	RRL	X.94-11ECO1 : the mandatory __REV__ was absent from the module
+**		header; per the Xaa-bbECOc -> aa.bb.c rule it is "94.11.1" (this very
+**		addition being the ECO).
 **
 **	 6-FEB-2019	SYS	Some redesigning according changes in the AVP's structure.
 **
@@ -75,7 +80,7 @@
 **
 **	29-JUL-2019	RRL	X.94-07 : Redeclared __tlv$dump();
 **
-**	27-JUL-2026	DN	X.94-08 : Security/robustness fixes:
+**	27-JUL-2026	RRL	X.94-08 : Security/robustness fixes:
 **				- __tlv$get()/__tlv$lookup()/__tlv$dump() take real PDU area
 **				  size <pdusz> and validate every TLV against it (no OOB on a
 **				  malformed/hostile PDU with a lying u_len/w_len);
@@ -88,7 +93,7 @@
 **
 **
 **
-**	28-JUL-2026	DN	X.94-09 : Renamed the routine prefix avproto_ to __tlv$ (the module
+**	28-JUL-2026	RRL	X.94-09 : Renamed the routine prefix avproto_ to __tlv$ (the module
 **				implements a Tag-Length-Value protocol). Uppercase types
 **				AVPROTO_PDU/AVPROTO_HDR/AVPROTO_TLV are unchanged.
 **
@@ -107,23 +112,30 @@
 #include	"avproto.h"	/* Constants and data structure definitions */
 
 /*
- *  DESCRIPTION: Encapsulate given data to TLV-container at end of the given PDU,
- *	adjust length of the PDU in the header.
- *
- *  INPUT:
- *	pdu:	A Protocol Data Unit
- *	pdusz:	A size of the PDU's area in octets
- *	v_tag:	Tag Id of the value (application specific)
- *	v_type:	See TAG$K_* constants
- *	val:	An address of the value to be encapsulated into the TLV
- *	valsz:	Actual size of the value, optional for fixed size 'val'
- *
- *  OUTPUT:
- *	NONE
- *
- *   RETURN:
- *	condition code, STS$K_* constants
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Append one Tag-Length-Value record to a PDU. Word, longword and quadword
+**	values are stored in network byte order; the header payload length is
+**	updated. Fails if the value does not fit in the remaining buffer space.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_pdup	Address of the PDU buffer
+**	a_pdusz	Total size of the PDU buffer in octets
+**	a_v_tag	Application tag identifier
+**	a_v_type	Tag type (TAG$K_*)
+**	a_val	Address of the value to store
+**	a_valsz	Size of the value in octets
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Updates the length field in the PDU header.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS on success; error if the buffer is too small or the header
+**	length is corrupt.
+**--
+*/
 int	__tlv$put (
 	void *		a_pdup,
 	unsigned short	a_pdusz,
@@ -230,23 +242,31 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 
 
 /*
- *  DESCRIPTION: Find TLV in with specified TAG the PDU from begin of the TLV areas (if contexts is set to -1).
- *
- *  INPUT:
- *	pdu:	A Protocol Data Unit
- *	pdusz:	A real size of the PDU area, octets
- *	ctx:	A private context to be used in consecutive calls, must be -1 at first call
- *	v_tag:	Tag Id of the value (application specific)
- *	val:	An address of the buffer to accept value
- *	valsz:	A size of the buffer
- *
- *  OUTPUT:
- *	v_type:	See TAG$K_* constants
- *	valsz:	Actual size of the value, optional
- *
- *   RETURN:
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Find a TLV by tag and copy its value into a caller buffer. Word, longword
+**	and quadword values are converted from network to host byte order. Every
+**	record is validated against <a_pdusz> so a malformed PDU cannot overrun.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_pdup	Address of the received PDU
+**	a_pdusz	REAL size of the PDU area (received octets)
+**	a_context	Iteration context; -1 on the first call
+**	a_v_tag	Tag identifier to find
+**	a_v_type	Receives the tag type
+**	a_val	Buffer that receives the value
+**	a_valsz	In: size of <a_val>; out: octets copied (mandatory for var-length)
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Advances <a_context> through the PDU.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS if found and copied; STS$K_WARN if absent; error if the
+**	destination is too small or <a_valsz> was omitted for a variable-length type.
+**--
+*/
 int	__tlv$get (
 		void	*a_pdup,
 	unsigned	a_pdusz,		/* Real size of the PDU area (received octets) */
@@ -398,23 +418,30 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 
 
 /*
- *  DESCRIPTION: Lookup TLV in with specified TAG the PDU from begin of the TLV areas (if contexts is set to -1),
- *	return type and address of the TLV's data area.
- *
- *  INPUT:
- *	pdu:	A Protocol Data Unit
- *	pdusz:	A real size of the PDU area, octets
- *	ctx:	A private context to be used in consecutive calls, must be -1 at first call
- *	v_tag:	Tag Id of the value (application specific)
- *
- *  OUTPUT:
- *	v_type:	See TAG$K_* constants
- *	val:	An address of TLV's data block (unconverted !!!)
- *	valsz:	A size of the TLV's data block
- *
- *   RETURN:
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Find a TLV by tag and return a pointer to its value inside the PDU, with
+**	no copy. The data is NOT byte-order converted. The pointer is valid only
+**	while the caller's PDU buffer lives. Suitable for large octet blocks.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_pdup	Address of the received PDU
+**	a_pdusz	REAL size of the PDU area (received octets)
+**	a_context	Iteration context; -1 on the first call
+**	a_v_tag	Tag identifier to find
+**	a_v_type	Receives the tag type
+**	a_val	Receives a pointer to the value inside the PDU
+**	a_valsz	Receives the length of the value
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Advances <a_context> through the PDU.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS if the record was found; STS$K_WARN otherwise.
+**--
+*/
 int	__tlv$lookup (
 		void	*a_pdup,
 	unsigned	a_pdusz,		/* Real size of the PDU area (received octets) */
@@ -495,15 +522,24 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 
 
 /*
- *  DESCRIPTION: Dump PDU
- *
- *  INPUT:
- *	pdu:	A Protocol Data Unit
- *	pdusz:	A real size of the PDU area, octets
- *
- *   RETURN:
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Write a human-readable listing of every TLV in a PDU to the log: each
+**	record with its tag, type, length and a hex dump of the value. For debugging.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_pdu	Address of the PDU
+**	a_pdusz	REAL size of the PDU area (received octets)
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	NONE.
+**--
+*/
 void	__tlv$dump	(
 		void	*a_pdu,
 		unsigned a_pdusz		/* Real size of the PDU area (received octets) */
@@ -528,6 +564,7 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdu;
 	l_limit = $MIN(l_limit, (unsigned) (a_pdusz - sizeof(AVPROTO_HDR)));
 
 	$LOG(STS$K_INFO, "PDU [len=%d, csr=%#x, seq=%d]", be32toh(l_pdu->r_hdr.u_len), be32toh(l_pdu->r_hdr.u_csr), be32toh(l_pdu->r_hdr.u_seq));
+	/* Walk every TLV record in the PDU and print tag / type / length / value */
 
 	for ( l_pchar = (char *) l_pdu->r_tlv, l_pos = l_count = 0; l_pos < l_limit; l_count++ )
 		{
@@ -595,6 +632,23 @@ char	pdubuf[8192];	/* This buffer will keep the PDU is shared between
 AVPROTO_PDU *pdu = (AVPROTO_PDU *) pdubuf;
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
+**
+**	Demo TLS client: build an SSL context, connect to the server, then
+**	exchange a request/response PDU pair over the encrypted channel.
+**
+**  FORMAL PARAMETERS:
+**
+**	NONE
+**
+**  RETURN VALUE:
+**	A condition code (STS$K_*).
+**--
+*/
 int	__client	(void)
 {
 unsigned char	username[] = "Ruslan (BadAss SysMan) Laishev",
@@ -622,6 +676,23 @@ long long	q_val = 0x1234abcddeadbeef;
 	return	STS$K_SUCCESS;
 }
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
+**
+**	Demo TLS server: build an SSL context, listen and accept a connection,
+**	then read a request PDU and answer with a response PDU.
+**
+**  FORMAL PARAMETERS:
+**
+**	NONE
+**
+**  RETURN VALUE:
+**	A condition code (STS$K_*).
+**--
+*/
 int	__server	(void)
 {
 unsigned context = -1, u_len, u_csr, u_seq, v_type, mlen;
@@ -860,6 +931,26 @@ struct pollfd pfd = {sd, POLLOUT, 0};
 
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
+**
+**	Read exactly one PDU from a TLS-protected socket: first the fixed header,
+**	then the payload whose length the header declares.
+**
+**  FORMAL PARAMETERS:
+**
+**	sd	Connected socket descriptor
+**	ssl	OpenSSL connection object
+**	pdubuf	Buffer that receives the PDU
+**	pdusz	Capacity of <pdubuf> in octets
+**
+**  RETURN VALUE:
+**	A condition code (STS$K_*).
+**--
+*/
 int	pdu_recv	(
 		int	sd,
 		SSL	*ssl,
@@ -892,6 +983,24 @@ unsigned status, u_len, u_csr, u_seq;
 }
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
+**
+**	Write one complete PDU (header plus payload) to a TLS-protected socket.
+**
+**  FORMAL PARAMETERS:
+**
+**	sd	Connected socket descriptor
+**	ssl	OpenSSL connection object
+**	pdubuf	The PDU to send
+**
+**  RETURN VALUE:
+**	A condition code (STS$K_*).
+**--
+*/
 int	pdu_xmit	(
 		int	sd,
 		SSL	*ssl,
@@ -914,17 +1023,22 @@ unsigned status, u_len, u_csr, u_seq;
 
 
 /*
- *  DESCRIPTION: init_ssl - Initialize SSL internal data and contexts, load certificate.
- *
- *  INPUT:
- *	__ctx:	a local specific part of the SSL context
- *
- *  OUTPUT:
- *	NONE
- *
- *  RETURN:
- *	condition code, see STS$K_* constants
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
+**
+**	Create and configure an OpenSSL context for the demo: pick the method,
+**	load the certificate and private key, and set the verification mode.
+**
+**  FORMAL PARAMETERS:
+**
+**	__ctx	Receives the newly created SSL_CTX
+**
+**  RETURN VALUE:
+**	A condition code (STS$K_*).
+**--
+*/
 int	init_ssl (SSL_CTX ** __ctx )
 {
 const SSL_METHOD *method = NULL;
@@ -969,6 +1083,25 @@ const SSL_METHOD *method = NULL;
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
+**
+**	Fetch a drive key from a KDEPO (key-depot) server: connect, send the
+**	computer UUID and receive the key block for each drive.
+**
+**  FORMAL PARAMETERS:
+**
+**	rsock	Address of the KDEPO server socket
+**	cuu	Computer UUID identifying the caller
+**	dk	Array that receives the returned drive keys
+**
+**  RETURN VALUE:
+**	A condition code (STS$K_*).
+**--
+*/
 int	kdepo_get_key	(
 	struct sockaddr_in *	rsock,
 		uuid_t		cuu,
@@ -1058,6 +1191,24 @@ end:
 
 
 
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
+**
+**	Entry point of the demo: obtain the drive keys from the KDEPO server
+**	and print them, exercising the TLV and TLS helpers above.
+**
+**  FORMAL PARAMETERS:
+**
+**	argc	Argument count
+**	argv	Argument vector
+**
+**  RETURN VALUE:
+**	Process exit status.
+**--
+*/
 int	main	(int argc, char ** argv)
 {
 int	status, i;

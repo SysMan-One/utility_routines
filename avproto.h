@@ -65,6 +65,9 @@
 **	29-JUL-2019	RRL	Added declaration for __tlv$dump();
 **				improved error handling in the __tlv$hget();
 **
+**	01-AUG-2026	DN	__tlv$hget() compared the magic against a_sig over the full
+**				magic width, reading past a signature string shorter than the field;
+**				it now compares a local zero-padded copy, mirroring __tlv$hset().
 **
 **--
 */
@@ -131,19 +134,24 @@ typedef struct ____tlv$pdu__ {
 #pragma	pack (pop)
 
 /*
- *  DESCRIPTION: __tlv$encode_tag - encapsulate given 'v_type' and  'v_tag' into the 16-bits field.
- *	return NBO representation of the w_tag;
- *
- *  INPUTS:
- *	v_type:	Tag type, see TAG$K_* constants
- *	v_tag:	Tag Id, application specific Tag Id
- *
- *  OUTPUTS:
- *	NONE
- *
- *   RETURNS:
- *	16 bits TLV.w_tag field, NBO
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Pack a tag type and tag identifier into the sixteen-bit tag field of a
+**	TLV. The layout is [ type : 4 | id : 12 ], returned in network byte order.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_v_type	Tag type; one of the TAG$K_* constants (four bits)
+**	a_v_tag	Application tag identifier (twelve bits)
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	The packed w_tag field, in network byte order.
+**--
+*/
 inline	static unsigned short __tlv$encode_tag
 		(
 	unsigned short	a_v_type,
@@ -155,19 +163,25 @@ inline	static unsigned short __tlv$encode_tag
 }
 
 /*
- *  DESCRIPTION: __tlv$decode_tag - extract 'tag id' and 'tag type' field from the TLV.w_tag.
- *	Return w_tag in the Host Order Byte
- *
- *  INPUTS:
- *	w_tag:	TLV.w_tag field, NBO
- *
- *  OUTPUTS:
- *	v_type:	an address of variable to accept unpacked 'tag type' field
- *	v_tag:	an address of variable to accept unpacked 'tag id field
- *
- *   RETURNS:
- *	16 bits, TLV_w_tag in Host Order Byte
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Extract the tag type and tag identifier from a TLV tag field. The high
+**	four bits give the type, the low twelve bits the identifier.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_w_tag	The w_tag field, in network byte order
+**	a_v_type	Receives the tag type
+**	a_v_tag	Receives the tag identifier
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	The tag field in host byte order.
+**--
+*/
 inline static unsigned short	__tlv$decode_tag
 		(
 	unsigned short	a_w_tag,
@@ -194,21 +208,27 @@ void	__tlv$dump   (void *a_pdu, unsigned a_pdusz);
 
 
 /*
- *  DESCRIPTION: Initialize given PDU's header with given values, reset length of the PDU
- *	to initial.
- *
- *  INPUTS:
- *	sig:	A signature string, ASCIZ
- *	pdu:	A Protocol Data Unit
- *	u_csr:	A command/status register field
- *	u_seq:	PDU's sequence field
- *
- *  OUTPUTS:
- *	NONE
- *
- *   RETURNS:
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Initialise the fixed header of a PDU and reset its payload length to zero.
+**	Must be called before the first __tlv$put(). All header fields are stored
+**	in network byte order.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_pdup	Address of the PDU buffer
+**	a_sig	Eight-octet protocol signature written into the header
+**	a_u_csr	Command/status register value
+**	a_u_seq	PDU sequence number
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS.
+**--
+*/
 inline static int	__tlv$hset	(
 		void		*a_pdup,
 	const unsigned char	*a_sig,
@@ -232,20 +252,27 @@ AVPROTO_PDU	*l_pdu = (AVPROTO_PDU *) a_pdup;
 
 
 /*
- *  DESCRIPTION: Get information from the PDU's header.
- *
- *  INPUTS:
- *	pdu:	A Protocol Data Unit
- *	sig:	A signature string, ASCIZ
- *
- *  OUTPUTS:
- *	u_len:	A length of the PDU's payload
- *	u_csr:	A command/status register field
- *	u_seq:	PDU's sequence field
- *
- *   RETURNS:
- *	condition code
- */
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Validate a PDU signature and extract the header fields. All returned
+**	fields are converted from network to host byte order.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_pdup	Address of the received PDU
+**	a_sig	Expected eight-octet signature; a mismatch is an error
+**	a_u_len	Receives the payload length declared in the header
+**	a_u_csr	Receives the command/status register
+**	a_u_seq	Receives the sequence number
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE.
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS if the signature matched; error otherwise.
+**--
+*/
 inline static int	__tlv$hget	(
 		void		*a_pdup,
 	const unsigned char	*a_sig,
@@ -256,13 +283,21 @@ inline static int	__tlv$hget	(
 {
 size_t		l_len;
 AVPROTO_PDU	*l_pdu = (AVPROTO_PDU *) a_pdup;
+unsigned char	l_sigbuf[sizeof(l_pdu->r_hdr.magic)];	/* zero-padded copy of a_sig	*/
 
 	*a_u_csr = STS$K_ERROR;
 
 	if ( (l_len = strnlen((const char *) a_sig, sizeof(l_pdu->r_hdr.magic) + 1)) > sizeof(l_pdu->r_hdr.magic) )
 		return	STS$K_ERROR;
 
-	if ( memcmp(l_pdu->r_hdr.magic, a_sig, sizeof (l_pdu->r_hdr.magic)) )
+	/* Compare against a zero-padded copy of the signature so that a caller may
+	** pass a string shorter than the magic field without reading past its end;
+	** __tlv$hset() zero-pads the stored magic in the same way.
+	*/
+	memset(l_sigbuf, 0, sizeof(l_sigbuf));
+	memcpy(l_sigbuf, a_sig, l_len);
+
+	if ( memcmp(l_pdu->r_hdr.magic, l_sigbuf, sizeof(l_sigbuf)) )
 		return	STS$K_ERROR;
 
 	*a_u_len = be32toh(l_pdu->r_hdr.u_len);

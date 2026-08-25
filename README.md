@@ -70,6 +70,69 @@ Then in your code:
 For ARMv8 hardware CRC, pass `-march=armv8-a+crc` (e.g.
 `target_compile_options(starlet PRIVATE -march=armv8-a+crc)`).
 
+## Tests
+
+Regression tests under `tests/` (all exit non-zero on failure, so they drop
+straight into a build pipeline):
+
+- **`test_status_convention`** — locks in the OpenVMS condition-value
+  convention (`1 & status` — odd is success, even is failure): `__util$bintim`,
+  `__util$asctim`, the `CLI$K_TIME`/`CLI$K_MAC` value types and the severity of
+  the `STS$K_*`/`FAO$K_*` codes.
+- **`test_cli_features`** — qualifier defaults, negatable qualifiers (including
+  "last wins" for a repeated `/X` / `/NOX`), value lists, `__cli$present` and
+  required qualifiers.
+- **`test_tlv`** — a full `__tlv$` PDU round-trip (header, word/longword/qword
+  byte-order conversion, octet blocks, lookup and a missing tag).
+- **`test_cli_help`** — the built-in `/HELP`, `-h`, `--help` detection, and that
+  a bare `help` token stays an ordinary verb or parameter value.
+- **`test_log_overflow`** — the logging routines truncate oversized records in
+  bounds and never write past their buffers.
+- **`test_setlogfd`** — `__util$setlogfd()` points the log at a given descriptor
+  without opening a file or seizing the standard streams.
+
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs them on every push,
+once via CTest and once standalone under ASan/UBSan.
+
+With CMake:
+
+```sh
+cmake -B build && cmake --build build && ctest --test-dir build
+```
+
+Or standalone, without CMake:
+
+```sh
+sh tests/run.sh          # honours CC and CFLAGS
+```
+
+## Install as a CMake package
+
+Build and install once:
+
+```sh
+cmake -B build
+cmake --build build
+cmake --install build --prefix /usr/local     # or any prefix
+```
+
+Then consume it from another project with no `add_subdirectory()` /
+`FetchContent()` - the package name is **StarLet**, the target is
+**`StarLet::starlet`** (the static library of all four modules):
+
+```cmake
+find_package(StarLet REQUIRED)
+
+add_executable(app main.c)
+target_link_libraries(app PRIVATE StarLet::starlet)
+```
+
+The install ships the four public headers, `libstarlet.a`, and the
+`StarLetConfig.cmake` / `StarLetConfigVersion.cmake` / `StarLetTargets.cmake`
+files under `<prefix>/lib/cmake/StarLet`. Version requests are honoured with
+same-major-version compatibility, e.g. `find_package(StarLet 1.0 REQUIRED)`.
+Binary or source packages can be produced with `cpack` from the build dir.
+
 ## Documentation
 
 Full reference manuals (VSI OpenVMS RTL style) are included:
