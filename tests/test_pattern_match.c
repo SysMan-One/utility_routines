@@ -40,6 +40,7 @@ int	l_done = 0, l_meos = 0;
 				break;
 
 			case '%':
+			case '?':	/* the alias, mirrored here for the fuzz */
 				a_p++;
 				a_s++;
 				break;
@@ -75,13 +76,17 @@ struct timespec l_t0, l_t1;
 	CHECK(  __util$pattern_match("eth0.100:rx", "*100*"),       "a '*middle*' matches");
 	CHECK(  __util$pattern_match("eth0.100:rx", "eth%.1%0*"),   "the percent wildcard takes exactly one octet");
 	CHECK( !__util$pattern_match("eth0", "eth0%"),              "the percent wildcard must not match the empty tail");
+	CHECK(  __util$pattern_match("eth0.100:rx", "eth?.1?0*"),   "the question-mark alias takes exactly one octet");
+	CHECK(  __util$pattern_match("abc", "a?c"),                 "the alias matches a single middle octet");
+	CHECK( !__util$pattern_match("ac", "a?c"),                  "the alias must not match the empty run");
+	CHECK( !__util$pattern_match("eth0", "eth0?"),              "the alias must not match the empty tail");
 	CHECK(  __util$pattern_match("", "*"),                      "a lone star matches the empty string");
 	CHECK(  __util$pattern_match("", ""),                       "empty matches empty");
 	CHECK( !__util$pattern_match("a", ""),                      "an empty pattern rejects a non-empty string");
 	CHECK(  __util$pattern_match("abc", "a**c"),                "adjacent stars collapse");
 
 	/* Fuzz against the former recursive matcher: strings over {a,b} up to 10,
-	** patterns over {a,b,*,%} up to 8 - small enough for the reference to stay
+	** patterns over {a,b,*,%,?} up to 8 - small enough for the reference to stay
 	** fast, rich enough to cover every branch.
 	*/
 	srand(20260814);
@@ -91,7 +96,7 @@ struct timespec l_t0, l_t1;
 		l_pl = rand() % 9;
 		for ( l_k = 0; l_k < l_sl; l_k++) l_s[l_k] = "ab"[rand() % 2];
 		l_s[l_sl] = '\0';
-		for ( l_k = 0; l_k < l_pl; l_k++) l_p[l_k] = "ab*%"[rand() % 4];
+		for ( l_k = 0; l_k < l_pl; l_k++) l_p[l_k] = "ab*%?"[rand() % 5];
 		l_p[l_pl] = '\0';
 
 		if ( !!__util$pattern_match(l_s, l_p) != !!s_ref(l_s, l_p) )

@@ -19,7 +19,7 @@ trap 'rm -rf "$OUT"' EXIT
 SRC="$HERE/utility_routines.c $HERE/cli_routines.c $HERE/starlet.c $HERE/avproto.c"
 rc=0
 
-for t in status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match
+for t in status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64
 do
 	printf '\n>>> test_%s\n' "$t"
 	# shellcheck disable=SC2086

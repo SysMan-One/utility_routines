@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-26"
-#define	__REV__		"1.26.0"
+#define	__IDENT__	"V.01-30"
+#define	__REV__		"1.30.0"
 
 
 /*
@@ -248,6 +248,41 @@
 **				a*a*a*a*a*b over 200 octets of 'a' went from 8.6 SECONDS to 318 ns, and
 **				the typical cases got 1.6-3.6x faster (15-26 ns). No recursion - no
 **				stack hazard on hostile patterns from a config or the CLI.
+
+**	14-AUG-2026	RRL	V.01-26ECO1 : the session's routines (s_msgcmp, s_util$prefix,
+**				s_util$facname) brought to the house routine-body template - one
+**				parameter per line, the closing parenthesis on its own, a_-prefixed
+**				parameters. Layout only, no functional change.
+**
+**	29-AUG-2026	RRL	V.01-27 : Added $LOG_FAO - the FAO twin of $LOG: the body is an FAO
+**				control string (!UL/!AZ/!AS/!XL/!%I/...) formatted by __util$faol(),
+**				with the $PUTMSG_FAO ergonomics (every parameter cast to fao_prm_t and
+**				the count derived by the macro). __util$log_fao() mirrors __util$log()
+**				(envelope, sanity clamp, STS$M_SYSLOG path reusing the formatted body),
+**				__util$logd_fao() mirrors __util$logd() ([mod\func:line] debug face).
+**				See tests/test_log_fao.c.
+**
+**	31-AUG-2026	RRL	V.01-28 : The facility name is stamped into every EMSG_RECORD (new
+**				trailing facname field) by __util$inimsg(), so __util$putmsg_fao()/
+**				__util$putmsgd_fao() read it off the found record instead of walking
+**				the descriptor list a SECOND time per message (the list had already
+**				been walked to find the record). s_util$facname() is gone with the
+**				walk. Existing positional record initializers stay valid - the field
+**				is trailing and filled at registration. See tests/test_putmsg_fao.c.
+**
+**	 1-SEP-2026	RRL	V.01-29 : __util$pattern_match() accepts '?' as an alias of '%'
+**				(exactly one octet) - the DOS/glob-style spelling next to the VMS
+**				one. NB: a literal '?' in a pattern is a wildcard from now on. The
+**				fuzz reference and vectors extended - tests/test_pattern_match.c.
+**
+**	10-SEP-2026	RRL	V.01-30 : Added __util$base64() / __util$unbase64() - RFC 4648
+**				encoding and decoding with the bounded-buffer calling sequence of
+**				the family (src, srclen, dst, dstsz, &dstlen). BroProxy and
+**				BroAgent carried these two under the same names in a private
+**				BASE64.H each; the library is where they belong.  The decoder
+**				is strict where the old one was not: an octet outside the
+**				alphabet, a '=' in the middle, or a dangling sextet is an error
+**				rather than garbage out.  tests/test_base64.c pins it.
 **
 */
 
@@ -394,9 +429,12 @@ static	inline void	s_util$logwrite	(int a_fd, const void *a_buf, size_t a_len)
 **	greater than b->sts.
 **--
 */
-static int s_msgcmp (const void *a, const void *b)
+static	int	s_msgcmp (
+		const void	*a_m1,
+		const void	*a_m2
+		)
 {
-const EMSG_RECORD *m1 = a, *m2 = b;
+const EMSG_RECORD *m1 = a_m1, *m2 = a_m2;
 int	l_c;
 
 
@@ -432,23 +470,33 @@ int	l_c;
 **	STS$K_SUCCESS on success; STS$K_WARN / condition code otherwise.
 **--
 */
-unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc)
+unsigned	__util$inimsg (
+		EMSG_RECORD_DESC	*a_msgdsc
+		)
 {
-EMSG_RECORD_DESC *md;
+EMSG_RECORD_DESC *l_md;
+unsigned l_i;
 
-	if ( !msgdsc )
+	if ( !a_msgdsc )
 		return	STS$K_WARN;
 
 	/* At first level we try to find the message records descriptor by using facility number */
-	for  (md = emsg_record_desc_root; md; md = md->link)
-		if ( md->facno == msgdsc->facno)
+	for  (l_md = emsg_record_desc_root; l_md; l_md = l_md->link)
+		if ( l_md->facno == a_msgdsc->facno)
 			return	STS$K_WARN;
 
 
-	qsort(msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp);
+	qsort(a_msgdsc->msgrec, a_msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp);
 
-	msgdsc->link = emsg_record_desc_root;
-	emsg_record_desc_root = msgdsc;
+	/* Stamp the facility name into every record, so the signalling routines
+	** read it off the found record instead of walking the descriptor list
+	** a second time (the descriptor was already walked to FIND the record).
+	*/
+	for ( l_i = 0; l_i < a_msgdsc->msgnr; l_i++ )
+		a_msgdsc->msgrec[l_i].facname = a_msgdsc->facname;
+
+	a_msgdsc->link = emsg_record_desc_root;
+	emsg_record_desc_root = a_msgdsc;
 
 	return	STS$K_SUCCESS;
 }
@@ -559,7 +607,9 @@ static const char s_defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: 
 #define	UTIL$TLS	__thread
 #endif
 
-static int	s_util$prefix (char *a_out)
+static	int	s_util$prefix (
+		char	*a_out
+		)
 {
 struct timespec l_now;
 unsigned l_val;
@@ -777,20 +827,6 @@ EMSG_RECORD *msgrec;
 }
 
 
-/*
-**  Return the name registered for a status's facility, or "NONAME" when the
-**  facility carries none - used to frame a signalled record as %<facility>-<S>-.
-*/
-static const char *s_util$facname (unsigned sts)
-{
-EMSG_RECORD_DESC *md;
-
-	for ( md = emsg_record_desc_root; md; md = md->link )
-		if ( md->facno == $FAC(sts) )
-			return	(md->facname && *md->facname) ? md->facname : "NONAME";
-
-	return	"NONAME";
-}
 
 
 /*
@@ -854,7 +890,8 @@ EMSG_RECORD *msgrec;
 		{
 		/* Prefix the caller's severity - %<S>- - so one record can show its INFO/WARNING/... face */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-",
+			(msgrec->facname && *msgrec->facname) ? msgrec->facname : "NONAME", s_severity[sev]);
 		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
 
 		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
@@ -930,7 +967,8 @@ EMSG_RECORD *msgrec;
 		{
 		/* Prefix the caller's severity - %<S>- - as __util$putmsg_fao() does */
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-",
+			(msgrec->facname && *msgrec->facname) ? msgrec->facname : "NONAME", s_severity[sev]);
 		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
 
 		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
@@ -1050,6 +1088,91 @@ unsigned opcom = sev & STS$M_SYSLOG;
 
 
 
+
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO twin of __util$logd(): as __util$log_fao(), but with the
+**	call-site [module\function:line] descriptor used by the debug
+**	$LOG_FAO macro.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fac	Facility name for the envelope
+**	a_sev	Record severity (STS$K_*)
+**	a_ctl	FAO control string
+**	a_mod	Call-site module name
+**	a_func	Call-site function name
+**	a_line	Call-site line number
+**	a_prmcnt	Number of FAO parameters that follow (0..16)
+**	...	FAO parameters, each already cast to fao_prm_t
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	The severity, as __util$logd() returns it.
+**--
+*/
+unsigned	__util$logd_fao (
+		const char	*a_fac,
+		unsigned	a_sev,
+		const char	*a_ctl,
+		const char	*a_mod,
+		const char	*a_func,
+		unsigned	a_line,
+		int	a_prmcnt,
+			...
+		)
+{
+va_list	l_arglist;
+const char l_fmt [] = "[%s\\%s:%u] %%%s-%c:  ";
+char	l_out [UTIL$SZ_OUTBUF + 8], l_body [UTIL$SZ_OUTBUF];
+fao_desc_t	l_bodydsc = $FAO_DESC(l_body);
+unsigned short	l_bodylen = 0;
+unsigned l_olen, l_isev = $SEV(a_sev);
+int	l_n;
+fao_prm_t	l_prm [16];
+
+	a_sev &= ~STS$M_SYSLOG;		/* as __util$logd() does	*/
+
+	/* "DD-MM-YYYY HH:MM:SS.msc <tid> " + [mod\func:line] + %<fac>-<s>: */
+	l_olen = s_util$prefix (l_out);
+	l_olen += snprintf (l_out + l_olen, UTIL$SZ_OUTBUF - l_olen, l_fmt, a_mod, a_func, a_line, a_fac, s_severity[l_isev]);
+	l_olen = $MIN(l_olen, UTIL$SZ_OUTBUF - 1);
+
+	/* The FAO parameters: the count is the caller's, see __util$putmsg_fao() */
+	if ( a_prmcnt > (int) (sizeof(l_prm)/sizeof(l_prm[0])) )
+		a_prmcnt = (int) (sizeof(l_prm)/sizeof(l_prm[0]));
+
+	if ( a_prmcnt < 0 )
+		a_prmcnt = 0;
+
+	va_start (l_arglist, a_prmcnt);
+	for ( l_n = 0; l_n < a_prmcnt; l_n++ )
+		l_prm[l_n] = va_arg(l_arglist, fao_prm_t);
+	va_end (l_arglist);
+
+	__util$faol (a_ctl, &l_bodylen, &l_bodydsc, l_prm, l_n);
+	if ( (int) l_bodylen > (int) (UTIL$SZ_OUTBUF - l_olen - 1) )
+		l_bodylen = (unsigned short) (UTIL$SZ_OUTBUF - l_olen - 1);
+	memcpy (l_out + l_olen, l_body, (size_t) l_bodylen);
+	l_olen += l_bodylen;
+
+	l_out[l_olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, l_out, l_olen);
+
+	/* ARL - for android logcat */
+	#ifdef ANDROID_LOGCAT
+		__android_log_print(ANDROID_LOG_VERBOSE, a_mod, "%.*s", l_olen, l_out);
+	#endif
+
+	return	a_sev;
+}
 
 /*
 **++
@@ -1937,6 +2060,94 @@ unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
 	return	sev;
 }
 
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO twin of __util$log(): format a record under an FAO control
+**	string (via __util$faol(), so !UL/!UQ/!AZ/!AS/!XL/!%I/... are at hand)
+**	and write it, with the usual timestamp / %<fac>-<S>: envelope, to the
+**	current log destination. Reached through the $LOG_FAO macro, which
+**	casts every parameter to fao_prm_t and derives the count for the
+**	caller - exactly the $PUTMSG_FAO ergonomics.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fac	Facility name for the envelope
+**	a_sev	Record severity (STS$K_*, optionally | STS$M_SYSLOG)
+**	a_ctl	FAO control string
+**	a_prmcnt	Number of FAO parameters that follow (0..16)
+**	...	FAO parameters, each already cast to fao_prm_t
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination (and syslog on STS$M_SYSLOG).
+**
+**  RETURN VALUE:
+**	The severity, as __util$log() returns it.
+**--
+*/
+unsigned	__util$log_fao (
+		const char	*a_fac,
+		unsigned	a_sev,
+		const char	*a_ctl,
+		int	a_prmcnt,
+			...
+		)
+{
+va_list	l_arglist;
+const char l_fmt [] = "%%%s-%C: ";
+char	l_out [UTIL$SZ_OUTBUF + 8], l_body [UTIL$SZ_OUTBUF];
+fao_desc_t	l_bodydsc = $FAO_DESC(l_body);
+unsigned short	l_bodylen = 0;
+unsigned l_olen, l_isev = $SEV(a_sev), l_opcom = a_sev & STS$M_SYSLOG;
+int	l_n;
+fao_prm_t	l_prm [16];
+
+	/* The same sanity clamp as __util$log() applies	*/
+	if ( !($ISINRANGE(a_sev, STS$K_WARN, STS$K_FATAL)) )
+		a_sev = STS$K_UNDEF;
+
+	/* "DD-MM-YYYY HH:MM:SS.msc <tid> " + the %<fac>-<S>: envelope	*/
+	l_olen = s_util$prefix (l_out);
+	l_olen += snprintf (l_out + l_olen, UTIL$SZ_OUTBUF - l_olen, l_fmt, a_fac, s_severity[l_isev]);
+	l_olen = $MIN(l_olen, UTIL$SZ_OUTBUF - 1);
+
+	/* The FAO parameters: the count is the caller's, see __util$putmsg_fao() */
+	if ( a_prmcnt > (int) (sizeof(l_prm)/sizeof(l_prm[0])) )
+		a_prmcnt = (int) (sizeof(l_prm)/sizeof(l_prm[0]));
+
+	if ( a_prmcnt < 0 )
+		a_prmcnt = 0;
+
+	va_start (l_arglist, a_prmcnt);
+	for ( l_n = 0; l_n < a_prmcnt; l_n++ )
+		l_prm[l_n] = va_arg(l_arglist, fao_prm_t);
+	va_end (l_arglist);
+
+	__util$faol (a_ctl, &l_bodylen, &l_bodydsc, l_prm, l_n);
+	if ( (int) l_bodylen > (int) (UTIL$SZ_OUTBUF - l_olen - 1) )
+		l_bodylen = (unsigned short) (UTIL$SZ_OUTBUF - l_olen - 1);
+	memcpy (l_out + l_olen, l_body, (size_t) l_bodylen);
+	l_olen += l_bodylen;
+
+	l_out[l_olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, l_out, l_olen);
+
+	/* ARL - for android logcat */
+	#ifdef ANDROID_LOGCAT
+		__android_log_print(ANDROID_LOG_VERBOSE, a_fac, "%.*s", l_olen, l_out);
+	#endif
+
+#ifndef	WIN32
+	if ( l_opcom )		/* The body is formatted already - reuse it	*/
+		syslog( LOG_PID | ((a_sev & 1) ? LOG_INFO : LOG_ERR), "%.*s", (int) l_bodylen, l_body);
+#endif
+
+	return	a_sev;
+}
+
 /*
 **++
 **  FUNCTIONAL DESCRIPTION:
@@ -2218,7 +2429,8 @@ int	status;
  *
  * CAVEATS :
  *  (1) pattern$ is assumed to be preprocessed, i.e, * replaced by WILD_STAR,
- *     '%' replaced by WILD_PERCENT, '\<character>' by '<character>', etc.
+ *     '%' replaced by WILD_PERCENT ('?' is accepted as its alias),
+ *     '\<character>' by '<character>', etc.
  *
  *  (2) str$, however, is LITERAL, ie, it does not have wildcards or
  *      '\<character>', etc.  *, %, and \ are given no special treatment.
@@ -2248,6 +2460,7 @@ int	status;
 /*--***********************************************************************/
 
 #define WILD_PERCENT	'%'
+#define WILD_QUESTION	'?'	/* An alias of WILD_PERCENT - one octet */
 #define WILD_STAR	'*'
 
 #ifndef	FALSE
@@ -2298,8 +2511,8 @@ const char *l_s = str$, *l_p = pattern$,
 	 */
 	while ( *l_s )
 		{
-		if ( (*l_p == WILD_PERCENT) || (*l_p == *l_s) )
-			{			/* '%' takes exactly one octet; a literal must equal */
+		if ( (*l_p == WILD_PERCENT) || (*l_p == WILD_QUESTION) || (*l_p == *l_s) )
+			{			/* '%' (or its '?' alias) takes exactly one octet; a literal must equal */
 			l_p++;
 			l_s++;
 			}
@@ -2944,6 +3157,207 @@ int	olen = 0;
 
 
 
+
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Encode a block of octets into the base64 alphabet of RFC 4648 (A-Z, a-z,
+**	0-9, '+', '/'), padded with '=' to a multiple of four characters.  The
+**	output is NOT zero-terminated as part of its length; a terminating NUL
+**	is appended as a courtesy when the buffer has room for one beyond the
+**	encoded text, so the result can be used as an ASCIZ string as well.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_src		An address of the octets to encode
+**	a_srclen	A number of octets to encode
+**	a_dst		An address of the output buffer
+**	a_dstsz		A size of the output buffer, octets
+**	a_dstlen	An address to accept the length of the encoded text - it
+**			is set even when the buffer is too small, so the caller
+**			learns what would have been needed
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS, or STS$K_ERROR on a bad argument or a buffer too small.
+**--
+*/
+int	__util$base64	(
+		void	*	a_src,
+		int		a_srclen,
+		void	*	a_dst,
+		int		a_dstsz,
+		int	*	a_dstlen
+			)
+{
+static const char s_b64 [] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const unsigned char *l_in = (const unsigned char *) a_src;
+char	*l_out = (char *) a_dst;
+int	l_i, l_need, l_rest;
+unsigned l_b0, l_b1, l_b2;
+
+	if ( !a_dstlen )
+		return	STS$K_ERROR;
+
+	*a_dstlen = 0;
+
+	if ( (a_srclen < 0) || (a_dstsz < 0) || (!a_src && a_srclen) || (!a_dst && a_dstsz) )
+		return	STS$K_ERROR;
+
+	/* Four characters for every three octets, the last group padded up. */
+	l_need = 4 * ((a_srclen + 2) / 3);
+	*a_dstlen = l_need;
+
+	if ( l_need > a_dstsz )
+		return	STS$K_ERROR;
+
+	for ( l_i = 0; l_i + 2 < a_srclen; l_i += 3 )
+		{
+		l_b0 = l_in[l_i];
+		l_b1 = l_in[l_i + 1];
+		l_b2 = l_in[l_i + 2];
+
+		*(l_out++) = s_b64[ l_b0 >> 2 ];
+		*(l_out++) = s_b64[ ((l_b0 & 0x03) << 4) | (l_b1 >> 4) ];
+		*(l_out++) = s_b64[ ((l_b1 & 0x0f) << 2) | (l_b2 >> 6) ];
+		*(l_out++) = s_b64[ l_b2 & 0x3f ];
+		}
+
+	/* The tail: one octet gives two characters and "==", two give three and "=". */
+	if ( (l_rest = a_srclen - l_i) == 1 )
+		{
+		l_b0 = l_in[l_i];
+
+		*(l_out++) = s_b64[ l_b0 >> 2 ];
+		*(l_out++) = s_b64[ (l_b0 & 0x03) << 4 ];
+		*(l_out++) = '=';
+		*(l_out++) = '=';
+		}
+	else if ( l_rest == 2 )
+		{
+		l_b0 = l_in[l_i];
+		l_b1 = l_in[l_i + 1];
+
+		*(l_out++) = s_b64[ l_b0 >> 2 ];
+		*(l_out++) = s_b64[ ((l_b0 & 0x03) << 4) | (l_b1 >> 4) ];
+		*(l_out++) = s_b64[ (l_b1 & 0x0f) << 2 ];
+		*(l_out++) = '=';
+		}
+
+	if ( l_need < a_dstsz )				/* The courtesy NUL, when there is room */
+		*l_out = '\0';
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Decode base64 text (RFC 4648) back into octets.  The '=' padding is
+**	accepted and it is also allowed to be absent - a trailing group of two
+**	or three characters is decoded as it stands.  Everything else is an
+**	error: a character outside the alphabet (white space included), a '='
+**	anywhere but at the very end, more than two of them, or a trailing group
+**	of a single character, which carries no whole octet.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_src		An address of the text to decode
+**	a_srclen	A length of the text, characters
+**	a_dst		An address of the output buffer
+**	a_dstsz		A size of the output buffer, octets
+**	a_dstlen	An address to accept the number of octets decoded - it is
+**			set even when the buffer is too small
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS, or STS$K_ERROR on a bad argument, malformed text or a
+**	buffer too small.
+**--
+*/
+int	__util$unbase64	(
+		void	*	a_src,
+		int		a_srclen,
+		void	*	a_dst,
+		int		a_dstsz,
+		int	*	a_dstlen
+			)
+{
+	/* The alphabet mapped back to sextets; 0xFF marks an octet that is not in it. */
+static const unsigned char s_unb64 [256] = {
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,  62,0xFF,0xFF,0xFF,  63,
+	  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,
+	  15,  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,  36,  37,  38,  39,  40,
+	  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	};
+const unsigned char *l_in = (const unsigned char *) a_src;
+unsigned char *l_out = (unsigned char *) a_dst;
+int	l_i, l_n, l_pad = 0, l_rest, l_need, l_bits = 0;
+unsigned l_acc = 0, l_v;
+
+	if ( !a_dstlen )
+		return	STS$K_ERROR;
+
+	*a_dstlen = 0;
+
+	if ( (a_srclen < 0) || (a_dstsz < 0) || (!a_src && a_srclen) || (!a_dst && a_dstsz) )
+		return	STS$K_ERROR;
+
+	/* Strip up to two '=' off the end; those are the only ones allowed. */
+	for ( l_n = a_srclen; l_n && (l_pad < 2) && (l_in[l_n - 1] == '='); l_n--)
+		l_pad++;
+
+	/* A trailing group of one character carries no whole octet, and the
+	 * padding, when present, has to complete the last group exactly. */
+	if ( ((l_rest = l_n % 4) == 1) || (l_pad && ((l_rest + l_pad) != 4)) )
+		return	STS$K_ERROR;
+
+	l_need = 3 * (l_n / 4) + (l_rest ? l_rest - 1 : 0);
+	*a_dstlen = l_need;
+
+	if ( l_need > a_dstsz )
+		return	STS$K_ERROR;
+
+	/* Six bits in, eight bits out whenever there are enough of them; the
+	 * one to four bits left over at the end of a partial group are dropped. */
+	for ( l_i = 0; l_i < l_n; l_i++ )
+		{
+		if ( (l_v = s_unb64[ l_in[l_i] ]) == 0xFF )
+			return	STS$K_ERROR;
+
+		l_acc = (l_acc << 6) | l_v;
+		l_bits += 6;
+
+		if ( l_bits >= 8 )
+			{
+			l_bits -= 8;
+			*(l_out++) = (unsigned char) (l_acc >> l_bits);
+			}
+		}
+
+	return	STS$K_SUCCESS;
+}
 
 
 #ifdef	__MAIN_FOR_DEBUG__
