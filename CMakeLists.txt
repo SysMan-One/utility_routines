@@ -113,13 +113,18 @@
 #					(V.01-30): RFC 4648 with the bounded-buffer calling sequence,
 #					strict decoder. The pair that BroProxy and BroAgent each kept in
 #					a private header moves here. test_base64 added.
+#
+#		11-SEP-2026	RRL	VERSION -> 1.6.3. Fixed the MSG() macro in utility_routines.h
+#					(V.01-30ECO1): it did not mask the facility off and so was not
+#					the inverse of DEFMSG(). test_status_convention gained group 5,
+#					which pins the condition-value layout field for field.
 #---
 
 
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.6.2 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.6.3 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.
