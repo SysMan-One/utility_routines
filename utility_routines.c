@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-30"
-#define	__REV__		"1.30.0"
+#define	__IDENT__	"V.01-30ECO1"
+#define	__REV__		"1.30.1"
 
 
 /*
@@ -283,6 +283,15 @@
 **				is strict where the old one was not: an octet outside the
 **				alphabet, a '=' in the middle, or a dangling sextet is an error
 **				rather than garbage out.  tests/test_base64.c pins it.
+**
+**	11-SEP-2026	RRL	V.01-30ECO1 : Fixed $MSG() in the header - it shifted the message
+**				number down but never masked the facility off, so it was not the
+**				inverse of $DEFMSG(): for a non-zero facility it returned
+**				<facility> << 13 | <number>. s_msgcmp() survived it only because
+**				it compares the facility first and the ordering came out right by
+**				accident; the s_defmsgfao line of an unregistered status printed the
+**				bogus number. tests/test_status_convention.c now pins the layout -
+**				$FAC/$MSG/$SEV must invert $DEFFAC/$DEFMSG/$DEFSEV field for field.
 **
 */
 

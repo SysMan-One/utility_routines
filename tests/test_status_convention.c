@@ -7,7 +7,9 @@
 **	facility.  Every status must be judged by its low bit (odd = success,
 **	even = failure) - NOT by comparison to a particular code.  The test
 **	fails (non-zero exit) if any success code turns even, any failure code
-**	turns odd, or bintim/asctim/CLI$K_TIME stop honouring 1 & status.
+**	turns odd, or bintim/asctim/CLI$K_TIME stop honouring 1 & status.  It also
+**	locks the condition-value layout itself - $FAC/$MSG/$SEV must invert
+**	$DEFFAC/$DEFMSG/$DEFSEV field for field.
 **
 **  MODULE:  test_status_convention.c
 **
@@ -131,6 +133,46 @@ static void t_cli_types (void)
 	CHECK( !(1 & s_parse("/mac=zz:bb:cc:dd:ee:ff")),    "CLI$K_MAC garbage must reject");
 }
 
+/*
+ *  Group 5 - the condition-value layout: | facility 16 | message number 13 | severity 3 |.
+ *  $FAC/$MSG/$SEV must be the exact inverse of $DEFFAC/$DEFMSG/$DEFSEV, each field
+ *  extracted free of its neighbours.  $MSG() used to omit the 13-bit mask, so for a
+ *  non-zero facility it handed back <facility> << 13 | <number>.
+ */
+static void t_condition_fields (void)
+{
+	static const struct { unsigned fac, msg, sev; } l_tst [] = {
+		{ 0x0000,      0, STS$K_WARN    },	/* every field at its floor	*/
+		{ 0x00AB,      5, STS$K_INFO    },	/* the case that exposed $MSG()	*/
+		{ 0x0001,      1, STS$K_SUCCESS },
+		{ 0x7FFF,   0x7B, STS$K_ERROR   },
+		{ 0xFFFF, 0x1FFF, STS$K_FATAL   }	/* every field at its ceiling	*/
+	};
+	unsigned	l_code, l_i;
+
+	printf("[5] $FAC/$MSG/$SEV invert $DEFFAC/$DEFMSG/$DEFSEV\n");
+
+	for ( l_i = 0; l_i < $ARRSZ(l_tst); l_i++ )
+		{
+		l_code = $DEFFAC(l_tst[l_i].fac) | $DEFMSG(l_tst[l_i].msg) | $DEFSEV(l_tst[l_i].sev);
+
+		CHECK( $FAC(l_code) == l_tst[l_i].fac, "$FAC() must return the facility alone");
+		CHECK( $MSG(l_code) == l_tst[l_i].msg, "$MSG() must return the message number alone");
+		CHECK( $SEV(l_code) == l_tst[l_i].sev, "$SEV() must return the severity alone");
+		}
+
+	/* The fields must not overlap: each one alone leaves the other two at zero */
+	CHECK( $MSG($DEFFAC(0x0ABU)) == 0, "the facility must not reach into the message number");
+	CHECK( $SEV($DEFMSG(0x1FFFU)) == 0, "the message number must not reach into the severity");
+	CHECK( $FAC($DEFMSG(0x1FFFU) | $DEFSEV(STS$K_FATAL)) == 0, "neither must reach into the facility");
+
+	/* $STS_ERROR() judges the severity field, not the whole value */
+	CHECK(   $STS_ERROR($DEFFAC(0x0ABU) | $DEFMSG(5) | $DEFSEV(STS$K_ERROR)),  "ERROR must be a failure");
+	CHECK(   $STS_ERROR($DEFFAC(0x0ABU) | $DEFMSG(5) | $DEFSEV(STS$K_FATAL)),  "FATAL must be a failure");
+	CHECK( !($STS_ERROR($DEFFAC(0x0ABU) | $DEFMSG(5) | $DEFSEV(STS$K_INFO))),  "INFO must not be a failure");
+	CHECK( !($STS_ERROR($DEFFAC(0x0ABU) | $DEFMSG(5) | $DEFSEV(STS$K_WARN))),  "WARN must not be a failure");
+}
+
 int main (void)
 {
 	printf("== status-convention regression ==\n");
@@ -139,6 +181,7 @@ int main (void)
 	t_bintim();
 	t_asctim();
 	t_cli_types();
+	t_condition_fields();
 
 	TEST_DONE();
 }

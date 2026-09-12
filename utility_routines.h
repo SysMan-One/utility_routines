@@ -53,6 +53,10 @@
 **	10-SEP-2026	RRL	Added __util$base64() / __util$unbase64() - RFC 4648 encoding and
 **				decoding, bounded buffers, (src, srclen, dst, dstsz, &dstlen).
 **
+**	11-SEP-2026	RRL	$MSG() did not mask the facility off, so it was not the inverse of
+**				$DEFMSG(): for a non-zero facility it returned <facility> << 13 |
+**				<number>. It now extracts the 13-bit field of the layout comment.
+**
 */
 
 #if _WIN32
@@ -409,7 +413,7 @@ enum	{
  * +---------------------+--------------------------+-------------------+
  */
 #define	$FAC(code)		((code) >> 16)
-#define	$MSG(code)		((code) >> 3)
+#define	$MSG(code)		( ((code) >> 3) & 0x00001FFFUL )		/* message number <- bits 3..15	*/
 #define	$SEV(code)		((code) & 0x7)
 
 
