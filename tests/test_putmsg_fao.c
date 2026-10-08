@@ -203,5 +203,40 @@ ssize_t	l_red;
 	close(l_fd[0]);
 	close(l_fd[1]);
 
+	/* The facility name is stamped into each record by __util$inimsg(): a second
+	** catalogue keeps its own name, and a NULL name yields NONAME - read off the
+	** record, with no descriptor-list walk in the signalling path.
+	*/
+	{
+	static EMSG_RECORD	l_m2 [1], l_m3 [1];
+	static EMSG_RECORD_DESC	l_d2, l_d3;
+	const char	*l_t2 = "second !UL", *l_t3 = "nameless !UL";
+
+	CHECK(0 == pipe(l_fd), "a second pipe for the stamp checks");
+	__util$setlogfd(l_fd[1]);
+
+	l_m2[0].sts = $DEFFAC(0x66) | $DEFMSG(1) | $DEFSEV(STS$K_INFO);
+	l_m2[0].textl = (unsigned char) strlen(l_t2); memcpy(l_m2[0].text, l_t2, strlen(l_t2) + 1);
+	l_d2.msgnr = 1; l_d2.facno = 0x66; l_d2.msgrec = l_m2; l_d2.facname = "SECFAC";
+	CHECK( 1 & __util$inimsg(&l_d2), "a second catalogue registers");
+
+	l_m3[0].sts = $DEFFAC(0x67) | $DEFMSG(1) | $DEFSEV(STS$K_INFO);
+	l_m3[0].textl = (unsigned char) strlen(l_t3); memcpy(l_m3[0].text, l_t3, strlen(l_t3) + 1);
+	l_d3.msgnr = 1; l_d3.facno = 0x67; l_d3.msgrec = l_m3; l_d3.facname = NULL;
+	CHECK( 1 & __util$inimsg(&l_d3), "a nameless catalogue registers");
+
+	__util$putmsg_fao(l_m2[0].sts, 1, (fao_prm_t) 5);
+	memset(l_buf, 0, sizeof(l_buf)); l_red = read(l_fd[0], l_buf, sizeof(l_buf) - 1); (void) l_red;
+	CHECK( NULL != strstr(l_buf, "%SECFAC-I-second 5"), "the second catalogue answers with ITS stamped name: '%s'", l_buf);
+
+	__util$putmsg_fao(l_m3[0].sts, 1, (fao_prm_t) 7);
+	memset(l_buf, 0, sizeof(l_buf)); l_red = read(l_fd[0], l_buf, sizeof(l_buf) - 1); (void) l_red;
+	CHECK( NULL != strstr(l_buf, "%NONAME-I-nameless 7"), "a NULL facility name yields NONAME: '%s'", l_buf);
+
+	__util$setlogfd(STDERR_FILENO);
+	close(l_fd[0]);
+	close(l_fd[1]);
+	}
+
 	TEST_DONE();
 }

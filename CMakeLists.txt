@@ -8,7 +8,7 @@
 #       MODIFICATION HISTORY:
 #
 #		24-MAR-2026	RRL	Added "__MAIN_FOR_DEBUG__" for debug and developing purpose;
-#					usage: $ cmake ... -D__MAIN_FOR_DEBUG__=1
+#					usage: cmake ... -D__MAIN_FOR_DEBUG__=1
 #
 #		01-AUG-2026	RRL	The installation and the packaging rules apply to a top-level build
 #					only. A consumer that add_subdirectory()es this set got its CPack
@@ -25,8 +25,8 @@
 #					every delivery that changes any module, so the tarball name (and the
 #					CPack/StarLetConfigVersion) identify the delivery without a diff.
 #
-#		 7-AUG-2026	RRL	VERSION -> 1.1.1. Bilingual manuals brought up to date: __util$putmsg_fao /
-#					$PUTMSG_FAO, and the CLI command syntax (sub-verbs, /name or --name
+#		 7-AUG-2026	RRL	VERSION -> 1.1.1. Bilingual manuals brought up to date: putmsg_fao /
+#					PUTMSG_FAO, and the CLI command syntax (sub-verbs, /name or --name
 #					qualifiers, positional/qualifier ordering, /-paths, the unrecognized-token
 #					error, and the /HELP, -h, --help forms).
 #
@@ -48,8 +48,8 @@
 #					gained Appendix A - the FAO Directives Reference (pages 39-40).
 #
 #		13-AUG-2026	RRL	VERSION -> 1.4.1. The log-record prefix is rendered by the cached
-#					s_util$prefix() (byte-identical, ~4x faster end-to-end logging:
-#					putmsg_fao 1153 -> 259 ns, $LOG 1216 -> 302 ns). test_log_prefix added.
+#					the prefix helper (byte-identical, ~4x faster end-to-end logging:
+#					putmsg_fao 1153 -> 259 ns, LOG 1216 -> 302 ns). test_log_prefix added.
 #
 #		13-AUG-2026	RRL	VERSION -> 1.4.2. !%6 shows an IPv4-mapped address in the RFC 5952
 #					mixed notation (::ffff:a.b.c.d), byte-identical to inet_ntop - the
@@ -72,7 +72,7 @@
 #					every module, history entries are marked RRL, and the delivery archive
 #					is named <package>-<ident>.tar.gz (StarLet-1.4.5.tar.gz).
 #
-#		14-AUG-2026	RRL	VERSION -> 1.4.6. __util$pattern_match() is iterative now: the hostile
+#		14-AUG-2026	RRL	VERSION -> 1.4.6. pattern_match() is iterative now: the hostile
 #					multi-star pattern went from 8.6 s to 318 ns, typical matches 1.6-3.6x
 #					faster; 500k-case fuzz against the old matcher agrees. test_pattern_match
 #					added.
@@ -80,13 +80,82 @@
 #		14-AUG-2026	RRL	VERSION -> 1.4.7. CI gained the musl job: CMake/CTest with musl-gcc
 #					(-Werror) plus the standalone suite statically linked against musl, so
 #					the musl compatibility verified by hand cannot creep away unnoticed.
+#
+#		14-AUG-2026	RRL	VERSION -> 1.4.8. The session's eight routines audited against the
+#					routine-body template and the seven strays brought in line (ECOs:
+#					utility V.01-26ECO1, starlet X.01-15ECO1). Legacy layout untouched.
+#
+#		29-AUG-2026	RRL	VERSION -> 1.5.0. LOG_FAO added: a LOG whose body is an FAO control
+#					string, with the PUTMSG_FAO ergonomics (auto-cast, auto-count).
+#					test_log_fao added (12 suites / 165 checks now).
+#
+#		29-AUG-2026	RRL	VERSION -> 1.5.1. The delivery unpacks into starlet-<ident>/ (was
+#					utility_routines-master/), matching the <package>-<ident> archive rule -
+#					each delivery lands in its own versioned directory.
+#
+#		31-AUG-2026	RRL	VERSION -> 1.5.2. The facility name is stamped into each message record
+#					at inimsg() time (new trailing EMSG_RECORD.facname), removing the
+#					second descriptor-list walk from every putmsg[d]_fao() call.
+#
+#		 1-SEP-2026	RRL	VERSION -> 1.5.3. House rule: no dollar-sign identifiers inside cmake
+#					files - the history mentions of C names are rewritten without the sign
+#					(the cmake-own brace expansions are unaffected).
+#
+#		 1-SEP-2026	RRL	VERSION -> 1.6.0. pattern_match() accepts the question mark as an alias
+#					of the percent wildcard (exactly one octet).
+#
+#		 1-SEP-2026	RRL	VERSION -> 1.6.1. Documentation pulled up to date: README reflects the
+#					delivery naming, LOG_FAO, the wildcard set, address directives, the
+#					musl CI and the current test roster; the manuals gained Appendix B
+#					(additions since the corpus) beside the refreshed Appendix A.
+#
+#		10-SEP-2026	RRL	VERSION -> 1.6.2. base64 / unbase64 added to utility_routines
+#					(V.01-30): RFC 4648 with the bounded-buffer calling sequence,
+#					strict decoder. The pair that BroProxy and BroAgent each kept in
+#					a private header moves here. test_base64 added.
+#
+#		11-SEP-2026	RRL	VERSION -> 1.6.3. Fixed the MSG() macro in utility_routines.h
+#					(V.01-30ECO1): it did not mask the facility off and so was not
+#					the inverse of DEFMSG(). test_status_convention gained group 5,
+#					which pins the condition-value layout field for field.
+#
+#		19-SEP-2026	RRL	VERSION -> 1.6.4. EMSG_RECORD gained a trailing mnemonic field
+#					(V.01-31): a $XXX_MSGENT table stringises its own code into it,
+#					and __util$inimsg() trims that down to the real VMS mnemonic
+#					(e.g. "CONFOK") after the facility's own "$_". putmsg_fao /
+#					putmsgd_fao glue it onto the envelope as %FAC-S-MNEMONIC, when
+#					a record carries one; one that never set the field keeps the
+#					plain %FAC-S- envelope this had before - test_putmsg_fao is
+#					unchanged and still pins that fallback.
+#
+#		 3-OCT-2026	RRL	VERSION -> 1.6.5. The CRC-32 of utility_routines (V.01-32) picks
+#					its engine at run time: PCLMULQDQ on x86-64, the CRC32
+#					instructions on ARMv8 (HWCAP_CRC32), the tables elsewhere - the
+#					same values, several times faster. test_crc32 added, run twice:
+#					as it stands and under STARLET_CRC32=SOFTWARE.
+#
+#		 3-OCT-2026	RRL	VERSION -> 1.6.6. No build type named - Release: the set used to
+#					be built with no optimization at all unless one was asked for,
+#					which every host did not, and the table and ARMv8 CRC-32 engines
+#					ran several times slower than they can (0.27 GB/s on the
+#					Armbian hosts). NDEBUG comes with it, so the library's own
+#					TRACE output is compiled out; a Debug build still has it.
+#
+#		 4-OCT-2026	RRL	VERSION -> 1.6.7. utility_routines V.01-33: __util$rotatelogfile()
+#					rotates the log file of __util$deflog() past a size limit to
+#					<file>.1 ... <file>.<keep> by rename, with no copying; deflog
+#					called again closes its previous file. test_logrotate added.
+#
+#		 6-OCT-2026	RRL	VERSION -> 1.6.8. utility_routines V.01-33ECO1: the thread id
+#					in the log-record prefix comes from syscall(SYS_gettid) - the
+#					library now builds with the Android NDK (bionic).
 #---
 
 
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.4.7 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.6.8 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.
@@ -112,6 +181,14 @@ add_definitions( -D__ARCH__NAME__="${CMAKE_HOST_SYSTEM_PROCESSOR}" )
 
 if (__MAIN_FOR_DEBUG__)
 	add_definitions( -D__MAIN_FOR_DEBUG__=1)
+endif()
+
+#	No build type named - Release, as HELP does it: without one the compiler is
+#	given no optimization and no NDEBUG.  cmake -DCMAKE_BUILD_TYPE=Debug for the
+#	tracing build.
+if ( NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES )
+	set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+	message(STATUS "No build type named, assuming ${CMAKE_BUILD_TYPE}")
 endif()
 
 if (CMAKE_BUILD_TYPE)
@@ -171,11 +248,15 @@ option (BUILD_TESTING "Build the regression tests" ON)
 if (BUILD_TESTING)
 	enable_testing()
 
-	foreach (t status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match)
+	foreach (t status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64 crc32 logrotate)
 		add_executable (test_${t} tests/test_${t}.c)
 		target_link_libraries (test_${t} starlet)
 		add_test (NAME ${t} COMMAND test_${t})
 	endforeach()
+
+	# The tables too, not only the engine this processor gets
+	add_test (NAME crc32_software COMMAND test_crc32)
+	set_tests_properties (crc32_software PROPERTIES ENVIRONMENT "STARLET_CRC32=SOFTWARE")
 endif()
 
 

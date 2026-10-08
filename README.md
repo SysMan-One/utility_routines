@@ -1,4 +1,6 @@
-# utility_routines
+# StarLet (utility_routines)
+
+Delivered as `StarLet-<ident>.tar.gz`, unpacking into `starlet-<ident>/`.
 
 A small, freestanding-friendly C library of OpenVMS-flavoured building blocks for
 systems and embedded work. Portable C11 (GCC/Clang); tested on x86-64 and ARMv8
@@ -8,10 +10,10 @@ systems and embedded work. Portable C11 (GCC/Clang); tested on x86-64 and ARMv8
 
 | Module | Prefix | What it provides |
 |--------|--------|------------------|
-| `utility_routines` | `__util$` / `$LOG` | Logging (`$LOG`, `$TRACE`, `$DUMPHEX`), ASCIC counted strings, hex/UUID conversion, CRC-32, command-line **and** config-file option parsing, spinlock-protected queues, wildcard matching. |
+| `utility_routines` | `__util$` / `$LOG` | Logging (`$LOG`, `$LOG_FAO`, `$TRACE`, `$DUMPHEX`), OpenVMS-style message catalogues (`$PUTMSG_FAO`), ASCIC counted strings, hex/UUID conversion, base64, CRC-32, command-line **and** config-file option parsing, spinlock-protected queues, wildcard matching (`*` a run, `%`/`?` one octet). |
 | `avproto` | `__tlv$` | A compact binary Tag-Length-Value protocol: a fixed header plus TLV records, all in network byte order. |
 | `cli_routines` | `__cli$` | A DCL-style command-line parser: `verb [p1..p8] [/qualifier[=value]]`, with per-value type validation. |
-| `starlet` | `__util$` | Portable analogues of OpenVMS system services: the FAO formatter (`__util$fao`) and binary-time routines (`__util$bintim`/`asctim`/`add_times`/`sub_times`). |
+| `starlet` | `__util$` | Portable analogues of OpenVMS system services: the FAO formatter (`__util$faol`, driving the `$FAO`/`$PUTMSG_FAO`/`$LOG_FAO` macros) with numeric, string, time and address directives (MAC, IPv4, RFC 5952 IPv6, UUID), and binary-time routines (`__util$bintim`/`asctim`/`add_times`/`sub_times`). |
 
 Routines follow the OpenVMS condition-value convention: the **low bit of the returned
 status is set on success**.
@@ -90,11 +92,35 @@ straight into a build pipeline):
   bounds and never write past their buffers.
 - **`test_setlogfd`** — `__util$setlogfd()` points the log at a given descriptor
   without opening a file or seizing the standard streams.
+- **`test_putmsg_fao`** — the `$PUTMSG_FAO` catalogue path: FAO-formatted records,
+  severity-independent lookup, and the facility name stamped into each record.
+- **`test_cli_nested`** / **`test_cli_filepath`** — `SHOW STATISTICS`-style sub-verbs;
+  `/`-paths staying parameter values while `/qualifiers` keep parsing.
+- **`test_fao_addr`** — the `!%M`/`!%I`/`!%6`/`!%U` address directives, RFC 5952
+  corner cases, byte parity with `inet_ntop`.
+- **`test_log_prefix`** — the cached log-record prefix stays byte-identical to the
+  historical rendering; the tid column matches the kernel's.
+- **`test_pattern_match`** — fixed vectors, a 500k-case fuzz against the former
+  recursive matcher, the `?` alias, and the pathological multi-star pattern
+  returning at once.
+- **`test_log_fao`** — the `$LOG_FAO` envelope, FAO body, address directives and
+  the zero-parameter form.
+- **`test_base64`** — `__util$base64`/`__util$unbase64`: the RFC 4648 vectors,
+  a random round-trip over every length, unpadded input, the courtesy NUL, and
+  the rejections (a foreign octet, a misplaced `=`, a dangling sextet, a short
+  buffer with the needed length still reported).
+- **`test_crc32`** — `__util$crc32c` (the IEEE CRC-32) against a bitwise
+  reference: the check values, every length up to 2048 at every alignment, a run
+  continued at every split point, a 4 MB buffer. CTest runs it twice: with the
+  fastest engine of the processor (PCLMULQDQ on x86-64, the CRC32 instructions on
+  ARMv8) and under `STARLET_CRC32=SOFTWARE` (the tables).
 
-A GitHub Actions workflow (`.github/workflows/ci.yml`) runs them on every push,
-once via CTest and once standalone under ASan/UBSan.
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs them on every push:
+via CTest and standalone under ASan/UBSan with glibc, then again with `musl-gcc`
+(CTest plus the standalone suite statically linked against musl, `-Werror` throughout).
 
-With CMake:
+With CMake (no build type named means Release; `-DCMAKE_BUILD_TYPE=Debug` for
+the build with the library's own tracing):
 
 ```sh
 cmake -B build && cmake --build build && ctest --test-dir build
@@ -156,3 +182,11 @@ Apache License 2.0 — see `LICENSE`.
 ## Author
 
 Ruslan R. Laishev
+
+## Manuals
+
+Bilingual reference manuals ship with the tree: `Routines_Reference_EN.pdf` and
+`Routines_Reference_RU.pdf`. Appendix A is the FAO directives reference (including
+the address directives); Appendix B covers the additions since the main corpus -
+`$LOG_FAO`, the wildcard set (`*`, `%`, `?`), the facility-name stamping and the
+cached log-record prefix.

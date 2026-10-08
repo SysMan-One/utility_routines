@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-26"
-#define	__REV__		"1.26.0"
+#define	__IDENT__	"V.01-33ECO1"
+#define	__REV__		"1.33.1"
 
 
 /*
@@ -248,6 +248,92 @@
 **				a*a*a*a*a*b over 200 octets of 'a' went from 8.6 SECONDS to 318 ns, and
 **				the typical cases got 1.6-3.6x faster (15-26 ns). No recursion - no
 **				stack hazard on hostile patterns from a config or the CLI.
+
+**	14-AUG-2026	RRL	V.01-26ECO1 : the session's routines (s_msgcmp, s_util$prefix,
+**				s_util$facname) brought to the house routine-body template - one
+**				parameter per line, the closing parenthesis on its own, a_-prefixed
+**				parameters. Layout only, no functional change.
+**
+**	29-AUG-2026	RRL	V.01-27 : Added $LOG_FAO - the FAO twin of $LOG: the body is an FAO
+**				control string (!UL/!AZ/!AS/!XL/!%I/...) formatted by __util$faol(),
+**				with the $PUTMSG_FAO ergonomics (every parameter cast to fao_prm_t and
+**				the count derived by the macro). __util$log_fao() mirrors __util$log()
+**				(envelope, sanity clamp, STS$M_SYSLOG path reusing the formatted body),
+**				__util$logd_fao() mirrors __util$logd() ([mod\func:line] debug face).
+**				See tests/test_log_fao.c.
+**
+**	31-AUG-2026	RRL	V.01-28 : The facility name is stamped into every EMSG_RECORD (new
+**				trailing facname field) by __util$inimsg(), so __util$putmsg_fao()/
+**				__util$putmsgd_fao() read it off the found record instead of walking
+**				the descriptor list a SECOND time per message (the list had already
+**				been walked to find the record). s_util$facname() is gone with the
+**				walk. Existing positional record initializers stay valid - the field
+**				is trailing and filled at registration. See tests/test_putmsg_fao.c.
+**
+**	 1-SEP-2026	RRL	V.01-29 : __util$pattern_match() accepts '?' as an alias of '%'
+**				(exactly one octet) - the DOS/glob-style spelling next to the VMS
+**				one. NB: a literal '?' in a pattern is a wildcard from now on. The
+**				fuzz reference and vectors extended - tests/test_pattern_match.c.
+**
+**	10-SEP-2026	RRL	V.01-30 : Added __util$base64() / __util$unbase64() - RFC 4648
+**				encoding and decoding with the bounded-buffer calling sequence of
+**				the family (src, srclen, dst, dstsz, &dstlen). BroProxy and
+**				BroAgent carried these two under the same names in a private
+**				BASE64.H each; the library is where they belong.  The decoder
+**				is strict where the old one was not: an octet outside the
+**				alphabet, a '=' in the middle, or a dangling sextet is an error
+**				rather than garbage out.  tests/test_base64.c pins it.
+**
+**	11-SEP-2026	RRL	V.01-30ECO1 : Fixed $MSG() in the header - it shifted the message
+**				number down but never masked the facility off, so it was not the
+**				inverse of $DEFMSG(): for a non-zero facility it returned
+**				<facility> << 13 | <number>. s_msgcmp() survived it only because
+**				it compares the facility first and the ordering came out right by
+**				accident; the s_defmsgfao line of an unregistered status printed the
+**				bogus number. tests/test_status_convention.c now pins the layout -
+**				$FAC/$MSG/$SEV must invert $DEFFAC/$DEFMSG/$DEFSEV field for field.
+**
+**	19-SEP-2026	RRL	V.01-31 : EMSG_RECORD gained a trailing mnemonic field - the real
+**				VMS mnemonic (e.g. "CONFOK"), which a $XXX_MSGENT table stringises
+**				from its own code (#a_sts, e.g. "ACST$_CONFOK") and __util$inimsg()
+**				trims to the part after the facility's own "$_". __util$putmsg_fao()
+**				and __util$putmsgd_fao() glue it onto the envelope as
+**				%FAC-S-MNEMONIC, when a record carries one; a caller-built
+**				EMSG_RECORD that never set the field (e.g. a test harness's own
+**				table) is left on the plain %FAC-S- envelope this had before the
+**				field existed - the same trailing-field precedent V.01-28 set for
+**				facname. __util$putmsg()/__util$putmsgd() (the non-FAO pair) are
+**				untouched: they never built the %FAC-S- envelope for a found
+**				record to begin with. See tests/test_putmsg_fao.c, unchanged and
+**				still passing on the NULL-mnemonic fallback.
+**
+**	 3-OCT-2026	RRL	V.01-32 : __util$crc32c() picks its engine at run time, on the first
+**				call: PCLMULQDQ folding on x86-64 (Intel's method, as the Linux
+**				kernel and zlib-ng have it for this polynomial), the CRC32
+**				instructions on ARMv8 when AT_HWCAP says HWCAP_CRC32, the slice-by-8
+**				tables elsewhere. The value is the same IEEE CRC-32 as before, bit
+**				for bit - only faster: 0.62 -> several GB/s on a Xeon E5-2680 v4.
+**				The ARMv8 path used to depend on __ARM_FEATURE_CRC32, which the
+**				default -march of Debian/Armbian does not define, so those hosts ran
+**				the tables. STARLET_CRC32=SOFTWARE forces the tables. Asked for by
+**				VBACKUP, which checksums every block and every file it saves.
+**				tests/test_crc32.c pins every engine against a bitwise reference.
+**
+**	 4-OCT-2026	RRL	V.01-33 : Added __util$rotatelogfile() - once the log file grows past
+**				a limit it is renamed to <file>.1 (the older ones shift up to
+**				<file>.<keep>, the oldest dropped) and a fresh one is opened on the
+**				same descriptor, stdout and stderr with it. Nothing is copied, so a
+**				slow disk is not stalled the way logrotate's copytruncate stalls it,
+**				and nothing is lost the way __util$rewindlogfile() loses it. keep = 0
+**				truncates in place. __util$deflog() remembers the file name for it
+**				and, called again, closes the file it opened before instead of
+**				leaking the descriptor. Asked for by ACS. tests/test_logrotate.c.
+**
+**	 6-OCT-2026	RRL	V.01-33ECO1 : The log-record prefix takes the thread id with
+**				syscall(SYS_gettid) itself instead of the __gettid() wrapper of
+**				utility_routines.h - the wrapper is compiled out under ANDROID,
+**				so the library did not build with the Android NDK. Still once
+**				per thread (s_tid).
 **
 */
 
@@ -337,6 +423,17 @@
 #endif // _WIN32
 
 static int	g_logoutput = STDOUT_FILENO;				/* Default descriptor for default output device		*/
+static char	s_logpath [1024];						/* The file __util$deflog() opened, for rotation	*/
+static size_t	s_logpathlen;							/* Its length, 0 - the log is not a file		*/
+static long	s_logrotating;							/* A rotation is under way (another thread skips)	*/
+
+#ifdef	_WIN32
+#define	$LOGROT_CLAIM()		InterlockedExchange(&s_logrotating, 1)
+#define	$LOGROT_RELEASE()	InterlockedExchange(&s_logrotating, 0)
+#else
+#define	$LOGROT_CLAIM()		__atomic_exchange_n(&s_logrotating, 1, __ATOMIC_ACQUIRE)
+#define	$LOGROT_RELEASE()	__atomic_store_n(&s_logrotating, 0, __ATOMIC_RELEASE)
+#endif
 
 
 
@@ -394,9 +491,12 @@ static	inline void	s_util$logwrite	(int a_fd, const void *a_buf, size_t a_len)
 **	greater than b->sts.
 **--
 */
-static int s_msgcmp (const void *a, const void *b)
+static	int	s_msgcmp (
+		const void	*a_m1,
+		const void	*a_m2
+		)
 {
-const EMSG_RECORD *m1 = a, *m2 = b;
+const EMSG_RECORD *m1 = a_m1, *m2 = a_m2;
 int	l_c;
 
 
@@ -432,23 +532,46 @@ int	l_c;
 **	STS$K_SUCCESS on success; STS$K_WARN / condition code otherwise.
 **--
 */
-unsigned	__util$inimsg	(EMSG_RECORD_DESC *msgdsc)
+unsigned	__util$inimsg (
+		EMSG_RECORD_DESC	*a_msgdsc
+		)
 {
-EMSG_RECORD_DESC *md;
+EMSG_RECORD_DESC *l_md;
+unsigned l_i;
 
-	if ( !msgdsc )
+	if ( !a_msgdsc )
 		return	STS$K_WARN;
 
 	/* At first level we try to find the message records descriptor by using facility number */
-	for  (md = emsg_record_desc_root; md; md = md->link)
-		if ( md->facno == msgdsc->facno)
+	for  (l_md = emsg_record_desc_root; l_md; l_md = l_md->link)
+		if ( l_md->facno == a_msgdsc->facno)
 			return	STS$K_WARN;
 
 
-	qsort(msgdsc->msgrec, msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp);
+	qsort(a_msgdsc->msgrec, a_msgdsc->msgnr, sizeof(EMSG_RECORD), s_msgcmp);
 
-	msgdsc->link = emsg_record_desc_root;
-	emsg_record_desc_root = msgdsc;
+	/* Stamp the facility name into every record, so the signalling routines
+	** read it off the found record instead of walking the descriptor list
+	** a second time (the descriptor was already walked to FIND the record).
+	*/
+	for ( l_i = 0; l_i < a_msgdsc->msgnr; l_i++ )
+		{
+		const char	*l_mn;
+
+		a_msgdsc->msgrec[l_i].facname = a_msgdsc->facname;
+
+		/*  A $XXX_MSGENT table stringises its own code (#a_sts) into this
+		**  field at compile time, e.g. "ACST$_CONFOK"; the real mnemonic is
+		**  the part after the facility's own "$_" - the invariant every
+		**  FAC$_NAME code follows, not merely "after the first underscore".
+		**  A caller-built EMSG_RECORD that never set the field is left NULL.
+		*/
+		if ( a_msgdsc->msgrec[l_i].mnemonic && (l_mn = strstr (a_msgdsc->msgrec[l_i].mnemonic, "$_")) )
+			a_msgdsc->msgrec[l_i].mnemonic = l_mn + 2;
+		}
+
+	a_msgdsc->link = emsg_record_desc_root;
+	emsg_record_desc_root = a_msgdsc;
 
 	return	STS$K_SUCCESS;
 }
@@ -559,7 +682,9 @@ static const char s_defmsgfao[] = {"NONAME-%c-NOMSG, Message number: %08X [fac: 
 #define	UTIL$TLS	__thread
 #endif
 
-static int	s_util$prefix (char *a_out)
+static	int	s_util$prefix (
+		char	*a_out
+		)
 {
 struct timespec l_now;
 unsigned l_val;
@@ -629,8 +754,10 @@ static UTIL$TLS unsigned s_tid;
 	if ( !s_tid )
 #ifdef	_WIN32
 		s_tid = (unsigned) gettid ();
+#elif	defined(__APPLE__) || defined(__OSX__)
+		s_tid = (unsigned) syscall (SYS_thread_selfid);
 #else
-		s_tid = (unsigned) __gettid ();
+		s_tid = (unsigned) syscall (SYS_gettid);	/* glibc, musl and Bionic alike: __gettid() is hidden under ANDROID */
 #endif
 
 	l_val = s_tid;
@@ -777,20 +904,6 @@ EMSG_RECORD *msgrec;
 }
 
 
-/*
-**  Return the name registered for a status's facility, or "NONAME" when the
-**  facility carries none - used to frame a signalled record as %<facility>-<S>-.
-*/
-static const char *s_util$facname (unsigned sts)
-{
-EMSG_RECORD_DESC *md;
-
-	for ( md = emsg_record_desc_root; md; md = md->link )
-		if ( md->facno == $FAC(sts) )
-			return	(md->facname && *md->facname) ? md->facname : "NONAME";
-
-	return	"NONAME";
-}
 
 
 /*
@@ -852,9 +965,19 @@ EMSG_RECORD *msgrec;
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )				/* Format the record text through FAO */
 		{
-		/* Prefix the caller's severity - %<S>- - so one record can show its INFO/WARNING/... face */
+		/*  Prefix the caller's severity - %<S>- - so one record can show its INFO/WARNING/... face.
+		**  A record that carries a real VMS mnemonic (from its own $XXX_MSGENT table, trimmed by
+		**  __util$inimsg()) gets it glued on as %FAC-S-MNEMONIC, ; one that never set the field
+		**  (a caller-built EMSG_RECORD, e.g. a test harness's own table) keeps the plain %FAC-S-
+		**  envelope this had before the field existed, body glued straight on - see V.01-28's
+		**  facname precedent: a trailing field left NULL by an old initializer changes nothing.
+		*/
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen += (msgrec->mnemonic && *msgrec->mnemonic)
+			? snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-%s, ",
+				(msgrec->facname && *msgrec->facname) ? msgrec->facname : "NONAME", s_severity[sev], msgrec->mnemonic)
+			: snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-",
+				(msgrec->facname && *msgrec->facname) ? msgrec->facname : "NONAME", s_severity[sev]);
 		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
 
 		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
@@ -928,9 +1051,16 @@ EMSG_RECORD *msgrec;
 
 	if ( 1 & __util$getmsg(sts, &msgrec) )
 		{
-		/* Prefix the caller's severity - %<S>- - as __util$putmsg_fao() does */
+		/*  Prefix the caller's severity - %<S>- - as __util$putmsg_fao() does, mnemonic and all;
+		**  see its own comment for the NULL-mnemonic fallback that keeps an old caller-built
+		**  EMSG_RECORD (never set the field) on the plain %FAC-S- envelope.
+		*/
 		sev = $SEV(sts);
-		olen += snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-", s_util$facname(sts), s_severity[sev]);
+		olen += (msgrec->mnemonic && *msgrec->mnemonic)
+			? snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-%s, ",
+				(msgrec->facname && *msgrec->facname) ? msgrec->facname : "NONAME", s_severity[sev], msgrec->mnemonic)
+			: snprintf(out + olen, UTIL$SZ_OUTBUF - olen, "%%%s-%c-",
+				(msgrec->facname && *msgrec->facname) ? msgrec->facname : "NONAME", s_severity[sev]);
 		olen = $MIN(olen, UTIL$SZ_OUTBUF - 1);
 
 		__util$faol (msgrec->text, &bodylen, &bodydsc, prm, n);
@@ -1050,6 +1180,91 @@ unsigned opcom = sev & STS$M_SYSLOG;
 
 
 
+
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO twin of __util$logd(): as __util$log_fao(), but with the
+**	call-site [module\function:line] descriptor used by the debug
+**	$LOG_FAO macro.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fac	Facility name for the envelope
+**	a_sev	Record severity (STS$K_*)
+**	a_ctl	FAO control string
+**	a_mod	Call-site module name
+**	a_func	Call-site function name
+**	a_line	Call-site line number
+**	a_prmcnt	Number of FAO parameters that follow (0..16)
+**	...	FAO parameters, each already cast to fao_prm_t
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination.
+**
+**  RETURN VALUE:
+**	The severity, as __util$logd() returns it.
+**--
+*/
+unsigned	__util$logd_fao (
+		const char	*a_fac,
+		unsigned	a_sev,
+		const char	*a_ctl,
+		const char	*a_mod,
+		const char	*a_func,
+		unsigned	a_line,
+		int	a_prmcnt,
+			...
+		)
+{
+va_list	l_arglist;
+const char l_fmt [] = "[%s\\%s:%u] %%%s-%c:  ";
+char	l_out [UTIL$SZ_OUTBUF + 8], l_body [UTIL$SZ_OUTBUF];
+fao_desc_t	l_bodydsc = $FAO_DESC(l_body);
+unsigned short	l_bodylen = 0;
+unsigned l_olen, l_isev = $SEV(a_sev);
+int	l_n;
+fao_prm_t	l_prm [16];
+
+	a_sev &= ~STS$M_SYSLOG;		/* as __util$logd() does	*/
+
+	/* "DD-MM-YYYY HH:MM:SS.msc <tid> " + [mod\func:line] + %<fac>-<s>: */
+	l_olen = s_util$prefix (l_out);
+	l_olen += snprintf (l_out + l_olen, UTIL$SZ_OUTBUF - l_olen, l_fmt, a_mod, a_func, a_line, a_fac, s_severity[l_isev]);
+	l_olen = $MIN(l_olen, UTIL$SZ_OUTBUF - 1);
+
+	/* The FAO parameters: the count is the caller's, see __util$putmsg_fao() */
+	if ( a_prmcnt > (int) (sizeof(l_prm)/sizeof(l_prm[0])) )
+		a_prmcnt = (int) (sizeof(l_prm)/sizeof(l_prm[0]));
+
+	if ( a_prmcnt < 0 )
+		a_prmcnt = 0;
+
+	va_start (l_arglist, a_prmcnt);
+	for ( l_n = 0; l_n < a_prmcnt; l_n++ )
+		l_prm[l_n] = va_arg(l_arglist, fao_prm_t);
+	va_end (l_arglist);
+
+	__util$faol (a_ctl, &l_bodylen, &l_bodydsc, l_prm, l_n);
+	if ( (int) l_bodylen > (int) (UTIL$SZ_OUTBUF - l_olen - 1) )
+		l_bodylen = (unsigned short) (UTIL$SZ_OUTBUF - l_olen - 1);
+	memcpy (l_out + l_olen, l_body, (size_t) l_bodylen);
+	l_olen += l_bodylen;
+
+	l_out[l_olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, l_out, l_olen);
+
+	/* ARL - for android logcat */
+	#ifdef ANDROID_LOGCAT
+		__android_log_print(ANDROID_LOG_VERBOSE, a_mod, "%.*s", l_olen, l_out);
+	#endif
+
+	return	a_sev;
+}
 
 /*
 **++
@@ -1937,6 +2152,94 @@ unsigned olen, _sev = $SEV(sev), opcom = sev & STS$M_SYSLOG;
 	return	sev;
 }
 
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The FAO twin of __util$log(): format a record under an FAO control
+**	string (via __util$faol(), so !UL/!UQ/!AZ/!AS/!XL/!%I/... are at hand)
+**	and write it, with the usual timestamp / %<fac>-<S>: envelope, to the
+**	current log destination. Reached through the $LOG_FAO macro, which
+**	casts every parameter to fao_prm_t and derives the count for the
+**	caller - exactly the $PUTMSG_FAO ergonomics.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_fac	Facility name for the envelope
+**	a_sev	Record severity (STS$K_*, optionally | STS$M_SYSLOG)
+**	a_ctl	FAO control string
+**	a_prmcnt	Number of FAO parameters that follow (0..16)
+**	...	FAO parameters, each already cast to fao_prm_t
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Writes to the current log destination (and syslog on STS$M_SYSLOG).
+**
+**  RETURN VALUE:
+**	The severity, as __util$log() returns it.
+**--
+*/
+unsigned	__util$log_fao (
+		const char	*a_fac,
+		unsigned	a_sev,
+		const char	*a_ctl,
+		int	a_prmcnt,
+			...
+		)
+{
+va_list	l_arglist;
+const char l_fmt [] = "%%%s-%C: ";
+char	l_out [UTIL$SZ_OUTBUF + 8], l_body [UTIL$SZ_OUTBUF];
+fao_desc_t	l_bodydsc = $FAO_DESC(l_body);
+unsigned short	l_bodylen = 0;
+unsigned l_olen, l_isev = $SEV(a_sev), l_opcom = a_sev & STS$M_SYSLOG;
+int	l_n;
+fao_prm_t	l_prm [16];
+
+	/* The same sanity clamp as __util$log() applies	*/
+	if ( !($ISINRANGE(a_sev, STS$K_WARN, STS$K_FATAL)) )
+		a_sev = STS$K_UNDEF;
+
+	/* "DD-MM-YYYY HH:MM:SS.msc <tid> " + the %<fac>-<S>: envelope	*/
+	l_olen = s_util$prefix (l_out);
+	l_olen += snprintf (l_out + l_olen, UTIL$SZ_OUTBUF - l_olen, l_fmt, a_fac, s_severity[l_isev]);
+	l_olen = $MIN(l_olen, UTIL$SZ_OUTBUF - 1);
+
+	/* The FAO parameters: the count is the caller's, see __util$putmsg_fao() */
+	if ( a_prmcnt > (int) (sizeof(l_prm)/sizeof(l_prm[0])) )
+		a_prmcnt = (int) (sizeof(l_prm)/sizeof(l_prm[0]));
+
+	if ( a_prmcnt < 0 )
+		a_prmcnt = 0;
+
+	va_start (l_arglist, a_prmcnt);
+	for ( l_n = 0; l_n < a_prmcnt; l_n++ )
+		l_prm[l_n] = va_arg(l_arglist, fao_prm_t);
+	va_end (l_arglist);
+
+	__util$faol (a_ctl, &l_bodylen, &l_bodydsc, l_prm, l_n);
+	if ( (int) l_bodylen > (int) (UTIL$SZ_OUTBUF - l_olen - 1) )
+		l_bodylen = (unsigned short) (UTIL$SZ_OUTBUF - l_olen - 1);
+	memcpy (l_out + l_olen, l_body, (size_t) l_bodylen);
+	l_olen += l_bodylen;
+
+	l_out[l_olen++] = '\n';
+
+	s_util$logwrite (g_logoutput, l_out, l_olen);
+
+	/* ARL - for android logcat */
+	#ifdef ANDROID_LOGCAT
+		__android_log_print(ANDROID_LOG_VERBOSE, a_fac, "%.*s", l_olen, l_out);
+	#endif
+
+#ifndef	WIN32
+	if ( l_opcom )		/* The body is formatted already - reuse it	*/
+		syslog( LOG_PID | ((a_sev & 1) ? LOG_INFO : LOG_ERR), "%.*s", (int) l_bodylen, l_body);
+#endif
+
+	return	a_sev;
+}
+
 /*
 **++
 **  FUNCTIONAL DESCRIPTION:
@@ -2076,7 +2379,20 @@ int	fd = -1;
 
 	lseek(fd, 0L, SEEK_END);
 
+	/* Called again: the file it opened the time before is not needed any more;
+	 * a descriptor given to __util$setlogfd() is the caller's, not closed.
+	 */
+	if ( s_logpathlen && (g_logoutput > STDERR_FILENO) && (g_logoutput != fd) )
+		close (g_logoutput);
+
 	g_logoutput = fd;
+
+	/* Kept for __util$rotatelogfile(); a name too long for it disables rotation	*/
+	s_logpathlen = strnlen(logfile, sizeof(s_logpath));
+
+	if ( s_logpathlen < sizeof(s_logpath) )
+		memcpy(s_logpath, logfile, s_logpathlen + 1);
+	else	s_logpathlen = 0;
 
 	dup2(fd, STDERR_FILENO);
 	dup2(fd, STDOUT_FILENO);
@@ -2117,6 +2433,7 @@ int	__util$setlogfd	(
 		return	STS$K_ERROR;
 
 	g_logoutput = a_fd;
+	s_logpathlen = 0;						/* Not a file of ours: never rotated	*/
 
 	return	STS$K_SUCCESS;
 }
@@ -2171,6 +2488,145 @@ int	status;
 
 
 /*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Rotate the log file once it grows past a limit. Called periodically by a
+**	long-running process (once in a few seconds is plenty), it checks the
+**	size of the file __util$deflog() opened and, past the limit, renames
+**	<file>.<keep-1> to <file>.<keep> ... <file> to <file>.1 - the oldest is
+**	replaced - then opens a fresh <file> on the very descriptor the logging
+**	writes to, and on the standard output and error with it. Nothing is
+**	copied: a rename is a metadata update, so a slow disk is not stalled.
+**	A record written by another thread meanwhile lands either at the end of
+**	the old file or at the start of the new one, never torn.
+**
+**	keep = 0 truncates the file in place instead: the old records are lost,
+**	as with __util$rewindlogfile(), but unlike it the size is checked on
+**	every call, not once.
+**
+**	A no-op when the log goes to the standard output (no __util$deflog()
+**	with a file), the limit is zero or the file is still short of it.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_limit	Size in bytes past which the file is rotated, 0 - never
+**	a_keep	How many old files to keep: <file>.1 ... <file>.<keep>, 0...99
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	Inputs:	the file name remembered by __util$deflog()
+**	Outputs: g_logoutput, STDOUT_FILENO and STDERR_FILENO point at the new file
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS	rotated, or nothing to do yet
+**	STS$K_ERROR	a_keep out of range, or a system service failed (the
+**			errno is in the record logged); the logging goes on into
+**			the file it was writing to
+**--
+*/
+int	__util$rotatelogfile	(
+		size_t		a_limit,
+		unsigned	a_keep
+			)
+{
+struct stat	l_st;
+char		l_old [sizeof(s_logpath) + 8], l_new [sizeof(s_logpath) + 8];
+int		l_fd, l_sts = STS$K_SUCCESS;
+#ifdef	_WIN32
+int		l_mode = _S_IREAD | _S_IWRITE;
+#else
+const mode_t	l_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+#endif
+
+	if ( a_keep > 99 )
+		return	$LOG(STS$K_ERROR, "Log rotation: keep %u is out of 0...99", a_keep);
+
+	if ( !a_limit || !s_logpathlen || (g_logoutput <= STDERR_FILENO) )
+		return	STS$K_SUCCESS;
+
+	if ( 0 > fstat(g_logoutput, &l_st) )
+		return	$LOG(STS$K_ERROR, "Log rotation: fstat(%d) -> %d", g_logoutput, errno);
+
+	if ( (size_t) l_st.st_size < a_limit )
+		return	STS$K_SUCCESS;
+
+	/* Only one thread rotates; the others find it under way and go on	*/
+	if ( $LOGROT_CLAIM() )
+		return	STS$K_SUCCESS;
+
+	if ( !a_keep )
+		{
+		/* O_APPEND: the next record goes to the new end, offset 0	*/
+		if ( 0 > ftruncate(g_logoutput, 0) )
+			l_sts = $LOG(STS$K_ERROR, "Log rotation: ftruncate(%d, 0) -> %d", g_logoutput, errno);
+		else	$LOG(STS$K_INFO, "Log file '%s' has been truncated at %llu octets.", s_logpath,
+				(unsigned long long) l_st.st_size);
+
+		$LOGROT_RELEASE();
+
+		return	l_sts;
+		}
+
+	/* <file>.<keep-1> -> <file>.<keep>, ..., <file>.1 -> <file>.2; a gap
+	 * in the row (fewer files than keep so far) is not an error.
+	 */
+	for ( unsigned i = a_keep - 1; i; i-- )
+		{
+		snprintf(l_old, sizeof(l_old), "%s.%u", s_logpath, i);
+		snprintf(l_new, sizeof(l_new), "%s.%u", s_logpath, i + 1);
+#ifdef	_WIN32
+		remove(l_new);
+#endif
+		if ( (0 > rename(l_old, l_new)) && (ENOENT != errno) )
+			$LOG(STS$K_WARN, "Log rotation: rename('%s', '%s') -> %d", l_old, l_new, errno);
+		}
+
+	snprintf(l_new, sizeof(l_new), "%s.1", s_logpath);
+#ifdef	_WIN32
+	remove(l_new);
+#endif
+
+	if ( 0 > rename(s_logpath, l_new) )
+		{
+		l_sts = $LOG(STS$K_ERROR, "Log rotation: rename('%s', '%s') -> %d", s_logpath, l_new, errno);
+		$LOGROT_RELEASE();
+
+		return	l_sts;
+		}
+
+	/* The old file is <file>.1 now and still open behind the descriptor:
+	 * the records written until the dup2() below land there, in order.
+	 */
+	if ( 0 > (l_fd = open(s_logpath, O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, l_mode)) )
+		{
+		l_sts = $LOG(STS$K_ERROR, "Log rotation: open('%s') -> %d, logging goes on into '%s'", s_logpath, errno, l_new);
+		$LOGROT_RELEASE();
+
+		return	l_sts;
+		}
+
+	if ( 0 > dup2(l_fd, g_logoutput) )
+		{
+		l_sts = $LOG(STS$K_ERROR, "Log rotation: dup2(%d, %d) -> %d, logging goes on into '%s'", l_fd, g_logoutput, errno, l_new);
+		close (l_fd);
+		$LOGROT_RELEASE();
+
+		return	l_sts;
+		}
+
+	dup2(l_fd, STDOUT_FILENO);
+	dup2(l_fd, STDERR_FILENO);
+	close (l_fd);
+
+	$LOGROT_RELEASE();
+
+	return	$LOG(STS$K_INFO, "Log file '%s' has been rotated at %llu octets, the previous one is '%s'.", s_logpath,
+			(unsigned long long) l_st.st_size, l_new);
+}
+
+
+
+/*
 	http://util.deltatelecom.ru/ovms82src/debug/lis/strings.lis
 
 				Source Listing                  19-NOV-2004 08:39:18  Compaq C V6.5-001-48BCD           Page 42
@@ -2218,7 +2674,8 @@ int	status;
  *
  * CAVEATS :
  *  (1) pattern$ is assumed to be preprocessed, i.e, * replaced by WILD_STAR,
- *     '%' replaced by WILD_PERCENT, '\<character>' by '<character>', etc.
+ *     '%' replaced by WILD_PERCENT ('?' is accepted as its alias),
+ *     '\<character>' by '<character>', etc.
  *
  *  (2) str$, however, is LITERAL, ie, it does not have wildcards or
  *      '\<character>', etc.  *, %, and \ are given no special treatment.
@@ -2248,6 +2705,7 @@ int	status;
 /*--***********************************************************************/
 
 #define WILD_PERCENT	'%'
+#define WILD_QUESTION	'?'	/* An alias of WILD_PERCENT - one octet */
 #define WILD_STAR	'*'
 
 #ifndef	FALSE
@@ -2298,8 +2756,8 @@ const char *l_s = str$, *l_p = pattern$,
 	 */
 	while ( *l_s )
 		{
-		if ( (*l_p == WILD_PERCENT) || (*l_p == *l_s) )
-			{			/* '%' takes exactly one octet; a literal must equal */
+		if ( (*l_p == WILD_PERCENT) || (*l_p == WILD_QUESTION) || (*l_p == *l_s) )
+			{			/* '%' (or its '?' alias) takes exactly one octet; a literal must equal */
 			l_p++;
 			l_s++;
 			}
@@ -2368,55 +2826,35 @@ char **	strings;
  *  for backward compatibility with existing callers.
  */
 
-#if defined(__ARM_FEATURE_CRC32)
 /*
-**++
-**  FUNCTIONAL DESCRIPTION:
+**  CRC-32 - __util$crc32c() and the engines behind it.
 **
-**	Compute the standard IEEE 802.3 / zlib CRC-32 (reflected polynomial
-**	0xEDB88320) over a memory region. Despite the name this is NOT
-**	Castagnoli CRC-32C. On ARMv8 the hardware crc32 instructions are used;
-**	elsewhere a portable slice-by-eight table. The result is identical on
-**	every platform and byte order; check value for "123456789" is 0xCBF43926.
+**  NOTE: despite the "crc32c" name, the routine computes the standard IEEE 802.3 / zlib
+**  CRC-32 (reflected polynomial 0xEDB88320), NOT Castagnoli CRC-32C. The check value
+**  __util$crc32c(0, "123456789", 9) == 0xCBF43926 confirms IEEE. The name is kept as-is
+**  for backward compatibility with existing callers.
 **
-**  FORMAL PARAMETERS:
+**  Three engines compute the very same value; the fastest the processor has is picked on
+**  the first call, at run time, so the result does not depend on the flags the library
+**  was compiled with:
 **
-**	a_crc	Initial value: 0 to start, or a previous result to continue
-**	a_buf	Address of the data
-**	a_buflen	Number of octets
+**	x86-64	PCLMULQDQ folding, after Intel's "Fast CRC Computation for Generic
+**		Polynomials Using PCLMULQDQ Instruction" - the method of the Linux kernel
+**		and of zlib-ng for this polynomial; four 128-bit lanes, then Barrett.
+**	ARMv8	the CRC32 instructions (crc32b/crc32x - the IEEE ones, not crc32c*), asked
+**		for with a target attribute and used only when AT_HWCAP says HWCAP_CRC32.
+**		Before V.01-32 they were used only under __ARM_FEATURE_CRC32, which the
+**		default -march of Debian and Armbian does not define.
+**	any	slice-by-8 tables, endian-neutral.
 **
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE
-**
-**  RETURN VALUE:
-**	The 32-bit checksum (this routine does not use the condition-value
-**	convention).
-**--
+**  STARLET_CRC32=SOFTWARE in the environment forces the tables - for a test that pins the
+**  engines against each other, or to rule an engine out when looking into a problem.
 */
-#include	<arm_acle.h>
+#include	<stdint.h>
 
-unsigned int	__util$crc32c (unsigned int a_crc, const void *a_buf, size_t a_buflen)
-{
-const unsigned char *l_p = (const unsigned char *) a_buf;
-unsigned int	l_crc = a_crc ^ ~0U;
-uint64_t	l_w;
-
-	while ( a_buflen && ((uintptr_t) l_p & 7) )			/* Reach an 8-byte boundary first */
-		{ l_crc = __crc32b(l_crc, *l_p++); a_buflen--; }
-
-	for ( ; a_buflen >= 8; l_p += 8, a_buflen -= 8 )		/* Eat 8 octets per step */
-		{
-		memcpy(&l_w, l_p, sizeof(l_w));
-		l_crc = __crc32d(l_crc, l_w);
-		}
-
-	while ( a_buflen-- )						/* Tail */
-		l_crc = __crc32b(l_crc, *l_p++);
-
-	return	l_crc ^ ~0U;
-}
-
-#else	/* Portable software: slice-by-8 (~4x the classic byte-at-a-time loop) */
+#define	UTIL$K_CRC_SW		0			/* Slice-by-8					*/
+#define	UTIL$K_CRC_CLMUL	1			/* x86-64 PCLMULQDQ				*/
+#define	UTIL$K_CRC_ARM		2			/* ARMv8 CRC32 instructions			*/
 
 /*
  *  Slice-by-8 tables. Slice 0 is the classic reflected CRC-32 (0xEDB88320) byte table;
@@ -2786,32 +3224,294 @@ static const unsigned int s_crc_tab8 [8][256] = {
 	}
 };
 
-unsigned int	__util$crc32c (unsigned int a_crc, const void *a_buf, size_t a_buflen)
+/*
+**  The table engine, on the inner (inverted) state
+*/
+static unsigned int	s_util$crc32_sw (
+		unsigned int	a_crc,
+	const	unsigned char *	a_p,
+		size_t		a_len
+			)
 {
-const unsigned char *l_p = (const unsigned char *) a_buf;
-unsigned int	l_crc = a_crc ^ ~0U;
+unsigned int	l_crc = a_crc;
 
-	for ( ; a_buflen >= 8; l_p += 8, a_buflen -= 8 )
+	for ( ; a_len >= 8; a_p += 8, a_len -= 8 )
 		{
-		l_crc ^= (unsigned) l_p[0] | ((unsigned) l_p[1] << 8) | ((unsigned) l_p[2] << 16) | ((unsigned) l_p[3] << 24);
+		l_crc ^= (unsigned) a_p[0] | ((unsigned) a_p[1] << 8) | ((unsigned) a_p[2] << 16) | ((unsigned) a_p[3] << 24);
 
 		l_crc = s_crc_tab8[7][ l_crc        & 0xFF]
 		      ^ s_crc_tab8[6][(l_crc >>  8) & 0xFF]
 		      ^ s_crc_tab8[5][(l_crc >> 16) & 0xFF]
 		      ^ s_crc_tab8[4][(l_crc >> 24) & 0xFF]
-		      ^ s_crc_tab8[3][ l_p[4] ]
-		      ^ s_crc_tab8[2][ l_p[5] ]
-		      ^ s_crc_tab8[1][ l_p[6] ]
-		      ^ s_crc_tab8[0][ l_p[7] ];
+		      ^ s_crc_tab8[3][ a_p[4] ]
+		      ^ s_crc_tab8[2][ a_p[5] ]
+		      ^ s_crc_tab8[1][ a_p[6] ]
+		      ^ s_crc_tab8[0][ a_p[7] ];
 		}
 
-	while ( a_buflen-- )						/* Tail, classic byte-at-a-time */
-		l_crc = s_crc_tab8[0][(l_crc ^ *l_p++) & 0xFF] ^ (l_crc >> 8);
+	while ( a_len-- )						/* Tail, classic byte-at-a-time */
+		l_crc = s_crc_tab8[0][(l_crc ^ *a_p++) & 0xFF] ^ (l_crc >> 8);
 
-	return	l_crc ^ ~0U;
+	return	l_crc;
 }
 
-#endif	/* __ARM_FEATURE_CRC32 */
+
+#if	defined(__x86_64__) && defined(__GNUC__) && !defined(_WIN32)
+#include	<immintrin.h>
+
+#define	UTIL$K_CLMUL_MIN	64			/* Shortest run the folding is worth for	*/
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	The PCLMULQDQ engine: fold 64 octets at a time in four 128-bit lanes by x^(4*128+64)
+**	and x^(4*128), merge the lanes into one, fold 16 octets at a time, reduce 128 -> 64
+**	bits and Barrett-reduce to 32. The constants are those of the reflected polynomial
+**	0xEDB88320 (k1..k5, P', mu), shifted by one as the reflected domain wants them.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_crc	Inner (inverted) state
+**	a_p	The data
+**	a_len	Its length: at least UTIL$K_CLMUL_MIN, a multiple of 16
+**
+**  RETURN VALUE:
+**	The inner state after the data.
+**--
+*/
+__attribute__((target("pclmul,sse4.1")))
+static unsigned int	s_util$crc32_clmul (
+		unsigned int	a_crc,
+	const	unsigned char *	a_p,
+		size_t		a_len
+			)
+{
+static const uint64_t	l_k1k2 [2] = { 0x0154442bd4ULL, 0x01c6e41596ULL },
+			l_k3k4 [2] = { 0x01751997d0ULL, 0x00ccaa009eULL },
+			l_k5k0 [2] = { 0x0163cd6124ULL, 0x0000000000ULL },
+			l_poly [2] = { 0x01db710641ULL, 0x01f7011641ULL };
+__m128i	x0, x1, x2, x3, x4, x5, x6, x7, x8, y5, y6, y7, y8;
+
+	x1 = _mm_loadu_si128((const __m128i *) (a_p + 0x00));
+	x2 = _mm_loadu_si128((const __m128i *) (a_p + 0x10));
+	x3 = _mm_loadu_si128((const __m128i *) (a_p + 0x20));
+	x4 = _mm_loadu_si128((const __m128i *) (a_p + 0x30));
+
+	x1 = _mm_xor_si128(x1, _mm_cvtsi32_si128((int) a_crc));
+	x0 = _mm_loadu_si128((const __m128i *) l_k1k2);
+
+	a_p	+= 64;
+	a_len	-= 64;
+
+	/* Four lanes, 64 octets a step */
+	while ( a_len >= 64 )
+		{
+		x5 = _mm_clmulepi64_si128(x1, x0, 0x00);
+		x6 = _mm_clmulepi64_si128(x2, x0, 0x00);
+		x7 = _mm_clmulepi64_si128(x3, x0, 0x00);
+		x8 = _mm_clmulepi64_si128(x4, x0, 0x00);
+
+		x1 = _mm_clmulepi64_si128(x1, x0, 0x11);
+		x2 = _mm_clmulepi64_si128(x2, x0, 0x11);
+		x3 = _mm_clmulepi64_si128(x3, x0, 0x11);
+		x4 = _mm_clmulepi64_si128(x4, x0, 0x11);
+
+		y5 = _mm_loadu_si128((const __m128i *) (a_p + 0x00));
+		y6 = _mm_loadu_si128((const __m128i *) (a_p + 0x10));
+		y7 = _mm_loadu_si128((const __m128i *) (a_p + 0x20));
+		y8 = _mm_loadu_si128((const __m128i *) (a_p + 0x30));
+
+		x1 = _mm_xor_si128(_mm_xor_si128(x1, x5), y5);
+		x2 = _mm_xor_si128(_mm_xor_si128(x2, x6), y6);
+		x3 = _mm_xor_si128(_mm_xor_si128(x3, x7), y7);
+		x4 = _mm_xor_si128(_mm_xor_si128(x4, x8), y8);
+
+		a_p	+= 64;
+		a_len	-= 64;
+		}
+
+	/* The four lanes into one */
+	x0 = _mm_loadu_si128((const __m128i *) l_k3k4);
+
+	x5 = _mm_clmulepi64_si128(x1, x0, 0x00);
+	x1 = _mm_clmulepi64_si128(x1, x0, 0x11);
+	x1 = _mm_xor_si128(_mm_xor_si128(x1, x2), x5);
+
+	x5 = _mm_clmulepi64_si128(x1, x0, 0x00);
+	x1 = _mm_clmulepi64_si128(x1, x0, 0x11);
+	x1 = _mm_xor_si128(_mm_xor_si128(x1, x3), x5);
+
+	x5 = _mm_clmulepi64_si128(x1, x0, 0x00);
+	x1 = _mm_clmulepi64_si128(x1, x0, 0x11);
+	x1 = _mm_xor_si128(_mm_xor_si128(x1, x4), x5);
+
+	/* One lane, 16 octets a step */
+	while ( a_len >= 16 )
+		{
+		x2 = _mm_loadu_si128((const __m128i *) a_p);
+
+		x5 = _mm_clmulepi64_si128(x1, x0, 0x00);
+		x1 = _mm_clmulepi64_si128(x1, x0, 0x11);
+		x1 = _mm_xor_si128(_mm_xor_si128(x1, x2), x5);
+
+		a_p	+= 16;
+		a_len	-= 16;
+		}
+
+	/* 128 -> 64 bits */
+	x2 = _mm_clmulepi64_si128(x1, x0, 0x10);
+	x3 = _mm_setr_epi32(~0, 0, ~0, 0);
+	x1 = _mm_srli_si128(x1, 8);
+	x1 = _mm_xor_si128(x1, x2);
+
+	x0 = _mm_loadl_epi64((const __m128i *) l_k5k0);
+
+	x2 = _mm_srli_si128(x1, 4);
+	x1 = _mm_and_si128(x1, x3);
+	x1 = _mm_clmulepi64_si128(x1, x0, 0x00);
+	x1 = _mm_xor_si128(x1, x2);
+
+	/* Barrett: 64 -> 32 bits */
+	x0 = _mm_loadu_si128((const __m128i *) l_poly);
+
+	x2 = _mm_and_si128(x1, x3);
+	x2 = _mm_clmulepi64_si128(x2, x0, 0x10);
+	x2 = _mm_and_si128(x2, x3);
+	x2 = _mm_clmulepi64_si128(x2, x0, 0x00);
+	x1 = _mm_xor_si128(x1, x2);
+
+	return	(unsigned int) _mm_extract_epi32(x1, 1);
+}
+#endif	/* __x86_64__ */
+
+
+#if	defined(__aarch64__) && defined(__GNUC__) && defined(__linux__)
+#include	<arm_acle.h>
+#include	<sys/auxv.h>
+
+#ifndef	HWCAP_CRC32
+#define	HWCAP_CRC32	(1 << 7)			/* <asm/hwcap.h> of arm64			*/
+#endif
+
+/*
+**  The ARMv8 engine: crc32x eight octets a step, crc32b for the edges. The target
+**  attribute lets the instructions be emitted whatever -march the library is built with;
+**  they are executed only when AT_HWCAP says the processor has them.
+*/
+__attribute__((target("+crc")))
+static unsigned int	s_util$crc32_arm (
+		unsigned int	a_crc,
+	const	unsigned char *	a_p,
+		size_t		a_len
+			)
+{
+unsigned int	l_crc = a_crc;
+uint64_t	l_w;
+
+	while ( a_len && ((uintptr_t) a_p & 7) )			/* Reach an 8-byte boundary first */
+		{
+		l_crc = __crc32b(l_crc, *a_p++);
+		a_len--;
+		}
+
+	for ( ; a_len >= 8; a_p += 8, a_len -= 8 )
+		{
+		memcpy(&l_w, a_p, sizeof(l_w));
+		l_crc = __crc32d(l_crc, l_w);
+		}
+
+	while ( a_len-- )
+		l_crc = __crc32b(l_crc, *a_p++);
+
+	return	l_crc;
+}
+#endif	/* __aarch64__ */
+
+
+/*
+**  Which engine this processor gets: decided on the first call. Two threads deciding at
+**  once decide alike, so the race is a harmless one.
+*/
+static int	s_util$crc_engine = -1;
+
+static int	s_util$crc_select (void)
+{
+const char *	l_env = getenv("STARLET_CRC32");
+int		l_engine = UTIL$K_CRC_SW;
+
+	if ( !l_env || (strcmp(l_env, "SOFTWARE") && strcmp(l_env, "software")) )
+		{
+#if	defined(__x86_64__) && defined(__GNUC__) && !defined(_WIN32)
+		__builtin_cpu_init();
+
+		if ( __builtin_cpu_supports("pclmul") && __builtin_cpu_supports("sse4.1") )
+			l_engine = UTIL$K_CRC_CLMUL;
+#elif	defined(__aarch64__) && defined(__GNUC__) && defined(__linux__)
+		if ( getauxval(AT_HWCAP) & HWCAP_CRC32 )
+			l_engine = UTIL$K_CRC_ARM;
+#endif
+		}
+
+	__atomic_store_n(&s_util$crc_engine, l_engine, __ATOMIC_RELAXED);
+
+	return	l_engine;
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Compute the standard IEEE 802.3 / zlib CRC-32 (reflected polynomial 0xEDB88320) of
+**	a memory region, by the fastest engine the processor has. The result is the same on
+**	every platform, engine and byte order; check value for "123456789" is 0xCBF43926.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_crc		Initial value: 0 to start, or a previous result to continue
+**	a_buf		Address of the data
+**	a_buflen	Number of octets
+**
+**  IMPLICIT INPUTS:
+**	STARLET_CRC32 of the environment, read on the first call.
+**
+**  RETURN VALUE:
+**	The 32-bit checksum (this routine does not use the condition-value convention).
+**--
+*/
+unsigned int	__util$crc32c (unsigned int a_crc, const void *a_buf, size_t a_buflen)
+{
+const unsigned char *l_p = (const unsigned char *) a_buf;
+unsigned int	l_crc = a_crc ^ ~0U;
+int		l_engine = __atomic_load_n(&s_util$crc_engine, __ATOMIC_RELAXED);
+
+	if ( l_engine < 0 )
+		l_engine = s_util$crc_select();
+
+	switch ( l_engine )
+		{
+#if	defined(__x86_64__) && defined(__GNUC__) && !defined(_WIN32)
+		case	UTIL$K_CRC_CLMUL:
+			if ( a_buflen >= UTIL$K_CLMUL_MIN )
+				{
+				size_t	l_n = a_buflen & ~(size_t) 15;
+
+				l_crc	  = s_util$crc32_clmul(l_crc, l_p, l_n);
+				l_p	 += l_n;
+				a_buflen -= l_n;
+				}
+			break;
+#endif
+
+#if	defined(__aarch64__) && defined(__GNUC__) && defined(__linux__)
+		case	UTIL$K_CRC_ARM:
+			return	s_util$crc32_arm(l_crc, l_p, a_buflen) ^ ~0U;
+#endif
+		}
+
+	return	s_util$crc32_sw(l_crc, l_p, a_buflen) ^ ~0U;
+}
 
 
 /*
@@ -2944,6 +3644,207 @@ int	olen = 0;
 
 
 
+
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Encode a block of octets into the base64 alphabet of RFC 4648 (A-Z, a-z,
+**	0-9, '+', '/'), padded with '=' to a multiple of four characters.  The
+**	output is NOT zero-terminated as part of its length; a terminating NUL
+**	is appended as a courtesy when the buffer has room for one beyond the
+**	encoded text, so the result can be used as an ASCIZ string as well.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_src		An address of the octets to encode
+**	a_srclen	A number of octets to encode
+**	a_dst		An address of the output buffer
+**	a_dstsz		A size of the output buffer, octets
+**	a_dstlen	An address to accept the length of the encoded text - it
+**			is set even when the buffer is too small, so the caller
+**			learns what would have been needed
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS, or STS$K_ERROR on a bad argument or a buffer too small.
+**--
+*/
+int	__util$base64	(
+		void	*	a_src,
+		int		a_srclen,
+		void	*	a_dst,
+		int		a_dstsz,
+		int	*	a_dstlen
+			)
+{
+static const char s_b64 [] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const unsigned char *l_in = (const unsigned char *) a_src;
+char	*l_out = (char *) a_dst;
+int	l_i, l_need, l_rest;
+unsigned l_b0, l_b1, l_b2;
+
+	if ( !a_dstlen )
+		return	STS$K_ERROR;
+
+	*a_dstlen = 0;
+
+	if ( (a_srclen < 0) || (a_dstsz < 0) || (!a_src && a_srclen) || (!a_dst && a_dstsz) )
+		return	STS$K_ERROR;
+
+	/* Four characters for every three octets, the last group padded up. */
+	l_need = 4 * ((a_srclen + 2) / 3);
+	*a_dstlen = l_need;
+
+	if ( l_need > a_dstsz )
+		return	STS$K_ERROR;
+
+	for ( l_i = 0; l_i + 2 < a_srclen; l_i += 3 )
+		{
+		l_b0 = l_in[l_i];
+		l_b1 = l_in[l_i + 1];
+		l_b2 = l_in[l_i + 2];
+
+		*(l_out++) = s_b64[ l_b0 >> 2 ];
+		*(l_out++) = s_b64[ ((l_b0 & 0x03) << 4) | (l_b1 >> 4) ];
+		*(l_out++) = s_b64[ ((l_b1 & 0x0f) << 2) | (l_b2 >> 6) ];
+		*(l_out++) = s_b64[ l_b2 & 0x3f ];
+		}
+
+	/* The tail: one octet gives two characters and "==", two give three and "=". */
+	if ( (l_rest = a_srclen - l_i) == 1 )
+		{
+		l_b0 = l_in[l_i];
+
+		*(l_out++) = s_b64[ l_b0 >> 2 ];
+		*(l_out++) = s_b64[ (l_b0 & 0x03) << 4 ];
+		*(l_out++) = '=';
+		*(l_out++) = '=';
+		}
+	else if ( l_rest == 2 )
+		{
+		l_b0 = l_in[l_i];
+		l_b1 = l_in[l_i + 1];
+
+		*(l_out++) = s_b64[ l_b0 >> 2 ];
+		*(l_out++) = s_b64[ ((l_b0 & 0x03) << 4) | (l_b1 >> 4) ];
+		*(l_out++) = s_b64[ (l_b1 & 0x0f) << 2 ];
+		*(l_out++) = '=';
+		}
+
+	if ( l_need < a_dstsz )				/* The courtesy NUL, when there is room */
+		*l_out = '\0';
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Decode base64 text (RFC 4648) back into octets.  The '=' padding is
+**	accepted and it is also allowed to be absent - a trailing group of two
+**	or three characters is decoded as it stands.  Everything else is an
+**	error: a character outside the alphabet (white space included), a '='
+**	anywhere but at the very end, more than two of them, or a trailing group
+**	of a single character, which carries no whole octet.
+**
+**  FORMAL PARAMETERS:
+**
+**	a_src		An address of the text to decode
+**	a_srclen	A length of the text, characters
+**	a_dst		An address of the output buffer
+**	a_dstsz		A size of the output buffer, octets
+**	a_dstlen	An address to accept the number of octets decoded - it is
+**			set even when the buffer is too small
+**
+**  IMPLICIT INPUTS/OUTPUTS:
+**	NONE
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS, or STS$K_ERROR on a bad argument, malformed text or a
+**	buffer too small.
+**--
+*/
+int	__util$unbase64	(
+		void	*	a_src,
+		int		a_srclen,
+		void	*	a_dst,
+		int		a_dstsz,
+		int	*	a_dstlen
+			)
+{
+	/* The alphabet mapped back to sextets; 0xFF marks an octet that is not in it. */
+static const unsigned char s_unb64 [256] = {
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,  62,0xFF,0xFF,0xFF,  63,
+	  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,
+	  15,  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,  36,  37,  38,  39,  40,
+	  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+	};
+const unsigned char *l_in = (const unsigned char *) a_src;
+unsigned char *l_out = (unsigned char *) a_dst;
+int	l_i, l_n, l_pad = 0, l_rest, l_need, l_bits = 0;
+unsigned l_acc = 0, l_v;
+
+	if ( !a_dstlen )
+		return	STS$K_ERROR;
+
+	*a_dstlen = 0;
+
+	if ( (a_srclen < 0) || (a_dstsz < 0) || (!a_src && a_srclen) || (!a_dst && a_dstsz) )
+		return	STS$K_ERROR;
+
+	/* Strip up to two '=' off the end; those are the only ones allowed. */
+	for ( l_n = a_srclen; l_n && (l_pad < 2) && (l_in[l_n - 1] == '='); l_n--)
+		l_pad++;
+
+	/* A trailing group of one character carries no whole octet, and the
+	 * padding, when present, has to complete the last group exactly. */
+	if ( ((l_rest = l_n % 4) == 1) || (l_pad && ((l_rest + l_pad) != 4)) )
+		return	STS$K_ERROR;
+
+	l_need = 3 * (l_n / 4) + (l_rest ? l_rest - 1 : 0);
+	*a_dstlen = l_need;
+
+	if ( l_need > a_dstsz )
+		return	STS$K_ERROR;
+
+	/* Six bits in, eight bits out whenever there are enough of them; the
+	 * one to four bits left over at the end of a partial group are dropped. */
+	for ( l_i = 0; l_i < l_n; l_i++ )
+		{
+		if ( (l_v = s_unb64[ l_in[l_i] ]) == 0xFF )
+			return	STS$K_ERROR;
+
+		l_acc = (l_acc << 6) | l_v;
+		l_bits += 6;
+
+		if ( l_bits >= 8 )
+			{
+			l_bits -= 8;
+			*(l_out++) = (unsigned char) (l_acc >> l_bits);
+			}
+		}
+
+	return	STS$K_SUCCESS;
+}
 
 
 #ifdef	__MAIN_FOR_DEBUG__

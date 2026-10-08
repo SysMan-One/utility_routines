@@ -100,6 +100,11 @@
 **		which renders the vectors through both and compares. The engine
 **		stays freestanding - no <arpa/inet.h> is pulled in. En passant the
 **		stale __REV__ (1.06) is brought back in step with __IDENT__.
+
+**	X.01-15ECO1	14-AUG-2026	RRL
+**		The address-directive helpers (s_fao$put_hwaddr/ipv4/ipv6/uuid)
+**		brought to the house routine-body template; the one-line blocks
+**		unfolded. Layout only, no functional change.
 **
 **	X.01-14		13-AUG-2026	RRL
 **		The !%6 directive now emits the RFC 5952 canonical form: the
@@ -185,8 +190,8 @@
 */
 
 #define	__MODULE__	"STARLET"
-#define	__IDENT__	"X.01-15"
-#define	__REV__		"1.15.0"
+#define	__IDENT__	"X.01-15ECO1"
+#define	__REV__		"1.15.1"
 
 #include	<stdarg.h>
 #include	<stdint.h>
@@ -897,14 +902,20 @@ static const char s_fao$hexlc[16] = "0123456789abcdef";
 **  A NULL pointer yields "(null)" rather than a fault. Used by the !%M, !%I,
 **  !%6 and !%U directives.
 */
-static void s_fao$put_hwaddr (fao_ctx_t *a_ctx, const void *a_addr)	/* aa:bb:cc:dd:ee:ff (6 octets) */
+static	void	s_fao$put_hwaddr (				/* aa:bb:cc:dd:ee:ff (6 octets) */
+		fao_ctx_t	*a_ctx,
+		const void	*a_addr
+		)
 {
 const unsigned char *l_p = a_addr;
 char	l_buf [18];
 int	l_i, l_n = 0;
 
 	if ( !l_p )
-		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+		{
+		s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0);
+		return;
+		}
 
 	for ( l_i = 0; l_i < 6; l_i++ )
 		{
@@ -916,7 +927,10 @@ int	l_i, l_n = 0;
 	s_fao$put_str (a_ctx, l_buf, (size_t) l_n, FAO$K_WIDTHAUTO, 0);
 }
 
-static void s_fao$put_ipv4 (fao_ctx_t *a_ctx, const void *a_addr)	/* d.d.d.d (4 octets) */
+static	void	s_fao$put_ipv4 (				/* d.d.d.d (4 octets) */
+		fao_ctx_t	*a_ctx,
+		const void	*a_addr
+		)
 {
 const unsigned char *l_p = a_addr;
 char	l_buf [16];
@@ -924,7 +938,10 @@ int	l_i, l_n = 0;
 unsigned l_v;
 
 	if ( !l_p )
-		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+		{
+		s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0);
+		return;
+		}
 
 	for ( l_i = 0; l_i < 4; l_i++ )
 		{
@@ -940,7 +957,10 @@ unsigned l_v;
 	s_fao$put_str (a_ctx, l_buf, (size_t) l_n, FAO$K_WIDTHAUTO, 0);
 }
 
-static void s_fao$put_ipv6 (fao_ctx_t *a_ctx, const void *a_addr)	/* RFC 5952 canonical form (16 octets) */
+static	void	s_fao$put_ipv6 (				/* RFC 5952 canonical form (16 octets) */
+		fao_ctx_t	*a_ctx,
+		const void	*a_addr
+		)
 {
 const unsigned char *l_p = a_addr;
 char	l_buf [46];
@@ -949,7 +969,10 @@ int	l_run, l_runlen, l_best, l_bestlen;
 unsigned l_g [8], l_d;
 
 	if ( !l_p )
-		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+		{
+		s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0);
+		return;
+		}
 
 	/*
 	 * RFC 5952 par.5: an IPv4-mapped address is shown in the mixed notation -
@@ -975,11 +998,17 @@ unsigned l_g [8], l_d;
 	for ( l_i = 0; l_i < 8; )
 		{
 		if ( l_g[l_i] )
-			{ l_i++; continue; }
+			{
+			l_i++;
+			continue;
+			}
 		for ( l_run = l_i, l_runlen = 0; (l_i < 8) && !l_g[l_i]; l_i++ )
 			l_runlen++;
 		if ( l_runlen > l_bestlen )
-			{ l_best = l_run; l_bestlen = l_runlen; }
+			{
+			l_best = l_run;
+			l_bestlen = l_runlen;
+			}
 		}
 
 	for ( l_i = 0; l_i < 8; l_i++ )
@@ -999,20 +1028,29 @@ unsigned l_g [8], l_d;
 				{
 				l_d = (l_g[l_i] >> l_j) & 0xF;
 				if ( l_d || l_seen )
-					{ l_buf[l_n++] = s_fao$hexlc[l_d]; l_seen = 1; }
+					{
+					l_buf[l_n++] = s_fao$hexlc[l_d];
+					l_seen = 1;
+					}
 				}
 		}
 	s_fao$put_str (a_ctx, l_buf, (size_t) l_n, FAO$K_WIDTHAUTO, 0);
 }
 
-static void s_fao$put_uuid (fao_ctx_t *a_ctx, const void *a_addr)	/* 8-4-4-4-12 (16 octets) */
+static	void	s_fao$put_uuid (				/* 8-4-4-4-12 (16 octets) */
+		fao_ctx_t	*a_ctx,
+		const void	*a_addr
+		)
 {
 const unsigned char *l_p = a_addr;
 char	l_buf [37];
 int	l_i, l_n = 0;
 
 	if ( !l_p )
-		{ s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0); return; }
+		{
+		s_fao$put_str (a_ctx, "(null)", 6, FAO$K_WIDTHAUTO, 0);
+		return;
+		}
 
 	for ( l_i = 0; l_i < 16; l_i++ )
 		{

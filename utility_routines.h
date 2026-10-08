@@ -50,6 +50,16 @@
 **
 **	10-OCT-2024	RRL	Fix $IFTRACE() in Release compilation
 **
+**	10-SEP-2026	RRL	Added __util$base64() / __util$unbase64() - RFC 4648 encoding and
+**				decoding, bounded buffers, (src, srclen, dst, dstsz, &dstlen).
+**
+**	11-SEP-2026	RRL	$MSG() did not mask the facility off, so it was not the inverse of
+**				$DEFMSG(): for a non-zero facility it returned <facility> << 13 |
+**				<number>. It now extracts the 13-bit field of the layout comment.
+**
+**	 4-OCT-2026	RRL	Added __util$rotatelogfile() - rotation of the log file opened by
+**				__util$deflog() to <file>.1 ... <file>.<keep> past a size limit.
+**
 */
 
 #if _WIN32
@@ -406,7 +416,7 @@ enum	{
  * +---------------------+--------------------------+-------------------+
  */
 #define	$FAC(code)		((code) >> 16)
-#define	$MSG(code)		((code) >> 3)
+#define	$MSG(code)		( ((code) >> 3) & 0x00001FFFUL )		/* message number <- bits 3..15	*/
 #define	$SEV(code)		((code) & 0x7)
 
 
@@ -427,6 +437,19 @@ typedef	struct __emsg_record__	{
 		};
 #pragma pack(pop)
 
+		const char	*facname;			/* Facility name, stamped by __util$inimsg()
+								** from the descriptor - a record answers for
+								** its %<facility>- envelope with no list walk
+								*/
+
+		const char	*mnemonic;			/* The real VMS mnemonic, e.g. "CONFOK" - a
+								** $XXX_MSGENT table supplies it stringised from
+								** its own "FAC$_NAME" code (#a_sts); __util$inimsg()
+								** trims it down to the part after "$_". NULL for a
+								** caller-built EMSG_RECORD that never set it - the
+								** %<facility>-<sev>- envelope is then left exactly
+								** as it was before this field existed.
+								*/
 } EMSG_RECORD;
 
 
@@ -450,6 +473,8 @@ unsigned	__util$putmsgd_fao	(unsigned sts, const char *__mod, const char *__fi, 
 
 unsigned	__util$log	(const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$logd	(const char *fac, unsigned severity, const char *fmt, const char *mod, const char *__func, unsigned __line, ...);
+unsigned	__util$log_fao	(const char *a_fac, unsigned a_sev, const char *a_ctl, int a_prmcnt, ...);
+unsigned	__util$logd_fao	(const char *a_fac, unsigned a_sev, const char *a_ctl, const char *a_mod, const char *a_func, unsigned a_line, int a_prmcnt, ...);
 unsigned	__util$log2buf	(void *out, int outsz, int * outlen, const char *fac, unsigned severity, const char *fmt, ...);
 unsigned	__util$syslog	(int fac, int sev, const char *tag, const char *msg, int  msglen);
 unsigned	__util$out	(char *fmt, ...);
@@ -502,11 +527,13 @@ unsigned	__util$out	(char *fmt, ...);
 	#define $PUTMSG(sts, ...)		__util$putmsgd(sts, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $PUTMSG_FAO(sts, ...)		__util$putmsgd_fao(sts, __MODULE__, __FUNCTION__ , __LINE__ , FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
+	#define $LOG_FAO(severity, ctl, ...)	__util$logd_fao(__FAC__, severity, ctl, __MODULE__, __FUNCTION__ , __LINE__ , FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : severity
 #else
 	#define $PUTMSG(sts, ...)		__util$putmsg(sts, ## __VA_ARGS__)
 	#define $PUTMSG_FAO(sts, ...)		__util$putmsg_fao(sts, FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$log(__FAC__, severity, fmt, ## __VA_ARGS__)
+	#define $LOG_FAO(severity, ctl, ...)	__util$log_fao(__FAC__, severity, ctl, FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)	: severity
 
 #endif
@@ -1736,7 +1763,30 @@ int	__util$showparams	(const OPTS *opts);
 int	__util$deflog		(const char *, const char *);
 int	__util$setlogfd	(int);
 int	__util$rewindlogfile	(size_t);
+int	__util$rotatelogfile	(size_t, unsigned);
 int	__util$pattern_match	(char * str$, char * pattern$);
+
+/*
+ *  DESCRIPTION: __util$base64 / __util$unbase64 - base64 (RFC 4648) encoding and
+ *	decoding into a bounded buffer.  The encoder pads with '=' and appends a
+ *	NUL when there is room for it beyond the text; the decoder accepts padded
+ *	and unpadded input and rejects anything outside the alphabet.
+ *
+ *  INPUT:
+ *	src:	an address of the data to convert
+ *	srclen:	a length of the data, octets
+ *	dst:	an address of the output buffer
+ *	dstsz:	a size of the output buffer, octets
+ *
+ *  OUTPUT:
+ *	dstlen:	a length of the result, octets - set even when dstsz is too small
+ *
+ *  RETURN:
+ *	STS$K_SUCCESS, or STS$K_ERROR on a bad argument, malformed input or a
+ *	buffer too small.
+ */
+int	__util$base64		(void *src, int srclen, void *dst, int dstsz, int *dstlen);
+int	__util$unbase64		(void *src, int srclen, void *dst, int dstsz, int *dstlen);
 
 char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
 
