@@ -19,12 +19,16 @@ trap 'rm -rf "$OUT"' EXIT
 SRC="$HERE/utility_routines.c $HERE/cli_routines.c $HERE/starlet.c $HERE/avproto.c"
 rc=0
 
-for t in status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64
+for t in status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64 crc32
 do
 	printf '\n>>> test_%s\n' "$t"
 	# shellcheck disable=SC2086
 	$CC $CFLAGS -I"$HERE" "$HERE/tests/test_$t.c" $SRC -o "$OUT/test_$t"
 	"$OUT/test_$t" || rc=1
 done
+
+#	The tables too, not only the engine this processor gets
+printf '\n>>> test_crc32 (STARLET_CRC32=SOFTWARE)\n'
+STARLET_CRC32=SOFTWARE "$OUT/test_crc32" || rc=1
 
 exit $rc

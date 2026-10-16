@@ -57,6 +57,9 @@
 **				$DEFMSG(): for a non-zero facility it returned <facility> << 13 |
 **				<number>. It now extracts the 13-bit field of the layout comment.
 **
+**	 4-OCT-2026	RRL	Added __util$rotatelogfile() - rotation of the log file opened by
+**				__util$deflog() to <file>.1 ... <file>.<keep> past a size limit.
+**
 */
 
 #if _WIN32
@@ -437,6 +440,15 @@ typedef	struct __emsg_record__	{
 		const char	*facname;			/* Facility name, stamped by __util$inimsg()
 								** from the descriptor - a record answers for
 								** its %<facility>- envelope with no list walk
+								*/
+
+		const char	*mnemonic;			/* The real VMS mnemonic, e.g. "CONFOK" - a
+								** $XXX_MSGENT table supplies it stringised from
+								** its own "FAC$_NAME" code (#a_sts); __util$inimsg()
+								** trims it down to the part after "$_". NULL for a
+								** caller-built EMSG_RECORD that never set it - the
+								** %<facility>-<sev>- envelope is then left exactly
+								** as it was before this field existed.
 								*/
 } EMSG_RECORD;
 
@@ -1751,6 +1763,7 @@ int	__util$showparams	(const OPTS *opts);
 int	__util$deflog		(const char *, const char *);
 int	__util$setlogfd	(int);
 int	__util$rewindlogfile	(size_t);
+int	__util$rotatelogfile	(size_t, unsigned);
 int	__util$pattern_match	(char * str$, char * pattern$);
 
 /*

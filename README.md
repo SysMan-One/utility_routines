@@ -109,12 +109,18 @@ straight into a build pipeline):
   a random round-trip over every length, unpadded input, the courtesy NUL, and
   the rejections (a foreign octet, a misplaced `=`, a dangling sextet, a short
   buffer with the needed length still reported).
+- **`test_crc32`** — `__util$crc32c` (the IEEE CRC-32) against a bitwise
+  reference: the check values, every length up to 2048 at every alignment, a run
+  continued at every split point, a 4 MB buffer. CTest runs it twice: with the
+  fastest engine of the processor (PCLMULQDQ on x86-64, the CRC32 instructions on
+  ARMv8) and under `STARLET_CRC32=SOFTWARE` (the tables).
 
 A GitHub Actions workflow (`.github/workflows/ci.yml`) runs them on every push:
 via CTest and standalone under ASan/UBSan with glibc, then again with `musl-gcc`
 (CTest plus the standalone suite statically linked against musl, `-Werror` throughout).
 
-With CMake:
+With CMake (no build type named means Release; `-DCMAKE_BUILD_TYPE=Debug` for
+the build with the library's own tracing):
 
 ```sh
 cmake -B build && cmake --build build && ctest --test-dir build

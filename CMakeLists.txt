@@ -118,13 +118,44 @@
 #					(V.01-30ECO1): it did not mask the facility off and so was not
 #					the inverse of DEFMSG(). test_status_convention gained group 5,
 #					which pins the condition-value layout field for field.
+#
+#		19-SEP-2026	RRL	VERSION -> 1.6.4. EMSG_RECORD gained a trailing mnemonic field
+#					(V.01-31): a $XXX_MSGENT table stringises its own code into it,
+#					and __util$inimsg() trims that down to the real VMS mnemonic
+#					(e.g. "CONFOK") after the facility's own "$_". putmsg_fao /
+#					putmsgd_fao glue it onto the envelope as %FAC-S-MNEMONIC, when
+#					a record carries one; one that never set the field keeps the
+#					plain %FAC-S- envelope this had before - test_putmsg_fao is
+#					unchanged and still pins that fallback.
+#
+#		 3-OCT-2026	RRL	VERSION -> 1.6.5. The CRC-32 of utility_routines (V.01-32) picks
+#					its engine at run time: PCLMULQDQ on x86-64, the CRC32
+#					instructions on ARMv8 (HWCAP_CRC32), the tables elsewhere - the
+#					same values, several times faster. test_crc32 added, run twice:
+#					as it stands and under STARLET_CRC32=SOFTWARE.
+#
+#		 3-OCT-2026	RRL	VERSION -> 1.6.6. No build type named - Release: the set used to
+#					be built with no optimization at all unless one was asked for,
+#					which every host did not, and the table and ARMv8 CRC-32 engines
+#					ran several times slower than they can (0.27 GB/s on the
+#					Armbian hosts). NDEBUG comes with it, so the library's own
+#					TRACE output is compiled out; a Debug build still has it.
+#
+#		 4-OCT-2026	RRL	VERSION -> 1.6.7. utility_routines V.01-33: __util$rotatelogfile()
+#					rotates the log file of __util$deflog() past a size limit to
+#					<file>.1 ... <file>.<keep> by rename, with no copying; deflog
+#					called again closes its previous file. test_logrotate added.
+#
+#		 6-OCT-2026	RRL	VERSION -> 1.6.8. utility_routines V.01-33ECO1: the thread id
+#					in the log-record prefix comes from syscall(SYS_gettid) - the
+#					library now builds with the Android NDK (bionic).
 #---
 
 
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.6.3 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.6.8 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.
@@ -150,6 +181,14 @@ add_definitions( -D__ARCH__NAME__="${CMAKE_HOST_SYSTEM_PROCESSOR}" )
 
 if (__MAIN_FOR_DEBUG__)
 	add_definitions( -D__MAIN_FOR_DEBUG__=1)
+endif()
+
+#	No build type named - Release, as HELP does it: without one the compiler is
+#	given no optimization and no NDEBUG.  cmake -DCMAKE_BUILD_TYPE=Debug for the
+#	tracing build.
+if ( NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES )
+	set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+	message(STATUS "No build type named, assuming ${CMAKE_BUILD_TYPE}")
 endif()
 
 if (CMAKE_BUILD_TYPE)
@@ -209,11 +248,15 @@ option (BUILD_TESTING "Build the regression tests" ON)
 if (BUILD_TESTING)
 	enable_testing()
 
-	foreach (t status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64)
+	foreach (t status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64 crc32 logrotate)
 		add_executable (test_${t} tests/test_${t}.c)
 		target_link_libraries (test_${t} starlet)
 		add_test (NAME ${t} COMMAND test_${t})
 	endforeach()
+
+	# The tables too, not only the engine this processor gets
+	add_test (NAME crc32_software COMMAND test_crc32)
+	set_tests_properties (crc32_software PROPERTIES ENVIRONMENT "STARLET_CRC32=SOFTWARE")
 endif()
 
 
