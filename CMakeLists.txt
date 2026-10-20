@@ -149,13 +149,17 @@
 #		 6-OCT-2026	RRL	VERSION -> 1.6.8. utility_routines V.01-33ECO1: the thread id
 #					in the log-record prefix comes from syscall(SYS_gettid) - the
 #					library now builds with the Android NDK (bionic).
+#
+#		20-OCT-2026	RRL	VERSION -> 1.6.9. utility_routines V.01-33ECO2: builds with
+#					GCC 14 on Windows (MSYS2) - the address of the WSAMSG of
+#					__util$syslog() cast to LPSOCKADDR.
 #---
 
 
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.6.8 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.6.9 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.

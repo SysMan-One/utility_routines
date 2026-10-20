@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-33ECO1"
-#define	__REV__		"1.33.1"
+#define	__IDENT__	"V.01-33ECO2"
+#define	__REV__		"1.33.2"
 
 
 /*
@@ -334,6 +334,10 @@
 **				utility_routines.h - the wrapper is compiled out under ANDROID,
 **				so the library did not build with the Android NDK. Still once
 **				per thread (s_tid).
+**
+**	20-OCT-2026	RRL	V.01-33ECO2 : __util$syslog() on Windows: the address of the
+**				WSAMSG cast to LPSOCKADDR - GCC 14 (MSYS2) takes the
+**				incompatible pointer for an error.
 **
 */
 
@@ -1339,7 +1343,7 @@ struct	msghdr  msg_desc = {0};
 
 	/* Prepare the msghdr structure */
 #ifdef	_WIN32
-	msg_desc.name = &slogsock;
+	msg_desc.name = (LPSOCKADDR) &slogsock;
 	msg_desc.namelen = sizeof(slogsock);
 
 	msg_desc.lpBuffers = (void *) &bufv;
