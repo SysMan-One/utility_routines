@@ -10,6 +10,9 @@
 **	a descriptor of __util$setlogfd() nothing is ever rotated.
 **
 **  MODULE:  test_logrotate.c
+**
+**	22-OCT-2026	RRL	Builds for Windows: mkdtemp() made of _mktemp() + _mkdir(),
+**				the files under the current directory there.
 **--
 */
 #define __MODULE__ "LRT$"
@@ -20,9 +23,18 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include "test_harness.h"
+#ifdef	_WIN32
+#include <io.h>
+#include <direct.h>
+/* No mkdtemp() in the Windows C RTL (mkstemp() is there); the files go under the current directory */
+static char *mkdtemp (char *a_tmpl) { return ( _mktemp(a_tmpl) && !_mkdir(a_tmpl) ) ? a_tmpl : NULL; }
+#define	TEST$TMP	""
+#else
+#define	TEST$TMP	"/tmp/"
+#endif
 #include "utility_routines.h"
 
-static char	s_dir [] = "/tmp/logrotate_XXXXXX";
+static char	s_dir [] = TEST$TMP "logrotate_XXXXXX";
 static char	s_log [64];
 
 /* Whole file into a buffer, "" when it is not there */
@@ -79,7 +91,7 @@ int	l_out;
 	 * when __util$deflog() takes the logging over afterwards.
 	 */
 	{
-	char	l_tmpl [] = "/tmp/logrotate_fd_XXXXXX";
+	char	l_tmpl [] = TEST$TMP "logrotate_fd_XXXXXX";
 	int	l_fd = mkstemp(l_tmpl);
 
 	CHECK( (l_fd > STDERR_FILENO) && (1 & __util$setlogfd(l_fd)), "setlogfd(own descriptor)");

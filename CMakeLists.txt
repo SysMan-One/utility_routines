@@ -160,6 +160,10 @@
 #					<endian.h>/<arpa/inet.h>/O_CLOEXEC/NAME_MAX there, <windows.h>
 #					in lower case); ws2_32 linked on WIN32. The tests run under
 #					Wine, 15 of 17 - log_prefix and logrotate stay Linux-only.
+#		22-OCT-2026	RRL	Still 1.6.10 (not released yet): utility_routines V.01-33ECO4 -
+#					the log file on Windows shares delete, so rotation works there;
+#					tests/test_logrotate passes on Windows 11 and is built for
+#					Windows, but not run under Wine (its delete-pending differs).
 #---
 
 
@@ -266,10 +270,14 @@ if (BUILD_TESTING)
 	enable_testing()
 
 	set (STARLET_TESTS status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr pattern_match log_fao base64 crc32)
-	# Linux-only for now: log_prefix reads the thread id through syscall(SYS_gettid), logrotate renames the
-	# log file while it is open (Windows refuses that without FILE_SHARE_DELETE) and uses mkdtemp()
+	# logrotate: Windows passes it (Windows 11, 22-OCT-2026); Wine does not - its delete-pending name of a removed,
+	# still-open file differs from Windows, so a cross build that runs its tests under Wine leaves it out
+	if (NOT (WIN32 AND CMAKE_CROSSCOMPILING_EMULATOR MATCHES "wine"))
+		list (APPEND STARLET_TESTS logrotate)
+	endif()
+	# Linux-only for now: log_prefix reads the thread id through syscall(SYS_gettid)
 	if (NOT WIN32)
-		list (APPEND STARLET_TESTS log_prefix logrotate)
+		list (APPEND STARLET_TESTS log_prefix)
 	endif()
 
 	foreach (t ${STARLET_TESTS})

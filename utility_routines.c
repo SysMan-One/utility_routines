@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-33ECO3"
-#define	__REV__		"1.33.3"
+#define	__IDENT__	"V.01-33ECO4"
+#define	__REV__		"1.33.4"
 
 
 /*
@@ -344,6 +344,12 @@
 **				<windows.h> in lower case, and its Windows time routine is named
 **				s___time() as __util$log() calls it (was ____time(), never linked)
 **				and no longer divides tv_nsec by 1024; Winsock (ws2_32) is linked.
+**
+**	22-OCT-2026	RRL	V.01-33ECO4 : Windows: the log file is opened with FILE_SHARE_DELETE
+**				(s_logopen, CreateFileA + _open_osfhandle) - open() of the C RTL
+**				does not share delete, and __util$rotatelogfile() could not rename
+**				the open file; keep = 0 truncates with _chsize() (no ftruncate()
+**				there). tests/test_logrotate passes on Windows 11.
 **
 */
 
@@ -2360,16 +2366,41 @@ int	l_pl;
 **	STS$K_SUCCESS on success; the file could not be opened otherwise.
 **--
 */
+#ifdef	_WIN32
+/*
+ * s_logopen - the log file for appending. Windows: opened with FILE_SHARE_DELETE, so that
+ * __util$rotatelogfile() can rename it (and anybody remove it) while it is open, as on POSIX -
+ * open() of the C RTL does not share delete, and the rename was refused. GENERIC_WRITE, not
+ * FILE_APPEND_DATA: keep = 0 truncates it; _O_APPEND puts every record at the end.
+ */
+static int	s_logopen	(
+		const char *	a_path
+			)
+{
+HANDLE	l_h;
+int	l_fd;
+
+	if ( INVALID_HANDLE_VALUE == (l_h = CreateFileA(a_path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)) )
+		{
+		errno = (GetLastError() == ERROR_PATH_NOT_FOUND) ? ENOENT : EACCES;
+		return	-1;
+		}
+
+	if ( 0 > (l_fd = _open_osfhandle((intptr_t) l_h, _O_APPEND)) )
+		CloseHandle(l_h);
+
+	return	l_fd;
+}
+#else
+#define	s_logopen(path)	open((path), O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+#endif
+
 int	__util$deflog	(
 		const char *	logfile,
 		const char *	sloghost
 				)
 {
-#ifdef	_WIN32
-int	mode = _S_IREAD | _S_IWRITE;
-#else
-const mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-#endif
 
 int	fd = -1;
 
@@ -2387,7 +2418,7 @@ int	fd = -1;
 	if ( !*logfile)
 		return	STS$K_SUCCESS;
 
-	if ( 0 > (fd = open(logfile, O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, mode)) )
+	if ( 0 > (fd = s_logopen(logfile)) )
 		return	$LOG(STS$K_ERROR, "Error opening log file '%s', errno = %d.", logfile, errno);
 
 	lseek(fd, 0L, SEEK_END);
@@ -2545,11 +2576,6 @@ int	__util$rotatelogfile	(
 struct stat	l_st;
 char		l_old [sizeof(s_logpath) + 8], l_new [sizeof(s_logpath) + 8];
 int		l_fd, l_sts = STS$K_SUCCESS;
-#ifdef	_WIN32
-int		l_mode = _S_IREAD | _S_IWRITE;
-#else
-const mode_t	l_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-#endif
 
 	if ( a_keep > 99 )
 		return	$LOG(STS$K_ERROR, "Log rotation: keep %u is out of 0...99", a_keep);
@@ -2570,7 +2596,11 @@ const mode_t	l_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 	if ( !a_keep )
 		{
 		/* O_APPEND: the next record goes to the new end, offset 0	*/
+#ifdef	_WIN32
+		if ( 0 > _chsize(g_logoutput, 0) )
+#else
 		if ( 0 > ftruncate(g_logoutput, 0) )
+#endif
 			l_sts = $LOG(STS$K_ERROR, "Log rotation: ftruncate(%d, 0) -> %d", g_logoutput, errno);
 		else	$LOG(STS$K_INFO, "Log file '%s' has been truncated at %llu octets.", s_logpath,
 				(unsigned long long) l_st.st_size);
@@ -2610,7 +2640,7 @@ const mode_t	l_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 	/* The old file is <file>.1 now and still open behind the descriptor:
 	 * the records written until the dup2() below land there, in order.
 	 */
-	if ( 0 > (l_fd = open(s_logpath, O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, l_mode)) )
+	if ( 0 > (l_fd = s_logopen(s_logpath)) )
 		{
 		l_sts = $LOG(STS$K_ERROR, "Log rotation: open('%s') -> %d, logging goes on into '%s'", s_logpath, errno, l_new);
 		$LOGROT_RELEASE();
