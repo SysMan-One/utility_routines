@@ -37,6 +37,11 @@
 #include	<stdio.h>
 #include	<string.h>
 #include	<unistd.h>
+#ifdef	_WIN32
+#include	<io.h>
+#include	<fcntl.h>
+#define	pipe(fd)	_pipe((fd), 65536, _O_BINARY)	/* the CRT's pipe - the capture reads what the log wrote */
+#endif
 
 #include	"utility_routines.h"
 #include	"starlet.h"

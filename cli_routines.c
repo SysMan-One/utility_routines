@@ -1,6 +1,6 @@
 #define	__MODULE__	"CLI_ROUTINES"
-#define	__IDENT__	"X.00-16ECO1"
-#define	__REV__		"0.16.1"
+#define	__IDENT__	"X.00-16ECO2"
+#define	__REV__		"0.16.2"
 
 /*
 **++
@@ -142,6 +142,10 @@
 **				Xaa-bbECOc -> aa.bb.c rule it is now "0.16.1" (this very correction
 **				being the ECO).
 **
+**	22-OCT-2026	RRL	X.00-16ECO2 : builds for Windows with MinGW-w64 from Linux - inet_pton()
+**				from <winsock2.h>/<ws2tcpip.h> instead of <arpa/inet.h>, NAME_MAX
+**				(absent there) defined as 255.
+**
 **--
 */
 
@@ -164,7 +168,15 @@
 #include	<errno.h>
 #include	<time.h>
 #include	<sys/stat.h>
+#ifdef	_WIN32
+#include	<winsock2.h>		/* inet_pton() */
+#include	<ws2tcpip.h>
+#else
 #include	<arpa/inet.h>
+#endif
+#ifndef	NAME_MAX
+#define	NAME_MAX	255		/* Windows has no NAME_MAX; 255 is the NTFS file name limit as well */
+#endif
 
 /*
 * Defines and includes for enable extend trace and logging

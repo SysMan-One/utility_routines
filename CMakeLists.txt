@@ -153,13 +153,20 @@
 #		20-OCT-2026	RRL	VERSION -> 1.6.9. utility_routines V.01-33ECO2: builds with
 #					GCC 14 on Windows (MSYS2) - the address of the WSAMSG of
 #					__util$syslog() cast to LPSOCKADDR.
+#
+#		22-OCT-2026	RRL	VERSION -> 1.6.10. Builds for Windows x64 with MinGW-w64 from
+#					Linux (yaVNA's cmake/mingw-w64-x86_64.cmake): utility_routines
+#					V.01-33ECO3, avproto X.94-11ECO2, cli_routines X.00-16ECO2 (no
+#					<endian.h>/<arpa/inet.h>/O_CLOEXEC/NAME_MAX there, <windows.h>
+#					in lower case); ws2_32 linked on WIN32. The tests run under
+#					Wine, 15 of 17 - log_prefix and logrotate stay Linux-only.
 #---
 
 
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.6.9 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.6.10 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.
@@ -236,6 +243,12 @@ target_include_directories (starlet PUBLIC
 	# target as find_package() consumers.
 	add_library (StarLet::starlet ALIAS starlet)
 
+if (WIN32)
+	# Winsock (__util$syslog(), the CLI's address values); WSASendMsg() needs Vista or later
+	target_link_libraries (starlet PUBLIC ws2_32)
+	target_compile_definitions (starlet PRIVATE _WIN32_WINNT=0x0600)
+endif()
+
 
 if (__MAIN_FOR_DEBUG__)
 	add_executable ( starlet.exe ${SRC_LIST})
@@ -252,7 +265,14 @@ option (BUILD_TESTING "Build the regression tests" ON)
 if (BUILD_TESTING)
 	enable_testing()
 
-	foreach (t status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64 crc32 logrotate)
+	set (STARLET_TESTS status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr pattern_match log_fao base64 crc32)
+	# Linux-only for now: log_prefix reads the thread id through syscall(SYS_gettid), logrotate renames the
+	# log file while it is open (Windows refuses that without FILE_SHARE_DELETE) and uses mkdtemp()
+	if (NOT WIN32)
+		list (APPEND STARLET_TESTS log_prefix logrotate)
+	endif()
+
+	foreach (t ${STARLET_TESTS})
 		add_executable (test_${t} tests/test_${t}.c)
 		target_link_libraries (test_${t} starlet)
 		add_test (NAME ${t} COMMAND test_${t})

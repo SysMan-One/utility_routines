@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-33ECO2"
-#define	__REV__		"1.33.2"
+#define	__IDENT__	"V.01-33ECO3"
+#define	__REV__		"1.33.3"
 
 
 /*
@@ -339,6 +339,12 @@
 **				WSAMSG cast to LPSOCKADDR - GCC 14 (MSYS2) takes the
 **				incompatible pointer for an error.
 **
+**	22-OCT-2026	RRL	V.01-33ECO3 : MinGW-w64 cross build from Linux (yaVNA for Windows x64):
+**				O_CLOEXEC is O_NOINHERIT there; utility_routines.h includes
+**				<windows.h> in lower case, and its Windows time routine is named
+**				s___time() as __util$log() calls it (was ____time(), never linked)
+**				and no longer divides tv_nsec by 1024; Winsock (ws2_32) is linked.
+**
 */
 
 
@@ -366,6 +372,9 @@
 #include	<sys/types.h>
 #include	<sys/stat.h>
 #include	<fcntl.h>
+#if	defined(_WIN32) && !defined(O_CLOEXEC)
+#define	O_CLOEXEC	O_NOINHERIT	/* the log file is not handed to child processes - the Windows spelling */
+#endif
 
 
 #ifdef  ANDROID

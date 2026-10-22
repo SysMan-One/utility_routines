@@ -60,12 +60,16 @@
 **	 4-OCT-2026	RRL	Added __util$rotatelogfile() - rotation of the log file opened by
 **				__util$deflog() to <file>.1 ... <file>.<keep> past a size limit.
 **
+**	22-OCT-2026	RRL	Windows (MinGW-w64 cross build): <windows.h> in lower case; the time
+**				routine is s___time() as on POSIX (clock_gettime() under MinGW-w64,
+**				timespec_get() otherwise), tv_nsec no longer divided by 1024.
+**
 */
 
 #if _WIN32
 #define _CRT_SECURE_NO_WARNINGS	1
 
-#include	<Windows.h>
+#include	<windows.h>		/* lower case: MinGW-w64 cross builds live on a case-sensitive file system */
 #include	<sys/timeb.h>
 
 #endif
@@ -227,13 +231,16 @@ struct	timespec {
 	long	tv_nsec;
 };
 */
-inline static	int	____time(struct timespec *tv)
+inline static	int	s___time(struct timespec *tv)		/* the same name as the POSIX one below - __util$log() calls s___time() */
 {
 
 #if    1
 
+#if defined(__MINGW32__)
+	clock_gettime(CLOCK_REALTIME, tv);	/* MinGW-w64 (winpthreads) has it, its <time.h> has no TIME_UTC */
+#else
 	timespec_get(tv, TIME_UTC);
-	tv->tv_nsec /=1024;
+#endif
 	//tv->tv_nsec *=1024;
 #else
 struct _timeb timebuffer;

@@ -69,11 +69,26 @@
 **				magic width, reading past a signature string shorter than the field;
 **				it now compares a local zero-padded copy, mirroring __tlv$hset().
 **
+**	22-OCT-2026	RRL	Windows has no <endian.h>: be16/be32/be64toh() and htobe16/32/64()
+**				through _byteswap_ushort/_ulong/_uint64() (MSVC and MinGW-w64).
+**
 **--
 */
 
 #include	<string.h>
+#ifdef	_WIN32
+#include	<stdlib.h>		/* _byteswap_ushort/_ulong/_uint64() - MSVC and MinGW-w64 alike; Windows is little-endian only */
+#ifndef	be32toh
+#define	be32toh(x)	_byteswap_ulong(x)
+#endif
+#define	htobe32(x)	_byteswap_ulong(x)
+#define	be16toh(x)	_byteswap_ushort(x)
+#define	be64toh(x)	_byteswap_uint64(x)
+#define	htobe64(x)	_byteswap_uint64(x)
+#define	htobe16(x)	_byteswap_ushort(x)
+#else
 #include	<endian.h>
+#endif
 
 
 #ifdef __cplusplus

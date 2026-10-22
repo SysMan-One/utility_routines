@@ -1,6 +1,6 @@
 #define	__MODULE__	"AVPROTO"
-#define	__IDENT__	"X.94-11ECO1"
-#define	__REV__		"94.11.1"
+#define	__IDENT__	"X.94-11ECO2"
+#define	__REV__		"94.11.2"
 
 
 /*
@@ -56,6 +56,9 @@
 **
 **  MODIFICATION HISTORY:
 **
+**	22-OCT-2026	RRL	X.94-11ECO2 : <endian.h> comes through avproto.h only - Windows has none,
+**		avproto.h gives the _byteswap_*() stand-ins there (MinGW-w64 cross build from Linux (yaVNA for Windows x64)).
+**
 **	14-AUG-2026	RRL	X.94-11ECO1 : the mandatory __REV__ was absent from the module
 **		header; per the Xaa-bbECOc -> aa.bb.c rule it is "94.11.1" (this very
 **		addition being the ECO).
@@ -106,10 +109,9 @@
 #include	<limits.h>
 #include	<stdarg.h>
 #include	<string.h>
-#include	<endian.h>
 
 #include	"utility_routines.h"
-#include	"avproto.h"	/* Constants and data structure definitions */
+#include	"avproto.h"	/* Constants and data structure definitions; <endian.h> or its Windows stand-ins */
 
 /*
 **++
