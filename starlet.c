@@ -5,87 +5,12 @@
 **
 **  MODULE:	starlet.c
 **
-**  ABSTRACT:	Portable (ISO C, freestanding-friendly) implementations
-**		of OpenVMS system services.  The module is intended to
-**		accumulate further VMS analogues over time; currently
-**		implemented:
-**
-**		  UTIL$FAO / UTIL$FAOL - SYS$FAO / SYS$FAOL,
-**			Formatted ASCII Output
-**		  UTIL$BINTIM          - SYS$BINTIM,
-**			ASCII time string to binary time
-**		  UTIL$GETTIM          - SYS$GETTIM,
-**			current binary time
-**		  UTIL$ASCTIM          - SYS$ASCTIM,
-**			binary time to ASCII string
-**		  UTIL$ADD_TIMES       - LIB$ADD_TIMES,
-**			sum of two binary times
-**		  UTIL$SUB_TIMES       - LIB$SUB_TIMES,
-**			difference of two binary times
-**
-**		Supported FAO directives:
-**
-**		Strings:
-**		  !AS  - string by descriptor (fao_desc_t *)
-**		  !AZ  - zero-terminated string (char *)
-**		  !AC  - counted string, first byte is the length
-**		  !AD  - two parameters: length, address
-**		  !AF  - as !AD, non-printables are replaced with '.'
-**
-**		Numeric (B - byte, W - word, L - longword, Q - quadword;
-**		the quadword parameter is passed BY VALUE):
-**		  !UB !UW !UL !UQ - unsigned decimal
-**		  !SB !SW !SL !SQ - signed   decimal
-**		  !XB !XW !XL !XQ - hexadecimal, zero-filled to 2/4/8/16
-**		  !OB !OW !OL !OQ - octal,       zero-filled to 3/6/11/22
-**		  !ZB !ZW !ZL !ZQ - unsigned decimal, zero-filled
-**
-**		Control:
-**		  !/  - CR+LF		!_  - horizontal tab
-**		  !^  - form feed	!!  - literal '!'
-**		  !%S - 's' if the last converted number != 1
-**		  !%T - time,  hh:mm:ss.cc  (UTC + FAO$K_TZOFFSET)
-**		  !%D - date,  dd-MMM-yyyy hh:mm:ss.cc
-**		  !%M - MAC / hardware address, aa:bb:cc:dd:ee:ff (ptr to 6 octets)
-**		  !%I - IPv4 address, d.d.d.d               (ptr to 4 octets)
-**		  !%6 - IPv6 address, RFC 5952 canonical; an IPv4-mapped one
-**		        in the mixed ::ffff:a.b.c.d notation (ptr to 16 octets)
-**		  !%U - UUID, xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (ptr to 16 octets)
-**			(parameter: 0 - current time, else time_t *)
-**
-**		Width / repetition (n - decimal number or '#' to take
-**		the value from the parameter list):
-**		  !nXL ...  - explicit output field width
-**		  !n*c      - repeat character 'c' n times
-**		  !n(...)   - repeat the directive group n times
-**		  !n<...!>  - fixed-width field, blank-filled/truncated
-**		  !n-       - reuse last n parameters
-**		  !n+       - skip next n parameters
-**
-**		Semantics of overflow of an explicit width field follows
-**		OpenVMS: decimal fields are filled with '*', hex/octal
-**		fields are truncated on the left, strings are truncated
-**		on the right.
-**
-**  DESIGN:	CRTL usage is reduced to the bare minimum:
-**		  - no <stdio.h>, <string.h>, <ctype.h>;
-**		  - character classification, copying, string length and
-**		    all numeric/date conversions are private inlines;
-**		  - date/time breakdown is computed by the module itself
-**		    (proleptic Gregorian, days-from-civil inverse), the
-**		    only external call is time() and it can be overridden
-**		    with the FAO$GETTIME macro for freestanding builds;
-**		  - the $LOG fallback is a no-op unless the UTIL$ macro
-**		    is supplied by the includer.
-**
-**		Speed:
-**		  - literal runs between directives are copied in bulk
-**		    with a single bounds check;
-**		  - output goes through raw pointers, no index math;
-**		  - decimal conversion emits two digits per division
-**		    via a 200-byte lookup table;
-**		  - the !n<...!> sub-field shares the parameter state by
-**		    reference, no context copying.
+**  ABSTRACT:	Portable (ISO C, freestanding-friendly) UTIL$FAO/UTIL$FAOL (SYS$FAO/SYS$FAOL), UTIL$BINTIM,
+**		UTIL$GETTIM, UTIL$ASCTIM (SYS$BINTIM/GETTIM/ASCTIM), UTIL$ADD_TIMES and UTIL$SUB_TIMES
+**		(LIB$ADD_TIMES/LIB$SUB_TIMES).  No CRTL beyond time(), which FAO$GETTIME may replace.  Binary
+**		time is fao_time_t, seconds of the UNIX epoch: a negative value is a delta time, zero means
+**		"now".  $LOG is a no-op here: the formatter must not log through itself, errors go to the caller
+**		as the returned status.  Directives and parameters: see starlet.h and the doc/ manuals.
 **
 **  AUTHOR:	StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
@@ -93,95 +18,57 @@
 **
 **  MODIFICATION HISTORY:
 **
+**	X.01-16		31-OCT-2026	CLD
+**		1.7.0 defect pass: bounded directive scanner (truncated directive = FAO$K_BADDIR), negative time = delta in !%D/!%T,
+**		zero = "now", year > 9999 printed in full, new FAO$K_FLDOVF/FAO$K_NOPRM, first error wins, FAO$K_* real condition values.
+**
 **	X.01-15		13-AUG-2026	RRL
-**		An IPv4-mapped address under !%6 is shown in the RFC 5952 par.5
-**		mixed notation - ::ffff:192.168.1.10 - byte-identical to
-**		inet_ntop(AF_INET6); the parity is pinned by tests/test_fao_addr.c,
-**		which renders the vectors through both and compares. The engine
-**		stays freestanding - no <arpa/inet.h> is pulled in. En passant the
-**		stale __REV__ (1.06) is brought back in step with __IDENT__.
-
+**		!%6 shows an IPv4-mapped address as ::ffff:a.b.c.d (RFC 5952 par.5, tests/test_fao_addr.c); __REV__ brought in step with __IDENT__.
+**
 **	X.01-15ECO1	14-AUG-2026	RRL
-**		The address-directive helpers (s_fao$put_hwaddr/ipv4/ipv6/uuid)
-**		brought to the house routine-body template; the one-line blocks
-**		unfolded. Layout only, no functional change.
+**		The address-directive helpers brought to the house routine-body template; layout only.
 **
 **	X.01-14		13-AUG-2026	RRL
-**		The !%6 directive now emits the RFC 5952 canonical form: the
-**		longest run of two or more zero groups is compressed to "::"
-**		(the leftmost on a tie), a lone zero group stays. See
-**		tests/test_fao_addr.c.
+**		!%6 emits the RFC 5952 canonical form: the longest run of two or more zero groups compressed to "::".
 **
 **	X.01-13		07-AUG-2026	RRL
-**		Added the FAO address directives !%M (MAC/hardware address, six
-**		octets, aa:bb:cc:dd:ee:ff), !%I (IPv4, four octets, d.d.d.d),
-**		!%6 (IPv6, sixteen octets) and !%U (UUID, sixteen octets). Each
-**		takes a pointer to the raw octets; a NULL pointer yields "(null)".
-**		See s_fao$put_hwaddr/ipv4/ipv6/uuid() and tests/test_fao_addr.c.
+**		Added the address directives !%M (MAC), !%I (IPv4), !%6 (IPv6) and !%U (UUID); a NULL pointer yields "(null)".
 **
 **	X.01-12		01-AUG-2026	RRL
-**		time-string helpers are now checked by the odd/even condition
-**		convention (!(1 & status)) rather than by comparison to
-**		STS$K_SUCCESS, for consistency across the module.
+**		Time-string helpers are checked by the odd/even convention (!(1 & status)) rather than against STS$K_SUCCESS.
 **
 **	X.01-11		01-AUG-2026	RRL
-**		__util$asctim() passed the address of its time to s_fao$put_time()
-**		while the latter, since X.01-09, takes the time BY VALUE; asctim
-**		therefore formatted a pointer instead of the time.  Pass the value.
+**		__util$asctim() passed the address of its time to s_fao$put_time(), which takes it BY VALUE; pass the value.
 **
 **	X.01-10		01-AUG-2026	RRL
-**		Fixed the severity of two FAO status codes that had an odd
-**		value and therefore read as success under the '1 & status'
-**		convention: FAO$K_BUFOVF 5 -> 0xA and FAO$K_IVTIME 7 -> 0xC.
-**		Internal time routines compare against STS$K_SUCCESS, so they
-**		are unaffected; external callers using '1 & __util$bintim(...)'
-**		now correctly detect an invalid time.
+**		FAO$K_BUFOVF 5 -> 0xA and FAO$K_IVTIME 7 -> 0xC: the odd values read as success under '1 & status'.
 **
 **	X.01-09		30-JUL-2026	RRL
-**		FAO now passes 64-bit parameters BY VALUE: fao_prm_t is
-**		uint64_t, and the !xQ quadword and !%D/!%T time directives
-**		read the value directly instead of dereferencing a pointer.
+**		64-bit parameters BY VALUE: fao_prm_t is uint64_t, !xQ and !%D/!%T read the value, not a pointer.
 **
 **	X.01-08		27-JUL-2026	RRL
-**		FAO routines renamed util$fao/util$faol -> __util$fao/
-**		__util$faol.
+**		FAO routines renamed util$fao/util$faol -> __util$fao/__util$faol.
 **
 **	X.01-07		27-JUL-2026	RRL
-**		Time routines renamed util$ -> __util$ for consistency.
+**		Time routines renamed util$ -> __util$.
 **
 **	X.01-06		27-JUL-2026	CLAUDE
-**		avproto declaration style: routine locals declared at
-**		the first position (no indent), nested block
-**		declarations hoisted to the routine top; lookup tables
-**		s_hexdef/s_octdef/s_mdays moved to module scope.
-**		No functional changes.
+**		avproto declaration style (locals at the top, tables s_hexdef/s_octdef/s_mdays at module scope); no functional change.
 **
 **	X.01-05		27-JUL-2026	CLAUDE
-**		Static routines renamed with the s_ prefix
-**		(fao$$name -> s_fao$name), per the coding standard.
-**		No functional changes.
+**		Static routines renamed with the s_ prefix (fao$$name -> s_fao$name); no functional change.
 **
 **	X.01-04		24-JUL-2026	CLAUDE
-**		UTIL$GETTIM, UTIL$ASCTIM (SYS$GETTIM/SYS$ASCTIM) and
-**		UTIL$ADD_TIMES, UTIL$SUB_TIMES (LIB$ADD_TIMES/
-**		LIB$SUB_TIMES) added; FAO$K_NEGTIM status added.
+**		UTIL$GETTIM, UTIL$ASCTIM, UTIL$ADD_TIMES, UTIL$SUB_TIMES added; FAO$K_NEGTIM status added.
 **
 **	X.01-03		24-JUL-2026	CLAUDE
-**		Module renamed fao.c -> starlet.c (facility STARLET),
-**		to accumulate further portable OpenVMS system service
-**		analogues.  No functional changes.
+**		Module renamed fao.c -> starlet.c (facility STARLET); no functional change.
 **
 **	X.01-02		24-JUL-2026	CLAUDE
-**		Routine prefix changed sys$ -> util$; UTIL$BINTIM added
-**		(portable SYS$BINTIM: absolute/delta ASCII time to
-**		binary); calendar conversions factored out into
-**		S_FAO$DAYS_TO_CIVIL / S_FAO$DAYS_FROM_CIVIL.
+**		Routine prefix sys$ -> util$; UTIL$BINTIM added; calendar conversions factored out (S_FAO$DAYS_TO/FROM_CIVIL).
 **
 **	X.01-01		24-JUL-2026	CLAUDE
-**		Remove CRTL dependencies (stdio/string/ctype/localtime),
-**		private date conversion, bulk literal copy, two-digit
-**		decimal conversion, pointer-based output, shared
-**		parameter state for sub-fields.
+**		CRTL dependencies removed (stdio/string/ctype/localtime); private date conversion, bulk literal copy, two-digit decimal conversion.
 **
 **	X.01-00		24-JUL-2026	CLAUDE
 **		Initial version.
@@ -190,8 +77,8 @@
 */
 
 #define	__MODULE__	"STARLET"
-#define	__IDENT__	"X.01-15ECO1"
-#define	__REV__		"1.15.1"
+#define	__IDENT__	"X.01-16"
+#define	__REV__		"1.16.0"
 
 #include	<stdarg.h>
 #include	<stdint.h>
@@ -217,21 +104,24 @@
 #endif
 
 /*
-**  Fallback of the $LOG macro, normally supplied by the UTIL$ module.
-**  Deliberately a no-op to keep the module free of <stdio.h>; the error
-**  is still reported to the caller via the FAO$K_BADDIR status.
+**  starlet.h now brings utility_routines.h in (the STS$K_* values), and with
+**  it the real $LOG.  The formatter must stay silent - a log line from inside
+**  the engine that $LOG_FAO itself runs on would be noise at best and a loop
+**  at worst - so $LOG is a no-op here; the error reaches the caller through
+**  the returned status (FAO$K_BADDIR, FAO$K_NOPRM, ...).
 */
-#ifndef	$LOG
-#define	$LOG(sts, fmt, ...)	((void) 0)
+#ifdef	$LOG
+#undef	$LOG
 #endif
+#define	$LOG(sts, fmt, ...)	((void) 0)
 
 /*
 **  Module-private constants and inline primitives (CRTL replacements)
 */
 #define	FAO$K_WIDTHAUTO	(-1)	/* No explicit width given		*/
 #define	FAO$K_NUMBUF	32	/* Scratch buffer for numeric conversion*/
-#define	FAO$K_FLDBUF	512	/* Scratch buffer for !n< > sub-fields	*/
 
+#define	$FAO_MAXWIDTH	65535		/* Largest field width / repeat count (the buffer is <= 64K)	*/
 #define	$FAO_ISDIGIT(c)	( ((unsigned char)((c) - '0')) < 10u )
 #define	$FAO_ISPRINT(c)	( ((unsigned char)((c) - 0x20)) < 0x5Fu )
 
@@ -259,22 +149,7 @@ static	const char	s_months [12][4] =
 	"JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
 	};
 
-/*
-**++
-**  S_FAO$COPY - private byte copy (memcpy replacement, non-overlapping).
-**
-**  INPUT:
-**	a_dst	- destination address
-**	a_src	- source address
-**	a_len	- byte count
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	NONE
-**--
-*/
+/* S_FAO$COPY - private memcpy (non-overlapping) */
 static	inline	void	s_fao$copy (char * restrict a_dst,
 				const char * restrict a_src, size_t a_len)
 {
@@ -282,20 +157,7 @@ static	inline	void	s_fao$copy (char * restrict a_dst,
 		*a_dst++ = *a_src++;
 }
 
-/*
-**++
-**  S_FAO$STRLEN - private string length (strlen replacement).
-**
-**  INPUT:
-**	a_str	- address of the zero-terminated string
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	Length in bytes, terminator excluded
-**--
-*/
+/* S_FAO$STRLEN - private strlen */
 static	inline	size_t	s_fao$strlen (const char *a_str)
 {
 const char *l_ptr = a_str;
@@ -320,6 +182,7 @@ typedef	struct	__fao_prmstate
 	int		prmfetched;	/* $FAO: elements in the cache	*/
 	int		prmidx;		/* Index of the next parameter	*/
 
+	int		noprm;		/* A parameter was wanted past the end	*/
 	int64_t		lastnum;	/* Last number, for !%S		*/
 	fao_prm_t	prmcache [FAO$K_MAXPRM];
 } fao_prmstate_t;
@@ -338,23 +201,25 @@ typedef	struct	__fao_ctx
 	int		sts;		/* Sticky completion status	*/
 } fao_ctx_t;
 
+/* S_FAO$SET_STS - record a completion status; the first error wins */
+static	inline	void	s_fao$set_sts	(fao_ctx_t *a_ctx, int a_sts)
+{
+	if ( a_ctx->sts == STS$K_SUCCESS )
+		a_ctx->sts = a_sts;
+}
+
 /*
 **++
-**  S_FAO$GET_PRM - fetch the next parameter from the list.
+**  S_FAO$GET_PRM - fetch the next parameter.
 **
-**	For $FAOL the parameter is taken from the explicit array; out of
-**	range access yields 0.  For $FAO the parameters are consumed from
-**	the va_list on demand and cached, so that !n- (parameter reuse)
-**	can be honoured.
+**	$FAOL: from the explicit array, past the end yields 0 and sets the NOPRM flag (FAO$K_NOPRM).
+**	$FAO: consumed from the va_list on demand and cached, so that !n- can reuse it.
 **
 **  INPUT:
 **	a_prm	- address of the shared parameter state
 **
-**  OUTPUT:
-**	NONE
-**
 **  RETURN:
-**	Value of the parameter (machine word)
+**	Value of the parameter
 **--
 */
 static	fao_prm_t	s_fao$get_prm	(fao_prmstate_t *a_prm)
@@ -365,6 +230,7 @@ fao_prm_t l_val = 0;
 		{
 		if ( a_prm->prmidx < a_prm->prmlstcnt )
 			l_val = a_prm->prmlst [a_prm->prmidx];
+		else	a_prm->noprm = 1;
 
 		a_prm->prmidx++;
 		return	l_val;
@@ -380,57 +246,28 @@ fao_prm_t l_val = 0;
 
 	if ( a_prm->prmidx < a_prm->prmfetched )
 		l_val = a_prm->prmcache [a_prm->prmidx];
+	else	a_prm->noprm = 1;	/* More than FAO$K_MAXPRM wanted	*/
 
 	a_prm->prmidx++;
 	return	l_val;
 }
 
-/*
-**++
-**  S_FAO$PUT_CHR - emit a single byte into the output buffer.
-**
-**  INPUT:
-**	a_ctx	- address of the conversion context
-**	a_chr	- byte to be emitted
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	NONE.  On buffer overflow the sticky status of the context is
-**	set to FAO$K_BUFOVF and the byte is discarded.
-**--
-*/
+/* S_FAO$PUT_CHR - emit one byte; a full buffer sets FAO$K_BUFOVF and drops the byte */
 static	inline	void	s_fao$put_chr	(fao_ctx_t *a_ctx, char a_chr)
 {
 	if ( a_ctx->optr < a_ctx->oend )
 		*a_ctx->optr++ = a_chr;
-	else	a_ctx->sts = FAO$K_BUFOVF;
+	else	s_fao$set_sts (a_ctx, FAO$K_BUFOVF);
 }
 
-/*
-**++
-**  S_FAO$PUT_FILL - emit a run of identical bytes.
-**
-**  INPUT:
-**	a_ctx	- address of the conversion context
-**	a_chr	- fill byte
-**	a_cnt	- run length
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	NONE
-**--
-*/
+/* S_FAO$PUT_FILL - emit a run of identical bytes, truncated to the room left (FAO$K_BUFOVF) */
 static	void	s_fao$put_fill	(fao_ctx_t *a_ctx, char a_chr, size_t a_cnt)
 {
 size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
 
 	if ( a_cnt > l_room )
 		{
-		a_ctx->sts = FAO$K_BUFOVF;
+		s_fao$set_sts (a_ctx, FAO$K_BUFOVF);
 		a_cnt = l_room;
 		}
 
@@ -438,22 +275,7 @@ size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
 		*a_ctx->optr++ = a_chr;
 }
 
-/*
-**++
-**  S_FAO$PUT_RAW - emit a byte string in bulk (single bounds check).
-**
-**  INPUT:
-**	a_ctx	- address of the conversion context
-**	a_str	- address of the bytes
-**	a_len	- byte count
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	NONE
-**--
-*/
+/* S_FAO$PUT_RAW - emit a byte string in bulk, one bounds check */
 static	inline	void	s_fao$put_raw	(fao_ctx_t *a_ctx,
 				const char *a_str, size_t a_len)
 {
@@ -461,7 +283,7 @@ size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
 
 	if ( a_len > l_room )
 		{
-		a_ctx->sts = FAO$K_BUFOVF;
+		s_fao$set_sts (a_ctx, FAO$K_BUFOVF);
 		a_len = l_room;
 		}
 
@@ -469,26 +291,7 @@ size_t	l_room = (size_t) (a_ctx->oend - a_ctx->optr);
 	a_ctx->optr += a_len;
 }
 
-/*
-**++
-**  S_FAO$PUT_STR - emit a byte string honouring the field width.
-**
-**  INPUT:
-**	a_ctx	- address of the conversion context
-**	a_str	- address of the string (may be not zero-terminated)
-**	a_len	- string length in bytes
-**	a_width	- explicit field width or FAO$K_WIDTHAUTO;
-**		  the string is left-justified, blank-filled on the
-**		  right, truncated on the right if it does not fit
-**	a_dots	- non-zero: replace non-printable bytes with '.'
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	NONE
-**--
-*/
+/* S_FAO$PUT_STR - emit a string left-justified in a_width (blank-filled, truncated on the right); a_dots: non-printables as '.' */
 static	void	s_fao$put_str	(fao_ctx_t *a_ctx, const char *a_str,
 				size_t a_len, int a_width, int a_dots)
 {
@@ -508,22 +311,7 @@ size_t	l_len = a_len, l_i;
 		s_fao$put_fill (a_ctx, ' ', (size_t) a_width - l_len);
 }
 
-/*
-**++
-**  S_FAO$CVT_DEC - convert an unsigned value to decimal digits,
-**  filling the scratch buffer backwards, two digits per division.
-**
-**  INPUT:
-**	a_val	- the value
-**	a_end	- address PAST the last byte of the scratch buffer
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	Address of the first (most significant) digit
-**--
-*/
+/* S_FAO$CVT_DEC - decimal digits of a_val written backwards from a_end, two per division; returns the first digit */
 static	inline	char	*s_fao$cvt_dec	(uint64_t a_val, char *a_end)
 {
 char	*l_ptr = a_end;
@@ -547,25 +335,18 @@ char	*l_ptr = a_end;
 
 /*
 **++
-**  S_FAO$PUT_NUM - convert a number and emit it into the output buffer.
+**  S_FAO$PUT_NUM - convert a number and emit it.
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
-**	a_val	- the value; for the signed conversion it is expected
-**		  to be already sign-extended to 64 bits
+**	a_val	- the value; already sign-extended to 64 bits when signed
 **	a_base	- radix: 8, 10, 16
-**	a_signed- non-zero: value is signed (decimal only)
+**	a_signed- non-zero: signed (decimal only)
 **	a_width	- explicit field width or FAO$K_WIDTHAUTO
-**	a_defdig- default digit count with zero fill (hex/octal and !Z
-**		  directives), 0 - natural width, blank fill
-**
-**  OUTPUT:
-**	NONE
+**	a_defdig- default digit count with zero fill (hex/octal, !Z), 0 - natural width, blank fill
 **
 **  RETURN:
-**	NONE.  Overflow of an explicit field: decimal - the field is
-**	filled with '*', hex/octal - the value is truncated on the left
-**	(OpenVMS semantics).
+**	NONE.  Field overflow: decimal is filled with '*', hex/octal is truncated on the left.
 **--
 */
 static	void	s_fao$put_num	(fao_ctx_t *a_ctx, uint64_t a_val,
@@ -641,38 +422,8 @@ int	l_neg = 0;
 	s_fao$put_raw (a_ctx, l_ptr, (size_t) l_len);
 }
 
-/*
-**++
-**  S_FAO$PUT_2D - emit exactly two decimal digits (00..99).
-**
-**  INPUT:
-**	a_ctx	- address of the conversion context
-**	a_val	- value, 0..99
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	NONE
-**--
-*/
-/*
-**++
-**  S_FAO$DAYS_TO_CIVIL - break a UNIX epoch day count into a civil date
-**  (proleptic Gregorian calendar, inverse of days-from-civil).
-**
-**  INPUT:
-**	a_days	- days since 01-JAN-1970 (may be negative)
-**
-**  OUTPUT:
-**	*a_year	- year
-**	*a_mon	- month, 1..12
-**	*a_day	- day of month, 1..31
-**
-**  RETURN:
-**	NONE
-**--
-*/
+/* S_FAO$PUT_2D - emit exactly two decimal digits (00..99) */
+/* S_FAO$DAYS_TO_CIVIL - UNIX epoch day count to a civil date (proleptic Gregorian) */
 static	void	s_fao$days_to_civil (int64_t a_days, int64_t *a_year,
 				unsigned *a_mon, unsigned *a_day)
 {
@@ -691,23 +442,7 @@ unsigned l_mon = l_mp < 10 ? l_mp + 3 : l_mp - 9;
 	*a_day	= l_day;
 }
 
-/*
-**++
-**  S_FAO$DAYS_FROM_CIVIL - convert a civil date to a UNIX epoch day
-**  count (proleptic Gregorian calendar).
-**
-**  INPUT:
-**	a_year	- year
-**	a_mon	- month, 1..12
-**	a_day	- day of month, 1..31
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	Days since 01-JAN-1970 (may be negative)
-**--
-*/
+/* S_FAO$DAYS_FROM_CIVIL - civil date to a UNIX epoch day count (proleptic Gregorian) */
 static	int64_t	s_fao$days_from_civil (int64_t a_year, unsigned a_mon,
 				unsigned a_day)
 {
@@ -730,50 +465,68 @@ static	inline	void	s_fao$put_2d	(fao_ctx_t *a_ctx, unsigned a_val)
 **++
 **  S_FAO$PUT_TIME - emit time (!%T) or date+time (!%D).
 **
-**	The civil date is derived from the UNIX epoch count by the
-**	module itself (proleptic Gregorian calendar, inverse of the
-**	days-from-civil algorithm) - no CRTL localtime/gmtime involved.
-**	The result is UTC shifted by FAO$K_TZOFFSET seconds.
+**	The sign of the value (seconds) is the absolute/delta discriminator:
+**	  > 0	absolute, seconds since 01-JAN-1970 UTC shifted by FAO$K_TZOFFSET, year in full above 9999;
+**	  = 0	"no time given" - the current time (the epoch itself is not printable, 1 second after it is);
+**	  < 0	delta of -value seconds: "dddd hh:mm:ss.cc" by !%D, "hh:mm:ss.cc" by !%T.
+**	An absolute time before the epoch cannot be expressed: a negative value is always a delta.
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
-**	a_prm	- FAO parameter (by value): 0 - current time, else a fao_time_t
-**	a_date	- non-zero: !%D (dd-MMM-yyyy hh:mm:ss.cc),
-**		  zero: !%T (hh:mm:ss.cc)
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	NONE
+**	a_prm	- fao_time_t BY VALUE
+**	a_date	- non-zero: !%D (dd-MMM-yyyy hh:mm:ss.cc), zero: !%T (hh:mm:ss.cc)
 **--
 */
 static	void	s_fao$put_time	(fao_ctx_t *a_ctx, fao_prm_t a_prm, int a_date)
 {
 int64_t	l_now, l_days, l_secs, l_year;
+uint64_t l_mag;
+int	l_delta;
 unsigned l_hh, l_mm, l_ss, l_mon, l_day;
+char	l_buf [FAO$K_NUMBUF];
+char	*l_dig;
 
-	/* Time is passed BY VALUE; 0 selects the current time (as on OpenVMS). */
-	if ( a_prm )
-		l_now = (int64_t) a_prm;
-	else	l_now = (int64_t) FAO$GETTIME ();
+	l_now = (int64_t) a_prm;
+	l_delta = (l_now < 0);
 
-	l_now += FAO$K_TZOFFSET;
-
-	l_days = l_now / 86400;
-	l_secs = l_now % 86400;
-
-	if ( l_secs < 0 )
+	if ( l_delta )				/* Delta time		*/
 		{
-		l_secs += 86400;
-		l_days -= 1;
+		l_mag = (uint64_t) 0 - (uint64_t) l_now;	/* Safe for INT64_MIN	*/
+
+		if ( a_date )
+			{
+			l_dig = s_fao$cvt_dec (l_mag / 86400, l_buf + FAO$K_NUMBUF);
+			s_fao$put_raw (a_ctx, l_dig, (size_t) (l_buf + FAO$K_NUMBUF - l_dig));
+			s_fao$put_chr (a_ctx, ' ');
+			}
+
+		l_secs = (int64_t) (l_mag % 86400);
+		l_days = 0;
+		}
+	else	{
+		if ( l_now == 0 )		/* No time given: now	*/
+			l_now = (int64_t) FAO$GETTIME ();
+
+		if ( l_now > INT64_MAX - FAO$K_TZOFFSET )	/* Keep the shift defined	*/
+			l_now = INT64_MAX - FAO$K_TZOFFSET;
+
+		l_now += FAO$K_TZOFFSET;
+
+		l_days = l_now / 86400;
+		l_secs = l_now % 86400;
+
+		if ( l_secs < 0 )
+			{
+			l_secs += 86400;
+			l_days -= 1;
+			}
 		}
 
 	l_hh = (unsigned) (l_secs / 3600);
 	l_mm = (unsigned) ((l_secs / 60) % 60);
 	l_ss = (unsigned) (l_secs % 60);
 
-	if ( a_date )
+	if ( a_date && (! l_delta) )
 		{
 		s_fao$days_to_civil (l_days, &l_year, &l_mon, &l_day);
 
@@ -785,8 +538,17 @@ unsigned l_hh, l_mm, l_ss, l_mon, l_day;
 		s_fao$put_chr (a_ctx, '-');
 		s_fao$put_raw (a_ctx, s_months [l_mon - 1], 3);
 		s_fao$put_chr (a_ctx, '-');
-		s_fao$put_2d  (a_ctx, (unsigned) (l_year / 100));
-		s_fao$put_2d  (a_ctx, (unsigned) (l_year % 100));
+
+		if ( (l_year >= 0) && (l_year <= 9999) )
+			{
+			s_fao$put_2d  (a_ctx, (unsigned) (l_year / 100));
+			s_fao$put_2d  (a_ctx, (unsigned) (l_year % 100));
+			}
+		else	{			/* Year above 9999: print it in full	*/
+			l_dig = s_fao$cvt_dec ((uint64_t) l_year, l_buf + FAO$K_NUMBUF);
+			s_fao$put_raw (a_ctx, l_dig, (size_t) (l_buf + FAO$K_NUMBUF - l_dig));
+			}
+
 		s_fao$put_chr (a_ctx, ' ');
 		}
 
@@ -798,26 +560,7 @@ unsigned l_hh, l_mm, l_ss, l_mon, l_day;
 	s_fao$put_raw (a_ctx, ".00", 3);
 }
 
-/*
-**++
-**  S_FAO$GET_NUMPRM - fetch a numeric operand of the given size.
-**
-**	B/W/L operands are passed by value in the parameter list and
-**	are masked/sign-extended to the requested size.  A quadword (Q)
-**	operand is passed BY VALUE (fao_prm_t is 64-bit wide).
-**
-**  INPUT:
-**	a_prm	- address of the shared parameter state
-**	a_size	- operand size code: 'B', 'W', 'L', 'Q'
-**	a_signed- non-zero: sign-extend the value
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	64-bit value of the operand
-**--
-*/
+/* S_FAO$GET_NUMPRM - fetch a B/W/L/Q operand (by value), masked or sign-extended to its size */
 static	uint64_t s_fao$get_numprm (fao_prmstate_t *a_prm, char a_size,
 				int a_signed)
 {
@@ -841,24 +584,7 @@ fao_prm_t l_prm = s_fao$get_prm (a_prm);
 	return	0;
 }
 
-/*
-**++
-**  S_FAO$FIND_GROUP_END - find the terminator of a !n(...) or !n<...!>
-**  group, honouring nesting of the same kind.
-**
-**  INPUT:
-**	a_ctl	- address of the first byte AFTER the group opener
-**	a_open	- opening character: '(' or '<'
-**	a_close	- closing character: ')' or '>'
-**
-**  OUTPUT:
-**	NONE
-**
-**  RETURN:
-**	Address of the '!' of the matching "!)"/"!>" terminator, or NULL
-**	if the terminator has not been found.
-**--
-*/
+/* S_FAO$FIND_GROUP_END - the "!)"/"!>" matching a group opener (nesting honoured), NULL if none */
 static	const char *s_fao$find_group_end (const char *a_ctl,
 				char a_open, char a_close)
 {
@@ -873,6 +599,9 @@ const char *l_ptr = a_ctl;
 
 			while ( $FAO_ISDIGIT (*l_dir) || (*l_dir == '#') )
 				l_dir++;
+
+			if ( *l_dir == 0 )		/* Truncated directive: never step past the NUL */
+				return	NULL;
 
 			if ( *l_dir == a_open )
 				l_depth++;
@@ -1065,26 +794,17 @@ int	l_i, l_n = 0;
 
 /*
 **++
-**  S_FAO$PROCESS - the FAO engine: scan the control string fragment and
-**  emit the formatted output into the context buffer.
-**
-**	Literal runs between directives are located first and emitted
-**	in bulk with a single bounds check.
+**  S_FAO$PROCESS - the FAO engine: scan a control string fragment and emit the output.
 **
 **  INPUT:
 **	a_ctx	- address of the conversion context
 **	a_ctl	- address of the control string fragment
-**	a_end	- address past the last byte of the fragment,
-**		  NULL - process up to the terminating zero byte
-**	a_depth	- current group nesting depth (recursion guard)
-**
-**  OUTPUT:
-**	NONE
+**	a_end	- address past the fragment, NULL - up to the terminating zero byte
+**	a_depth	- group nesting depth (recursion guard)
 **
 **  RETURN:
-**	Address past the processed fragment; on a malformed directive
-**	the sticky status of the context is set to FAO$K_BADDIR and
-**	processing continues from the next byte.
+**	Address past the processed fragment; a malformed directive sets FAO$K_BADDIR in the context
+**	and processing goes on from the next byte.
 **--
 */
 static	const char *s_fao$process (fao_ctx_t *a_ctx, const char *a_ctl,
@@ -1098,10 +818,11 @@ fao_ctx_t l_sub;
 uint64_t l_val;
 size_t	l_len, l_sublen;
 int	l_width, l_rpt, l_signed, l_base, l_defdig, l_szidx;
-char	l_dir, l_size;
+char	l_dir, l_size, l_chr;
 char	l_fldbuf [FAO$K_FLDBUF];
 
 #define	$FAO_MORE()	( (a_end == NULL) ? (*l_ptr != 0) : (l_ptr < a_end) )
+#define	$FAO_NEXT()	( $FAO_MORE () ? *l_ptr++ : 0 )		/* Next byte, or 0 at the end - never past it	*/
 
 	while ( $FAO_MORE () )
 		{
@@ -1121,20 +842,27 @@ char	l_fldbuf [FAO$K_FLDBUF];
 		l_width = FAO$K_WIDTHAUTO;
 
 		/* Optional width/count: decimal digits or '#' */
-		if ( *l_ptr == '#' )
+		if ( $FAO_MORE () && (*l_ptr == '#') )
 			{
-			l_width = (int) (uint32_t) s_fao$get_prm (l_prm);
+			l_val = (uint32_t) s_fao$get_prm (l_prm);
+			l_width = (l_val > $FAO_MAXWIDTH) ? $FAO_MAXWIDTH : (int) l_val;
 			l_ptr++;
 			}
-		else if ( $FAO_ISDIGIT (*l_ptr) )
+		else if ( $FAO_MORE () && $FAO_ISDIGIT (*l_ptr) )
 			{
 			l_width = 0;
 
-			do	l_width = l_width * 10 + (*l_ptr++ - '0');
-			while ( $FAO_ISDIGIT (*l_ptr) );
+			do	{
+				if ( l_width < $FAO_MAXWIDTH )		/* Clamp: no int overflow	*/
+					l_width = l_width * 10 + (*l_ptr - '0');
+				l_ptr++;
+				} while ( $FAO_MORE () && $FAO_ISDIGIT (*l_ptr) );
+
+			if ( l_width > $FAO_MAXWIDTH )
+				l_width = $FAO_MAXWIDTH;
 			}
 
-		l_dir = *l_ptr++;
+		l_dir = $FAO_NEXT ();
 
 		switch ( l_dir )
 			{
@@ -1172,7 +900,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 				break;
 
 			case '%':		/* !%S !%T !%D		*/
-				switch ( *l_ptr++ )
+				switch ( $FAO_NEXT () )
 					{
 					case 'S':
 						if ( l_prm->lastnum != 1 )
@@ -1210,7 +938,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 						break;
 
 					default:
-						a_ctx->sts = FAO$K_BADDIR;
+						s_fao$set_sts (a_ctx, FAO$K_BADDIR);
 						$LOG (STS$K_ERROR,
 							"Bad !%% directive at offset %ld",
 							(long) (l_ptr - a_ctl));
@@ -1219,7 +947,16 @@ char	l_fldbuf [FAO$K_FLDBUF];
 				break;
 
 			case '*':		/* !n*c - repeat char	*/
-				s_fao$put_fill (a_ctx, *l_ptr++,
+				l_chr = $FAO_NEXT ();
+
+				if ( l_chr == 0 )	/* "!n*" with no character	*/
+					{
+					s_fao$set_sts (a_ctx, FAO$K_BADDIR);
+					$LOG (STS$K_ERROR, "Truncated !n* directive");
+					break;
+					}
+
+				s_fao$put_fill (a_ctx, l_chr,
 					(l_width == FAO$K_WIDTHAUTO)
 						? 1 : (size_t) l_width);
 				break;
@@ -1231,7 +968,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 				if ( (l_grpend == NULL)
 					|| (a_depth >= FAO$K_MAXDEPTH) )
 					{
-					a_ctx->sts = FAO$K_BADDIR;
+					s_fao$set_sts (a_ctx, FAO$K_BADDIR);
 					$LOG (STS$K_ERROR,
 						"Unterminated or too deep !n( ) group");
 					break;
@@ -1255,7 +992,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 				if ( (l_grpend == NULL)
 					|| (a_depth >= FAO$K_MAXDEPTH) )
 					{
-					a_ctx->sts = FAO$K_BADDIR;
+					s_fao$set_sts (a_ctx, FAO$K_BADDIR);
 					$LOG (STS$K_ERROR,
 						"Unterminated or too deep !n< > group");
 					break;
@@ -1275,8 +1012,9 @@ char	l_fldbuf [FAO$K_FLDBUF];
 				(void) s_fao$process (&l_sub, l_ptr,
 						l_grpend, a_depth + 1);
 
-				if ( l_sub.sts == FAO$K_BADDIR )
-					a_ctx->sts = FAO$K_BADDIR;
+				if ( l_sub.sts != STS$K_SUCCESS )	/* Field overflow is a field cut, not a buffer cut	*/
+					s_fao$set_sts (a_ctx, (l_sub.sts == FAO$K_BUFOVF)
+						? FAO$K_FLDOVF : l_sub.sts);
 
 				l_sublen = (size_t)(l_sub.optr - l_fldbuf);
 
@@ -1291,7 +1029,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 
 			case 'A':		/* String directives	*/
 				{
-				switch ( *l_ptr++ )
+				switch ( $FAO_NEXT () )
 					{
 					case 'S':	/* By descriptor */
 						l_arg = s_fao$get_prm (l_prm);
@@ -1339,7 +1077,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 						break;
 
 					default:
-						a_ctx->sts = FAO$K_BADDIR;
+						s_fao$set_sts (a_ctx, FAO$K_BADDIR);
 						$LOG (STS$K_ERROR,
 							"Bad !A directive at offset %ld",
 							(long) (l_ptr - a_ctl));
@@ -1354,7 +1092,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 			case 'X':		/* Hexadecimal		*/
 			case 'O':		/* Octal		*/
 				{
-				l_size	= *l_ptr++;
+				l_size	= $FAO_NEXT ();
 				l_signed = (l_dir == 'S');
 				l_base	= 10;
 				l_defdig = 0;
@@ -1366,7 +1104,7 @@ char	l_fldbuf [FAO$K_FLDBUF];
 					case 'L':	l_szidx = 2;	break;
 					case 'Q':	l_szidx = 3;	break;
 					default:
-						a_ctx->sts = FAO$K_BADDIR;
+						s_fao$set_sts (a_ctx, FAO$K_BADDIR);
 						$LOG (STS$K_ERROR,
 							"Bad size in !%c directive",
 							l_dir);
@@ -1394,8 +1132,13 @@ char	l_fldbuf [FAO$K_FLDBUF];
 				break;
 				}
 
+			case 0:			/* "!", "!5": the string ended inside a directive */
+				s_fao$set_sts (a_ctx, FAO$K_BADDIR);
+				$LOG (STS$K_ERROR, "Truncated FAO directive");
+				break;
+
 			default:
-				a_ctx->sts = FAO$K_BADDIR;
+				s_fao$set_sts (a_ctx, FAO$K_BADDIR);
 				$LOG (STS$K_ERROR,
 					"Unknown FAO directive '!%c'", l_dir);
 				break;
@@ -1409,32 +1152,29 @@ char	l_fldbuf [FAO$K_FLDBUF];
 
 /*
 **++
-**  UTIL$FAO - portable variant of the OpenVMS Formatted ASCII Output
-**  system service, varargs form.
+**  UTIL$FAO - portable SYS$FAO, varargs form.
 **
-**	NOTE: every variadic parameter MUST be explicitly cast by the
-**	caller to fao_prm_t (a 64-bit value); a quadword
-**	(!..Q) parameter is the ADDRESS of a 64-bit integer.
+**	NOTE: every variadic parameter MUST be cast by the caller to fao_prm_t (64 bits); a quadword and a
+**	time are passed BY VALUE, only the string and address directives take a pointer.  This form has no
+**	parameter count and cannot detect too few arguments: use __util$faol() (or $LOG_FAO/$PUTMSG_FAO,
+**	which count) when the control string is not a literal of the caller.
 **
 **  INPUT:
-**	a_ctlstr - address of the zero-terminated control string with
-**		   FAO directives (see the module abstract)
-**	a_outlen - optional address of a word to receive the length of
-**		   the resulting string, may be NULL
-**	a_outbuf - address of the output buffer descriptor (fao_desc_t):
-**		   dsc$w_length is the buffer capacity on input
+**	a_ctlstr - zero-terminated control string
+**	a_outlen - optional address of a word to receive the result length, may be NULL
+**	a_outbuf - output buffer descriptor (fao_desc_t), dsc$w_length is the capacity on input
 **	...	 - conversion parameters, each of type fao_prm_t
 **
 **  OUTPUT:
-**	Buffer described by a_outbuf - the resulting string (not
-**	zero-terminated, as on OpenVMS); *a_outlen - its length
+**	Buffer of a_outbuf - the result (not zero-terminated); *a_outlen - its length
 **
 **  RETURN:
-**	Condition value:
-**	  STS$K_SUCCESS - conversion complete
-**	  FAO$K_BUFOVF  - output truncated to the buffer capacity
-**	  FAO$K_BADDIR  - malformed directive has been encountered
-**	  STS$K_ERROR   - bad routine arguments
+**	STS$K_SUCCESS, or the first error found (the text is produced anyway):
+**	  FAO$K_BUFOVF - output truncated to the capacity
+**	  FAO$K_BADDIR - unknown, malformed or truncated directive
+**	  FAO$K_FLDOVF - a !n<...!> field exceeded FAO$K_FLDBUF bytes and was cut
+**	  FAO$K_NOPRM  - more than FAO$K_MAXPRM parameters wanted
+**	  STS$K_ERROR  - bad routine arguments
 **--
 */
 int	__util$fao		(const char *a_ctlstr, unsigned short *a_outlen,
@@ -1455,6 +1195,7 @@ va_list	l_ap;
 	l_prm.ap	= &l_ap;
 	l_prm.prmfetched = 0;
 	l_prm.prmidx	= 0;
+	l_prm.noprm	= 0;
 	l_prm.lastnum	= 0;
 
 	l_ctx.obase	= a_outbuf->dsc$a_pointer;
@@ -1467,6 +1208,9 @@ va_list	l_ap;
 
 	va_end (l_ap);
 
+	if ( l_prm.noprm )
+		s_fao$set_sts (&l_ctx, FAO$K_NOPRM);
+
 	if ( a_outlen != NULL )
 		*a_outlen = (unsigned short) (l_ctx.optr - l_ctx.obase);
 
@@ -1475,24 +1219,20 @@ va_list	l_ap;
 
 /*
 **++
-**  UTIL$FAOL - portable variant of the OpenVMS Formatted ASCII Output
-**  system service, list form.
+**  UTIL$FAOL - portable SYS$FAOL, list form.
 **
 **  INPUT:
-**	a_ctlstr - address of the zero-terminated control string
-**	a_outlen - optional address of a word to receive the length of
-**		   the resulting string, may be NULL
-**	a_outbuf - address of the output buffer descriptor (fao_desc_t)
-**	a_prmlst - address of the parameter array (fao_prm_t elements)
-**	a_prmcnt - number of elements in the array; unlike OpenVMS the
-**		   count is explicit, out of range access yields 0
+**	a_ctlstr - zero-terminated control string
+**	a_outlen - optional address of a word to receive the result length, may be NULL
+**	a_outbuf - output buffer descriptor (fao_desc_t)
+**	a_prmlst - parameter array (fao_prm_t elements)
+**	a_prmcnt - element count (explicit, unlike OpenVMS); a directive past it gets 0
 **
 **  OUTPUT:
-**	Buffer described by a_outbuf - the resulting string;
-**	*a_outlen - its length
+**	Buffer of a_outbuf - the result; *a_outlen - its length
 **
 **  RETURN:
-**	See UTIL$FAO
+**	As UTIL$FAO; FAO$K_NOPRM when the control string wanted more than a_prmcnt parameters.
 **--
 */
 int	__util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
@@ -1512,6 +1252,7 @@ static	const fao_prm_t s_empty [1] = { 0 };
 	l_prm.ap	= NULL;
 	l_prm.prmfetched = 0;
 	l_prm.prmidx	= 0;
+	l_prm.noprm	= 0;
 	l_prm.lastnum	= 0;
 
 	l_ctx.obase	= a_outbuf->dsc$a_pointer;
@@ -1522,26 +1263,16 @@ static	const fao_prm_t s_empty [1] = { 0 };
 
 	(void) s_fao$process (&l_ctx, a_ctlstr, NULL, 0);
 
+	if ( l_prm.noprm )			/* The control string wanted more than a_prmcnt	*/
+		s_fao$set_sts (&l_ctx, FAO$K_NOPRM);
+
 	if ( a_outlen != NULL )
 		*a_outlen = (unsigned short) (l_ctx.optr - l_ctx.obase);
 
 	return	l_ctx.sts;
 }
 
-/*
-**++
-**  S_FAO$TIM_NUM - parse an unsigned decimal number of the time string.
-**
-**  INPUT:
-**	a_ptr	- address of the scan pointer, advanced past the digits
-**
-**  OUTPUT:
-**	*a_val	- parsed value; unchanged when no digits are present
-**
-**  RETURN:
-**	Number of digits consumed (0 - field omitted)
-**--
-*/
+/* S_FAO$TIM_NUM - parse an unsigned decimal of the time string; returns the digit count (0 = field omitted) */
 static	int	s_fao$tim_num	(const char **a_ptr, unsigned *a_val)
 {
 const char *l_ptr = *a_ptr;
@@ -1561,21 +1292,7 @@ int	l_cnt = 0;
 	return	l_cnt;
 }
 
-/*
-**++
-**  S_FAO$TIM_HMS - parse the time-of-day part "hh:mm[:ss[.cc]]" with
-**  optionally omitted fields ("::10", "12:", ...), OpenVMS style.
-**
-**  INPUT:
-**	a_ptr	- address of the scan pointer, advanced past the field
-**
-**  OUTPUT:
-**	*a_secs	- seconds since midnight
-**
-**  RETURN:
-**	STS$K_SUCCESS or FAO$K_IVTIME on a range violation
-**--
-*/
+/* S_FAO$TIM_HMS - parse "hh:mm[:ss[.cc]]", fields may be omitted ("::10"); FAO$K_IVTIME on a range violation */
 static	int	s_fao$tim_hms	(const char **a_ptr, unsigned *a_secs)
 {
 const char *l_ptr = *a_ptr;
@@ -1609,20 +1326,7 @@ unsigned l_hh = 0, l_mm = 0, l_ss = 0, l_cc = 0;
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  S_FAO$TIM_MONTH - match a case-insensitive three-letter month name.
-**
-**  INPUT:
-**	a_ptr	- address of the scan pointer, advanced past the name
-**
-**  OUTPUT:
-**	*a_mon	- month number, 1..12
-**
-**  RETURN:
-**	STS$K_SUCCESS or FAO$K_IVTIME when the name is not recognized
-**--
-*/
+/* S_FAO$TIM_MONTH - match a case-insensitive three-letter month name; FAO$K_IVTIME if unknown */
 static	int	s_fao$tim_month	(const char **a_ptr, unsigned *a_mon)
 {
 const char *l_ptr = *a_ptr;
@@ -1657,45 +1361,26 @@ unsigned l_i;
 
 /*
 **++
-**  UTIL$BINTIM - portable variant of the OpenVMS SYS$BINTIM system
-**  service: convert an ASCII time string to binary time.
+**  UTIL$BINTIM - portable SYS$BINTIM: ASCII time string to binary time.
 **
-**	Unlike OpenVMS (quadword of 100ns ticks since 17-NOV-1858) the
-**	binary time here is fao_time_t: seconds of the UNIX epoch, i.e.
-**	exactly what the !%T/!%D directives of UTIL$FAO consume, so the
-**	pair is round-trip consistent.  Hundredths of a second are
-**	parsed and validated but dropped.
-**
-**	Accepted grammar (leading/trailing blanks and tabs ignored):
-**
-**	  Absolute: "dd-MMM-yyyy[ hh:mm[:ss[.cc]]]"
-**		Result: seconds of the epoch; the string is interpreted
-**		in the FAO$K_TZOFFSET timezone (mirror of !%D output).
-**		Omitted date fields ("-MMM-", "dd-MMM-") default to the
-**		current date values, omitted time defaults to 00:00:00.
-**
-**	  Absolute, time only: "hh:mm[:ss[.cc]]"
-**		The current date is assumed.
-**
-**	  Delta:    "dddd hh:mm[:ss[.cc]]"  or  "dddd-hh:mm[:ss[.cc]]"
-**		Result is NEGATIVE (OpenVMS convention for delta times):
-**		-(dddd*86400 + hh*3600 + mm*60 + ss).
-**
-**	Time-of-day fields can be individually omitted ("::10" is ten
-**	seconds), matching the OpenVMS rules.
+**	The result is fao_time_t (seconds of the UNIX epoch), the very value !%T/!%D consume.  Hundredths are
+**	parsed and validated but dropped.  Blanks around the string are ignored.  Accepted forms:
+**	  "dd-MMM-yyyy[ hh:mm[:ss[.cc]]]"	absolute, in the FAO$K_TZOFFSET timezone; omitted date fields
+**						default to the current date, omitted time to 00:00:00.  A date before
+**						01-JAN-1970 gives FAO$K_IVTIME; the epoch itself gives 0 ("now" to the display routines)
+**	  "hh:mm[:ss[.cc]]"			absolute, the current date
+**	  "dddd hh:mm[:ss[.cc]]" or "dddd-hh:mm..."	delta: a NEGATIVE result
+**	Time-of-day fields may be omitted individually ("::10" is ten seconds).
 **
 **  INPUT:
-**	a_timstr - address of the zero-terminated time string
+**	a_timstr - zero-terminated time string
 **	a_timadr - address of the fao_time_t to receive the result
 **
 **  OUTPUT:
-**	*a_timadr - binary time (see above); unchanged on error
+**	*a_timadr - binary time; unchanged on error
 **
 **  RETURN:
-**	Condition value:
-**	  STS$K_SUCCESS - conversion complete
-**	  FAO$K_IVTIME  - syntax error or field out of range
-**	  STS$K_ERROR   - bad routine arguments
+**	STS$K_SUCCESS; FAO$K_IVTIME - syntax error or field out of range; STS$K_ERROR - bad routine arguments
 **--
 */
 int	__util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
@@ -1703,7 +1388,7 @@ int	__util$bintim	(const char *a_timstr, fao_time_t *a_timadr)
 const char *l_ptr = a_timstr;
 unsigned l_num = 0, l_mon, l_secs = 0;
 unsigned l_day, l_cmon, l_cday, l_max;
-int64_t	l_year, l_cyear, l_now;
+int64_t	l_year, l_cyear, l_now, l_abs;
 int	l_numdig, l_sts;
 
 	if ( (a_timstr == NULL) || (a_timadr == NULL) )
@@ -1803,28 +1488,34 @@ int	l_numdig, l_sts;
 	if ( (l_day < 1) || (l_day > l_max) )
 		return	FAO$K_IVTIME;
 
-	*a_timadr = (fao_time_t)
-		( s_fao$days_from_civil (l_year, l_mon, l_day) * 86400
-		+ (int64_t) l_secs - FAO$K_TZOFFSET );
+	l_abs = s_fao$days_from_civil (l_year, l_mon, l_day) * 86400
+		+ (int64_t) l_secs - FAO$K_TZOFFSET;
+
+	/*
+	** A negative binary time is a delta, so an absolute time before the
+	** epoch has no representation; refuse it rather than hand back a
+	** value that every consumer would read as a delta.
+	*/
+	if ( l_abs < 0 )
+		return	FAO$K_IVTIME;
+
+	*a_timadr = (fao_time_t) l_abs;
 
 	return	STS$K_SUCCESS;
 }
 
 /*
 **++
-**  UTIL$GETTIM - portable variant of the OpenVMS SYS$GETTIM system
-**  service: return the current binary time.
+**  UTIL$GETTIM - portable SYS$GETTIM: the current binary time.
 **
 **  INPUT:
 **	a_timadr - address of the fao_time_t to receive the result
 **
 **  OUTPUT:
-**	*a_timadr - current time, seconds of the UNIX epoch (UTC)
+**	*a_timadr - seconds of the UNIX epoch (UTC)
 **
 **  RETURN:
-**	Condition value:
-**	  STS$K_SUCCESS - always, unless a_timadr is NULL
-**	  STS$K_ERROR   - bad routine arguments
+**	STS$K_SUCCESS; STS$K_ERROR - a_timadr is NULL
 **--
 */
 int	__util$gettim	(fao_time_t *a_timadr)
@@ -1839,40 +1530,24 @@ int	__util$gettim	(fao_time_t *a_timadr)
 
 /*
 **++
-**  UTIL$ASCTIM - portable variant of the OpenVMS SYS$ASCTIM system
-**  service: convert binary time to an ASCII string.
+**  UTIL$ASCTIM - portable SYS$ASCTIM: binary time to an ASCII string.
 **
-**	Output formats (exact mirror of the !%D/!%T directives, so
-**	UTIL$BINTIM accepts the result back - round-trip consistent):
-**
-**	  Absolute (value >= 0), a_cvtflg = 0:
-**		"dd-MMM-yyyy hh:mm:ss.00"  (day blank-padded to 2)
-**	  Absolute, a_cvtflg = 1:
-**		"hh:mm:ss.00"
-**	  Delta (value < 0, OpenVMS convention), a_cvtflg = 0:
-**		"dddd hh:mm:ss.00"
-**	  Delta, a_cvtflg = 1:
-**		"hh:mm:ss.00"  (the day count is discarded)
-**
-**	The absolute value is rendered in the FAO$K_TZOFFSET timezone.
+**	The renderer is that of !%D/!%T, and UTIL$BINTIM accepts the result back.  Absolute (> 0, in the
+**	FAO$K_TZOFFSET timezone): "dd-MMM-yyyy hh:mm:ss.00", or "hh:mm:ss.00" with a_cvtflg = 1.  Delta (< 0):
+**	"dddd hh:mm:ss.00", or "hh:mm:ss.00" with a_cvtflg = 1.  Zero is "no time given" and means now, as a
+**	missing time address does; an absolute time before the epoch cannot be expressed.
 **
 **  INPUT:
-**	a_outlen - optional address of a word to receive the length of
-**		   the resulting string, may be NULL
-**	a_outbuf - address of the output buffer descriptor (fao_desc_t)
+**	a_outlen - optional address of a word to receive the result length, may be NULL
+**	a_outbuf - output buffer descriptor (fao_desc_t)
 **	a_timadr - address of the binary time; NULL - the current time
-**		   is used, as on OpenVMS
-**	a_cvtflg - conversion flag: 0 - full, 1 - time-of-day only
+**	a_cvtflg - 0 - full, 1 - time of day only
 **
 **  OUTPUT:
-**	Buffer described by a_outbuf - the resulting string (not
-**	zero-terminated); *a_outlen - its length
+**	Buffer of a_outbuf - the result (not zero-terminated); *a_outlen - its length
 **
 **  RETURN:
-**	Condition value:
-**	  STS$K_SUCCESS - conversion complete
-**	  FAO$K_BUFOVF  - output truncated to the buffer capacity
-**	  STS$K_ERROR   - bad routine arguments
+**	STS$K_SUCCESS; FAO$K_BUFOVF - truncated to the capacity; STS$K_ERROR - bad routine arguments
 **--
 */
 int	__util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
@@ -1881,9 +1556,6 @@ int	__util$asctim	(unsigned short *a_outlen, fao_desc_t *a_outbuf,
 fao_ctx_t l_ctx;
 fao_prmstate_t l_prm = {0};
 fao_time_t l_tim;
-int64_t	l_val, l_mag, l_secs;
-char	l_buf [FAO$K_NUMBUF];
-char	*l_dig;
 
 	if ( (a_outbuf == NULL) || (a_outbuf->dsc$a_pointer == NULL) )
 		return	STS$K_ERROR;
@@ -1892,38 +1564,14 @@ char	*l_dig;
 		l_tim = *a_timadr;
 	else	l_tim = (fao_time_t) FAO$GETTIME ();
 
-	l_val = (int64_t) l_tim;
-
 	l_ctx.obase	= a_outbuf->dsc$a_pointer;
 	l_ctx.optr	= l_ctx.obase;
 	l_ctx.oend	= l_ctx.obase + a_outbuf->dsc$w_length;
 	l_ctx.prm	= &l_prm;
 	l_ctx.sts	= STS$K_SUCCESS;
 
-	if ( l_val >= 0 )			/* Absolute time	*/
-		/* BATCH: by value - S_FAO$PUT_TIME takes the time itself, not its address */
-		s_fao$put_time (&l_ctx, (fao_prm_t) l_tim, ! a_cvtflg);
-	else	{				/* Delta time		*/
-		l_mag	= - l_val;
-		l_secs	= l_mag % 86400;
-
-		if ( ! a_cvtflg )
-			{
-			l_dig = s_fao$cvt_dec ((uint64_t)(l_mag / 86400),
-					l_buf + FAO$K_NUMBUF);
-
-			s_fao$put_raw (&l_ctx, l_dig,
-				(size_t)(l_buf + FAO$K_NUMBUF - l_dig));
-			s_fao$put_chr (&l_ctx, ' ');
-			}
-
-		s_fao$put_2d  (&l_ctx, (unsigned) (l_secs / 3600));
-		s_fao$put_chr (&l_ctx, ':');
-		s_fao$put_2d  (&l_ctx, (unsigned) ((l_secs / 60) % 60));
-		s_fao$put_chr (&l_ctx, ':');
-		s_fao$put_2d  (&l_ctx, (unsigned) (l_secs % 60));
-		s_fao$put_raw (&l_ctx, ".00", 3);
-		}
+	/* The same renderer as !%D/!%T, so the two can never disagree (by value; sign-extended) */
+	s_fao$put_time (&l_ctx, (fao_prm_t) (int64_t) l_tim, ! a_cvtflg);
 
 	if ( a_outlen != NULL )
 		*a_outlen = (unsigned short) (l_ctx.optr - l_ctx.obase);
@@ -1933,26 +1581,18 @@ char	*l_dig;
 
 /*
 **++
-**  UTIL$ADD_TIMES - portable variant of the OpenVMS LIB$ADD_TIMES
-**  routine: add two binary times.
+**  UTIL$ADD_TIMES - portable LIB$ADD_TIMES: add two binary times.
 **
-**	OpenVMS combination rules (delta times are negative):
-**	  delta + delta    -> delta
-**	  absolute + delta -> absolute (delta magnitude is added)
-**	  absolute + absolute -> error, at least one delta is required
+**	delta + delta -> delta; absolute + delta -> absolute; absolute + absolute is an error.
 **
 **  INPUT:
-**	a_tim1	- address of the first operand
-**	a_tim2	- address of the second operand
+**	a_tim1, a_tim2	- addresses of the operands
 **
 **  OUTPUT:
 **	*a_result - the sum; unchanged on error
 **
 **  RETURN:
-**	Condition value:
-**	  STS$K_SUCCESS - operation complete
-**	  FAO$K_IVTIME  - both operands are absolute times
-**	  STS$K_ERROR   - bad routine arguments
+**	STS$K_SUCCESS; FAO$K_IVTIME - both absolute; STS$K_ERROR - bad routine arguments
 **--
 */
 int	__util$add_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,
@@ -1985,16 +1625,10 @@ int64_t	l_t1, l_t2;
 
 /*
 **++
-**  UTIL$SUB_TIMES - portable variant of the OpenVMS LIB$SUB_TIMES
-**  routine: subtract the second binary time from the first.
+**  UTIL$SUB_TIMES - portable LIB$SUB_TIMES: subtract the second binary time from the first.
 **
-**	OpenVMS combination rules (delta times are negative):
-**	  absolute - absolute -> delta; tim1 must not precede tim2
-**	  absolute - delta    -> absolute (delta magnitude subtracted);
-**		the result must not become negative
-**	  delta - delta       -> delta; |tim1| must not be less than
-**		|tim2|
-**	  delta - absolute    -> error
+**	absolute - absolute -> delta (tim1 must not precede tim2); absolute - delta -> absolute (not negative);
+**	delta - delta -> delta (|tim1| >= |tim2|); delta - absolute is an error.
 **
 **  INPUT:
 **	a_tim1	- address of the minuend
@@ -2004,11 +1638,8 @@ int64_t	l_t1, l_t2;
 **	*a_result - the difference; unchanged on error
 **
 **  RETURN:
-**	Condition value:
-**	  STS$K_SUCCESS - operation complete
-**	  FAO$K_NEGTIM  - the result would be negative (LIB$_NEGTIM)
-**	  FAO$K_IVTIME  - delta minus absolute is requested
-**	  STS$K_ERROR   - bad routine arguments
+**	STS$K_SUCCESS; FAO$K_NEGTIM - result would be negative; FAO$K_IVTIME - delta minus absolute;
+**	STS$K_ERROR - bad routine arguments
 **--
 */
 int	__util$sub_times	(const fao_time_t *a_tim1, const fao_time_t *a_tim2,

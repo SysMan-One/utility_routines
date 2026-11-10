@@ -28,7 +28,7 @@ cc *.o -o your_app                 # link with your application
 - Define `__MODULE__` (and optionally `__FAC__`) before including a header, so log
   records carry the right prefix.
 - Build with `-DNDEBUG` to compile out `$TRACE`/asserts in release.
-- On ARMv8, add `-march=armv8-a+crc` to enable the hardware CRC-32 in `__util$crc32c`.
+- On ARMv8 the hardware CRC-32 of `__util$crc32c` (IEEE 802.3 CRC-32) is chosen at run time; no `-march` flag is needed.
 
 A `CMakeLists.txt` is also provided. It builds the static-library target **`starlet`**
 (all four modules) and exports its include directory, so consumers get the headers
@@ -69,8 +69,7 @@ Then in your code:
 #include "utility_routines.h"     /* and avproto.h / cli_routines.h / starlet.h as needed */
 ```
 
-For ARMv8 hardware CRC, pass `-march=armv8-a+crc` (e.g.
-`target_compile_options(starlet PRIVATE -march=armv8-a+crc)`).
+The ARMv8 hardware CRC engine is selected at run time (target attributes), so no `-march` option is needed.
 
 ## Tests
 
@@ -156,18 +155,23 @@ target_link_libraries(app PRIVATE StarLet::starlet)
 The install ships the four public headers, `libstarlet.a`, and the
 `StarLetConfig.cmake` / `StarLetConfigVersion.cmake` / `StarLetTargets.cmake`
 files under `<prefix>/lib/cmake/StarLet`. Version requests are honoured with
-same-major-version compatibility, e.g. `find_package(StarLet 1.0 REQUIRED)`.
+same-major-version compatibility, e.g. `find_package(StarLet 1.7 REQUIRED)`.
 Binary or source packages can be produced with `cpack` from the build dir.
 
 ## Documentation
 
-Full reference manuals (VSI OpenVMS RTL style) are included:
+The manuals are in `doc/`, in English and Russian, as markdown and PDF, laid out like
+the OpenVMS manuals:
 
-- `Routines_Reference_EN.pdf` — English
-- `Routines_Reference_RU.pdf` — Russian
+- *STARLET Programmer's Guide* (STARLET-PG-0171) - `doc/starlet_programmers_guide.pdf`,
+  `doc/starlet_programmers_guide_ru.pdf`: the ideas, the heritage, how to use each part;
+  Appendix D lists what changed in 1.7.0 and 1.7.1.
+- *STARLET Reference Manual* (STARLET-RM-0171) - `doc/starlet_reference_manual.pdf`,
+  `doc/starlet_reference_manual_ru.pdf`: every routine and macro (Format / Returns /
+  Arguments / Description / Condition Values Returned / Example), the FAO directives,
+  the condition values, an index.
 
-Both cover every public routine (Format / Returns / parameter tables / condition
-values) plus worked, compilable examples.
+They replace `Routines_Reference_EN.pdf` / `Routines_Reference_RU.pdf` of 1.6.x.
 
 ## Coding style
 
@@ -181,12 +185,4 @@ Apache License 2.0 — see `LICENSE`.
 
 ## Author
 
-Ruslan R. Laishev
-
-## Manuals
-
-Bilingual reference manuals ship with the tree: `Routines_Reference_EN.pdf` and
-`Routines_Reference_RU.pdf`. Appendix A is the FAO directives reference (including
-the address directives); Appendix B covers the additions since the main corpus -
-`$LOG_FAO`, the wildcard set (`*`, `%`, `?`), the facility-name stamping and the
-cached log-record prefix.
+StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)

@@ -13,7 +13,7 @@
 **
 **  MODULE:  test_status_convention.c
 **
-**  AUTHORS: DN
+**  AUTHOR:  StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  CREATION DATE:  01-AUG-2026
 **

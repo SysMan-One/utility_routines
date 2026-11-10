@@ -1,26 +1,17 @@
 #define	__MODULE__	"CLI_ROUTINES"
-#define	__IDENT__	"X.00-16ECO2"
-#define	__REV__		"0.16.2"
+#define	__IDENT__	"X.00-17ECO1"
+#define	__REV__		"0.17.1"
 
 /*
 **++
 **
 **  FACILITY:  Command Language Interface (CLI) Routines
 **
-**  ABSTRACT: A portable API to implement command line parameters parsing, primary syntax checking,
-**	and dispatching of processing. This true story is based on the OpenVMS CDU/CLI facilities.
-**
-**  DESCRIPTION: Command Language Interface (CLI) Routines - an API is supposed to be used to parse and
-**	dispatch processing.
-**
-**	This set of routines help to implement a follows syntax:
-**
-**	<verb> [p1 p2 ... p8] [/qualifiers[=<value> ...]
-**
-**	...
-**
-**  DESIGN ISSUE:
-**	{tbs}
+**  ABSTRACT: A portable command line parser modelled on the OpenVMS CDU/CLI: it matches argv against a table of verbs
+**	(with sub-verbs), parameters and qualifiers by the DCL rules (abbreviations, /NO<name>, value lists, keywords),
+**	validates the value types, builds a parse context and dispatches the action routine of the verb.  Syntax:
+**	<verb> [p1 p2 ... p8] [/qualifiers[=<value> ...]]; the Unix form --name is accepted for a qualifier.  /HELP, -h and --help
+**	print a usage screen made from the tables.  Needs starlet (__util$bintim() for CLI$K_TIME).
 **
 **  AUTHORS: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
@@ -32,119 +23,48 @@
 **
 **	28-JUL-2021	RRL	Project reanimation.
 **
-**	27-JUL-2026	RRL	X.00-02 : Audit fixes.
-**				- __cli$parse() now propagates the parse status instead of always
-**				  returning SUCCESS, and releases the half-built context on error;
-**				- rewrote and wired up __cli$val_check(): correct UUID check (canonical
-**				  8-4-4-4-12 validated via %n length), snprintf() for the device path,
-**				  errno reset and trailing-garbage check for numbers, values are taken
-**				  as NUL-terminated strings;
-**				- wired up __cli$check_keyword() (CLI$K_KWD) and initialised its 'ksel';
-**				- checked the __cli$add_item2ctx() status in the qualifier path;
-**				- fixed the sub-verb recursion argument (argv + 1), the argc<1 message,
-**				  a NULL guard in __cli$cleanup(); removed diagnostic-suppression pragmas
-**				  and the resulting -Wparentheses; unified the verb-length macro name.
+**	27-JUL-2026	RRL	X.00-02 : Audit fixes: __cli$parse() propagates the parse status and frees the half-built context; __cli$val_check()
+**				rewritten (UUID, device path, number checks) and wired up, __cli$check_keyword() wired up; sub-verb recursion and NULL guards fixed.
 **
-**	28-JUL-2026	RRL	X.00-03 : Renamed the cli$/_cli$ routine prefix to __cli$ (the
-**				CLI$K_* constants keep the CLI$ prefix).
+**	28-JUL-2026	RRL	X.00-03 : Routine prefix cli$/_cli$ renamed to __cli$ (the CLI$K_* constants keep CLI$).
 **
-**	30-JUL-2026	RRL	X.00-04 : Documentation pass - VMS-style **++ headers on every
-**				routine; documented the __CLI_DEBUG__ demo; normalised to LF.
+**	30-JUL-2026	RRL	X.00-04 : Documentation pass - VMS-style **++ headers on every routine; __CLI_DEBUG__ demo documented; normalised to LF.
 **
-**	31-JUL-2026	RRL	X.00-05 : Added qualifier defaults (CLI_PQDESC.defval), negatable
-**				qualifiers (CLI$M_NEGATABLE, /NO<name>), value lists (CLI$M_LIST,
-**				/Q=(a,b,c) returned in turn by __cli$get_value), required
-**				parameters/qualifiers (CLI$M_REQUIRED) and __cli$present() to test
-**				presence/negation (CLI$M_PRESENT/_NEGATED).
+**	31-JUL-2026	RRL	X.00-05 : Qualifier defaults (defval), negatable qualifiers (CLI$M_NEGATABLE), value lists (CLI$M_LIST), required
+**				parameters/qualifiers (CLI$M_REQUIRED) and __cli$present().
 **
-**	01-AUG-2026	RRL	X.00-06 : Added value types CLI$K_TIME (absolute/delta time,
-**				validated via starlet __util$bintim) and CLI$K_MAC (aa:bb:cc:dd:ee:ff
-**				or aa-bb-...).  The module now depends on starlet.
+**	01-AUG-2026	RRL	X.00-06 : Value types CLI$K_TIME (via __util$bintim) and CLI$K_MAC; the module depends on starlet now.
 **
-**	01-AUG-2026	RRL	X.00-07 : Made cli_routines.h self-contained: CLI_VERB.act_rtn now
-**				carries a full prototype (CLI_CTX *, void *) with a forward reference,
-**				instead of the __unknown_params placeholder that failed to compile when
-**				the header was included alone (GCC 14 -Wdeclaration-missing-parameter-type)
-**				and broke under C23. Action routines must be int (CLI_CTX *, void *).
+**	01-AUG-2026	RRL	X.00-07 : cli_routines.h self-contained: CLI_VERB.act_rtn has a full prototype (CLI_CTX *, void *), no __unknown_params (GCC 14, C23).
 **
-**	01-AUG-2026	RRL	X.00-08 : Fixes in the qualifier lookup and the value retrieval:
-**				- s_cli$find_qual() dereferenced a NULL verb->quals, which crashed
-**				  any verb declaring parameters but no qualifiers;
-**				- a zero length token ("-" or "/" alone) was compared by strncasecmp()
-**				  with a length of 0 and so matched every qualifier of a table;
-**				- an exact, full length qualifier name was reported as ambiguous when
-**				  it was also a prefix of a longer one (/LOG vs /LOGFILE), leaving the
-**				  shorter qualifier unaddressable; an exact match now wins over an
-**				  abbreviation, as it does in the DCL;
-**				- __cli$get_value() returned <defval> after a CLI$M_LIST qualifier had
-**				  been drained, so a "while (get_value())" loop never terminated;
-**				- __cli$check_keyword() had the same exact-versus-prefix defect: a
-**				  keyword that is a prefix of another one (INET vs INET6) could not
-**				  be spelled out in full, it was always reported as ambiguous;
-**				- __cli$parse_params() reported every absent parameter as missing, so
-**				  a parameter could never be optional and the CLI$M_REQUIRED flag was
-**				  dead code for parameters; a parameter is now optional unless it is
-**				  declared CLI$M_REQUIRED;
-**				- added <strings.h> for strncasecmp() (musl does not pull it in) and
-**				  removed a NULL + 0 pointer arithmetic.
+**	01-AUG-2026	RRL	X.00-08 : Qualifier lookup and value fixes: NULL verb->quals, zero length token, exact name wins over a longer one it prefixes
+**				(/LOG vs /LOGFILE, INET vs INET6), drained CLI$M_LIST loop, optional parameters; <strings.h> added, NULL + 0 removed.
 **
-**	01-AUG-2026	RRL	X.00-09 : Re-integrated __cli$help() (usage/help generator from the
-**				command tables) and the built-in /HELP, -h, --help handling on top of
-**				the X.00-08 fixes; help is detected before parameter validation and
-**				the parse returns STS$K_WARN so the caller does not dispatch.
+**	01-AUG-2026	RRL	X.00-09 : __cli$help() (usage generator from the tables) and the built-in /HELP, -h, --help; help is detected before
+**				parameter validation and the parse returns STS$K_WARN.
 **
-**	01-AUG-2026	RRL	X.00-11 : Narrowed the built-in help detector, which was too greedy:
-**				- it accepted a BARE "help"/"h", with no leading '-' or '/'. Since
-**				  __cli$parse() tests argv[0], a caller supplied verb named HELP - the
-**				  natural DCL spelling - was answered by the built-in generator and
-**				  never reached the verb table. The punctuation is required now;
-**				- the same bare form made a PARAMETER VALUE of "help" or "h" print a
-**				  usage screen, e.g. "COPY help" for a file so named. Requiring the
-**				  punctuation covers this too;
-**				- __cli$parse() left *clictx untouched on its two early returns, while
-**				  the documented idiom (see tests/) calls __cli$cleanup() on it after a
-**				  failed parse; it is zeroed up front now.
-**				See tests/test_cli_help.c.
+**	01-AUG-2026	RRL	X.00-11 : Help detector narrowed: the leading '-' or '/' is required (a verb or a value "help" is not swallowed); __cli$parse()
+**				zeroes *clictx up front. See tests/test_cli_help.c.
 **
-**	01-AUG-2026	RRL	X.00-12 : __cli$present() reported the state of the FIRST occurrence
-**				of a repeated qualifier, so /HIGHLIGHT /NOHIGHLIGHT was read as
-**				affirmative. It now scans the whole item list and returns the LAST
-**				occurrence's state, giving DCL "last wins" semantics. See
-**				tests/test_cli_features.c.
+**	01-AUG-2026	RRL	X.00-12 : __cli$present() returns the state of the LAST occurrence of a repeated qualifier (DCL "last wins"). See tests/test_cli_features.c.
 **
-**	 3-AUG-2026	RRL	X.00-13 : The Unix qualifier prefix is now the GNU long form '--' rather
-**				than a single '-': __cli$parse_quals() accepts /name or --name, and a
-**				lone '-name' is no longer a qualifier. The built-in help detector still
-**				accepts the short -h alias.
+**	 3-AUG-2026	RRL	X.00-13 : The Unix qualifier prefix is the GNU form '--name' instead of '-name'; the short -h help alias stays.
 **
-**	 3-AUG-2026	RRL	X.00-14 : __cli$parse_verb() recursed on the matched verb instead of its
-**				sub-verb list, so a nested verb was searched in the parent table and
-**				SHOW STATISTICS gave 'unrecognized verb statistics'. It now descends
-**				into vsel->next. A sub-verb follows its parent immediately (no qualifier
-**				between them); qualifiers after the sub-verb are its own. See
-**				tests/test_cli_nested.c.
+**	 3-AUG-2026	RRL	X.00-14 : __cli$parse_verb() descends into the sub-verb list (vsel->next), so SHOW STATISTICS is found. See tests/test_cli_nested.c.
 **
-**	 7-AUG-2026	RRL	X.00-15 : __cli$parse_params() now stops the positional scan at a token
-**				that names a defined qualifier (/name or --name via s_cli$find_qual),
-**				leaving it to __cli$parse_quals(). A '/'-path such as /etc/passwd is
-**				longer than any qualifier name, so it is not matched and is kept as the
-**				parameter's value - a file parameter may hold a leading slash, while a
-**				qualifier is no longer swallowed by an omitted optional parameter. See
-**				tests/test_cli_filepath.c.
+**	 7-AUG-2026	RRL	X.00-15 : __cli$parse_params() stops the positional scan at a defined qualifier; a '/'-path stays a parameter value. See tests/test_cli_filepath.c.
 **
-**	 7-AUG-2026	RRL	X.00-16 : __cli$parse_quals() reported an unrecognized /qualifier but
-**				dropped a bare token in silence. Such a token took neither a parameter
-**				(the slots are filled, or a qualifier stopped the positional scan) nor
-**				a qualifier, so it is now reported - 'Unrecognized token' - closing the
-**				silent-loss hole an optional parameter left open. See test_cli_filepath.c.
+**	 7-AUG-2026	RRL	X.00-16 : A bare token which is neither a parameter nor a qualifier is reported ('Unrecognized token') instead of dropped.
 **
-**	14-AUG-2026	RRL	X.00-16ECO1 : __REV__ read "0.02.0" against __IDENT__ X.00-16; per the
-**				Xaa-bbECOc -> aa.bb.c rule it is now "0.16.1" (this very correction
-**				being the ECO).
+**	14-AUG-2026	RRL	X.00-16ECO1 : __REV__ read "0.02.0" against __IDENT__ X.00-16; per the Xaa-bbECOc -> aa.bb.c rule it is "0.16.1".
 **
-**	22-OCT-2026	RRL	X.00-16ECO2 : builds for Windows with MinGW-w64 from Linux - inet_pton()
-**				from <winsock2.h>/<ws2tcpip.h> instead of <arpa/inet.h>, NAME_MAX
-**				(absent there) defined as 255.
+**	22-OCT-2026	RRL	X.00-16ECO2 : MinGW-w64 build from Linux: inet_pton() from <winsock2.h>/<ws2tcpip.h>, NAME_MAX defined as 255.
+**
+**	31-OCT-2026	CLD	X.00-17ECO1 : StarLet 1.7.1: __cli$get_keyword() returns STS$K_WARN for an item present with an empty value (/mode, /mode=), as __cli$get_value() does.
+**
+**	31-OCT-2026	CLD	X.00-17 : StarLet 1.7.0 DCL parsing rules: verb abbreviation (full name wins, unique prefix selects, synonyms never ambiguous),
+**				"Too many parameters", /HELP of a sub-verb, CLI$K_KWD stored as the full keyword and new __cli$get_keyword(), unknown /NAME or --name
+**				always an error, quiet STS$K_ERROR "absent" in __cli$get_value(), stricter CLI$K_DATE/CLI$K_NUM, __cli$show_verbs() lists a sub-verb table once.
 **
 **--
 */
@@ -219,6 +139,71 @@ static	char *__cli$val_type	(
 	return	"ILLEGAL";
 }
 
+/* S_CLI$DIGITS - read 1..a_maxdigits decimal digits at *a_pp and advance it; STS$K_ERROR if there is none */
+static	int	s_cli$digits	(
+	const char	**a_pp,
+		int	a_maxdigits,
+		int	*a_val
+			)
+{
+const char	*l_p = *a_pp;
+int		l_n = 0, l_v = 0;
+
+	for ( ; (l_n < a_maxdigits) && (*l_p >= '0') && (*l_p <= '9'); l_p++, l_n++ )
+		l_v = l_v * 10 + (*l_p - '0');
+
+	if ( !l_n )
+		return	STS$K_ERROR;
+
+	*a_pp = l_p;
+	*a_val = l_v;
+
+	return	STS$K_SUCCESS;
+}
+
+/* S_CLI$DATE_CHECK - validate dd-mm-yyyy[<sep>hh:mm[:ss]], <sep> is '-', a blank or 'T'; calendar and leap years checked, no trailing text */
+static	int	s_cli$date_check	(
+	const char	*a_val
+				)
+{
+static const int s_dim[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+const char	*l_p = a_val;
+int		l_day, l_mon, l_year, l_hour = 0, l_min = 0, l_sec = 0, l_dmax;
+
+	if ( !(1 & s_cli$digits(&l_p, 2, &l_day)) || (*l_p++ != '-') || !(1 & s_cli$digits(&l_p, 2, &l_mon)) || (*l_p++ != '-') || !(1 & s_cli$digits(&l_p, 4, &l_year)) )
+		return	STS$K_ERROR;
+
+	if ( (l_mon < 1) || (l_mon > 12) || (l_year < 1) )
+		return	STS$K_ERROR;
+
+	l_dmax = s_dim[l_mon - 1] + ((l_mon == 2) && !(l_year % 4) && ((l_year % 100) || !(l_year % 400)));
+
+	if ( (l_day < 1) || (l_day > l_dmax) )
+		return	STS$K_ERROR;
+
+	if ( *l_p )
+		{
+		if ( (*l_p != '-') && (*l_p != ' ') && (*l_p != 'T') )
+			return	STS$K_ERROR;
+		l_p++;
+
+		if ( !(1 & s_cli$digits(&l_p, 2, &l_hour)) || (*l_p++ != ':') || !(1 & s_cli$digits(&l_p, 2, &l_min)) )
+			return	STS$K_ERROR;
+
+		if ( *l_p == ':' )
+			{
+			l_p++;
+			if ( !(1 & s_cli$digits(&l_p, 2, &l_sec)) )
+				return	STS$K_ERROR;
+			}
+
+		if ( *l_p || (l_hour > 23) || (l_min > 59) || (l_sec > 59) )
+			return	STS$K_ERROR;
+		}
+
+	return	STS$K_SUCCESS;
+}
+
 /*
  *
  *  DESCRIPTION: Check a input value for the parameter/qualifier corresponding has been declared type
@@ -240,18 +225,16 @@ static	int	__cli$check_keyword (char *sts, int len, int opts, CLI_KEYWORD *klist
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Validate a candidate value string against the type declared in a
-**	parameter/qualifier descriptor (CLI$K_FILE, CLI$K_NUM, CLI$K_IPV4, ...).
-**	A helper of __cli$parse().
+**	Validate a candidate value string against the value type of a descriptor (CLI$K_FILE, CLI$K_NUM,
+**	CLI$K_IPV4, ...).  A helper of __cli$parse().
 **
 **  FORMAL PARAMETERS:
 **
 **	clictx	The parse context
-**	pqdesc	The parameter/qualifier descriptor (value type)
-**	a_val	The candidate value string
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE.
+**	pqdesc	The parameter/qualifier descriptor
+**	a_valp	In: the candidate value.  For a CLI$K_KWD replaced with the FULL keyword of the table
+**		(copied into <a_canon>), left alone for other types
+**	a_canon	A buffer of ASC$K_SZ + 1 octets for the full keyword
 **
 **  RETURN VALUE:
 **	STS$K_SUCCESS if the value is valid for its type; error otherwise.
@@ -260,10 +243,12 @@ static	int	__cli$check_keyword (char *sts, int len, int opts, CLI_KEYWORD *klist
 static	int	__cli$val_check	(
 		CLI_CTX		*clictx,
 		CLI_PQDESC	*pqdesc,
-		const char	*a_val
+	const	char		**a_valp,
+		char		*a_canon
 				)
 {
-char	buf[NAME_MAX], *cp;
+char		buf[NAME_MAX], *cp;
+const char	*a_val = *a_valp;
 
 	switch (pqdesc->type)
 		{
@@ -279,6 +264,14 @@ char	buf[NAME_MAX], *cp;
 			{
 			char	*l_end = NULL;
 
+			/* The values are unsigned: strtoull() would wrap "-1" to ULLONG_MAX and skip a leading blank;
+			** neither is a number here. A range overflow (ERANGE) and trailing junk are errors too.
+			*/
+			if ( (*a_val == '-') || (*a_val == ' ') || (*a_val == '\t') )
+				return	(clictx->opts & CLI$M_OPSIGNAL)
+					? $LOG(STS$K_ERROR, "Value '%s' is not a valid unsigned number", a_val)
+					: STS$K_ERROR;
+
 			errno = 0;
 			strtoull(a_val, &l_end, 0);
 
@@ -290,18 +283,10 @@ char	buf[NAME_MAX], *cp;
 			break;
 
 		case	CLI$K_DATE:
-			{
-			struct tm	l_tm = {0};
-			char		l_sep;
-
-			if ( 3 > sscanf(a_val, "%2d-%2d-%4d%c%2d:%2d:%2d",
-					&l_tm.tm_mday, &l_tm.tm_mon, &l_tm.tm_year,
-					&l_sep,
-					&l_tm.tm_hour, &l_tm.tm_min, &l_tm.tm_sec) )
+			if ( !(1 & s_cli$date_check(a_val)) )
 				return	(clictx->opts & CLI$M_OPSIGNAL)
 					? $LOG(STS$K_ERROR, "Illformed date/time value '%s'", a_val)
 					: STS$K_ERROR;
-			}
 			break;
 
 		case	CLI$K_DEVICE:
@@ -341,13 +326,20 @@ char	buf[NAME_MAX], *cp;
 		case	CLI$K_KWD:
 			{
 			CLI_KEYWORD	*l_kwd;
+			int		l_status;
 
 			if ( !pqdesc->kwd )
 				break;			/* no keyword list - nothing to check against */
 
-			return	__cli$check_keyword((char *) a_val, (int) strlen(a_val),
-						clictx->opts, pqdesc->kwd, &l_kwd);
+			if ( !(1 & (l_status = __cli$check_keyword((char *) a_val, (int) strlen(a_val), clictx->opts, pqdesc->kwd, &l_kwd))) )
+				return	l_status;
+
+			/* Keep the keyword of the table, not what has been typed (an abbreviation, other case) */
+			memcpy(a_canon, $ASCPTR(&l_kwd->name), $ASCLEN(&l_kwd->name));
+			a_canon[$ASCLEN(&l_kwd->name)] = '\0';
+			*a_valp = a_canon;
 			}
+			break;
 
 		case	CLI$K_TIME:
 			{
@@ -388,34 +380,12 @@ char	buf[NAME_MAX], *cp;
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	Record a matched parameter or qualifier, with its value, in the parse
-**	context so that __cli$get_value() can retrieve it later.
-**
-**  FORMAL PARAMETERS:
-**
-**	clictx	The parse context
-**	type	Item kind (parameter or qualifier)
-**	item	The matched descriptor
-**	val	The value string bound to it, or NULL
-**	state	Extra item-state bits (e.g. CLI$M_NEGATED); CLI$M_PRESENT is
-**		added automatically
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Allocates and links a CLI_ITEM into the context.
-**
-**  RETURN VALUE:
-**	STS$K_SUCCESS on success; error if memory could not be allocated.
-**--
-*/
+/* __CLI$ADD_ITEM2CTX - link a matched parameter/qualifier and its value into the context (CLI$M_PRESENT is added to <state>) */
 static	int	__cli$add_item2ctx	(
 		CLI_CTX		*clictx,
 		int		type,
 		void		*item,
-		char		*val,
+	const	char		*val,
 		unsigned	state
 			)
 {
@@ -435,6 +405,7 @@ CLI_ITEM	*avp, *avp2;
 
 	/* Every parsed item is 'present'; the caller adds _NEGATED where needed */
 	avp->state = (unsigned char) (state | CLI$M_PRESENT);
+	avp->type = type;
 
 	if ( !type )
 		{
@@ -468,20 +439,13 @@ CLI_ITEM	*avp, *avp2;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Write a human-readable listing of a command-definition table to the log;
-**	sub-verb chains are listed recursively with increasing indentation. For
-**	documenting or debugging a grammar.
+**	Write a listing of a command-definition table to the log.  A sub-verb table is listed once, one level
+**	deeper than its parent; the caller's level is not changed.
 **
 **  FORMAL PARAMETERS:
 **
 **	verbs	The command-definition table
 **	level	Initial indentation level; 0 for the top level
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Writes to the current log destination.
-**
-**  RETURN VALUE:
-**	NONE.
 **--
 */
 void	__cli$show_verbs	(
@@ -489,7 +453,7 @@ void	__cli$show_verbs	(
 		int	level
 		)
 {
-CLI_VERB *verb, *subverb;
+CLI_VERB *verb;
 CLI_PQDESC *par;
 CLI_KEYWORD *kwd;
 CLI_PQDESC *qual;
@@ -501,11 +465,11 @@ char	spaces [64];
 		{
 		if ( !level )
 			$LOG(STS$K_INFO, "Show verb '%.*s' : ", $ASC(&verb->name));
-		else	$LOG(STS$K_INFO, " %.*s%.*s", level * 2, spaces, $ASC(&verb->name));
+		else	$LOG(STS$K_INFO, " %.*s%.*s", $MIN(level * 2, (int) sizeof(spaces)), spaces, $ASC(&verb->name));
 
-		/* Run over command's verbs list ... */
-		for ( subverb = verb->next; subverb; subverb = subverb->next)
-			__cli$show_verbs(verb->next, ++level);
+		/* A sub-verb table is listed once, one level deeper; our own level stays as it is */
+		if ( verb->next )
+			__cli$show_verbs(verb->next, level + 1);
 
 		for ( par = verb->params; par && par->pn; par++)
 			{
@@ -514,7 +478,7 @@ char	spaces [64];
 			if ( par->kwd )
 				{
 				for ( kwd = par->kwd; $ASCLEN(&kwd->name); kwd++)
-					$LOG(STS$K_INFO, "      %.*s=%#x ", $ASC(&kwd->name), kwd->val);
+					$LOG(STS$K_INFO, "      %.*s=%#llx ", $ASC(&kwd->name), (unsigned long long) kwd->val);
 				}
 			}
 
@@ -526,7 +490,7 @@ char	spaces [64];
 			if ( qual->kwd )
 				{
 				for ( kwd = qual->kwd; $ASCLEN(&kwd->name); kwd++)
-					$LOG(STS$K_INFO, "      %.*s=%#x ", $ASC(&kwd->name), kwd->val);
+					$LOG(STS$K_INFO, "      %.*s=%#llx ", $ASC(&kwd->name), (unsigned long long) kwd->val);
 				}
 			}
 
@@ -538,18 +502,11 @@ char	spaces [64];
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Write the contents of a parse context - the matched verb, parameters and
-**	qualifiers with their values - to the log. For debugging.
+**	Write the matched verb, parameters and qualifiers with their values to the log.  For debugging.
 **
 **  FORMAL PARAMETERS:
 **
 **	clictx	The parse context to display
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Writes to the current log destination.
-**
-**  RETURN VALUE:
-**	NONE.
 **--
 */
 void	__cli$show_ctx	(
@@ -567,11 +524,11 @@ int	splen = 0;
 
 	/* Run over command's verbs list ... */
 	for ( splen = 2, avp = clictx->vlist; avp; avp = avp->next, splen += 2)
-		$LOG(STS$K_INFO, "%.*s %.*s  ('%.*s')", splen, spaces, $ASC(&avp->verb->name), $ASC(&avp->val));
+		$LOG(STS$K_INFO, "%.*s %.*s  ('%.*s')", $MIN(splen, (int) sizeof(spaces)), spaces, $ASC(&avp->verb->name), $ASC(&avp->val));
 
 	for ( avp = clictx->avlist; avp; avp = avp->next)
 		{
-		if ( avp->type )
+		if ( avp->type != CLI$K_QUAL )
 			$LOG(STS$K_INFO, "   P%d[0:%d]='%.*s'", avp->pqdesc->pn, $ASCLEN(&avp->val), $ASC(&avp->val));
 		else	$LOG(STS$K_INFO, "   /%.*s[0:%d]='%.*s'", $ASC(&avp->pqdesc->name), $ASCLEN(&avp->val), $ASC(&avp->val));
 		}
@@ -581,11 +538,9 @@ int	splen = 0;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Print a human-readable usage/help screen derived from the command tables.
-**	With <verb> == NULL it lists the available commands; with a container verb
-**	it lists the sub-verbs; with a leaf verb it prints a SYNOPSIS line plus the
-**	parameters and qualifiers with their types, defaults and flags.  Reached
-**	automatically when /HELP, -h or --help appears on the command line.
+**	Print a usage screen from the command tables: the list of commands (<verb> == NULL), the sub-verbs of a
+**	container verb, or a SYNOPSIS plus the parameters and qualifiers of a leaf verb.  Reached from
+**	__cli$parse() on /HELP, -h or --help.
 **
 **  FORMAL PARAMETERS:
 **
@@ -593,7 +548,7 @@ int	splen = 0;
 **	verb	The verb to describe, or NULL for an overview
 **
 **  IMPLICIT INPUTS/OUTPUTS:
-**	Writes to the current log destination, unprefixed, via __util$out().
+**	Writes to the log destination, unprefixed, via __util$out().
 **
 **  RETURN VALUE:
 **	STS$K_SUCCESS.
@@ -680,28 +635,7 @@ int		l_n;
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	Match a token against a keyword list, honouring unambiguous-prefix
-**	abbreviation, and return the keyword it resolves to.
-**
-**  FORMAL PARAMETERS:
-**
-**	sts	The token to match
-**	len	Length of the token
-**	opts	Matching options
-**	klist	The keyword list
-**	kwd	Receives the matched keyword
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE.
-**
-**  RETURN VALUE:
-**	STS$K_SUCCESS on a unique match; error if unknown or ambiguous.
-**--
-*/
+/* __CLI$CHECK_KEYWORD - match a token against a keyword list (exact name wins, else a unique abbreviation); error if unknown or ambiguous */
 static	int	__cli$check_keyword	(
 			char	*sts,
 			int	 len,
@@ -764,50 +698,8 @@ int	nmatch = 0, qlog = opts & CLI$M_OPTRACE;
 		: STS$K_ERROR;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	Parse the /qualifier[=value] portion of a command against a verb's
-**	qualifier table, validating each value. A helper of __cli$parse().
-**
-**  FORMAL PARAMETERS:
-**
-**	clictx	The parse context
-**	verb	The matched verb descriptor
-**	argc	Remaining argument count
-**	argv	Remaining argument vector
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Adds the matched qualifiers to the context.
-**
-**  RETURN VALUE:
-**	STS$K_SUCCESS on success; error on an unknown qualifier or a bad value.
-**--
-*/
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	Test whether a command-line token is a built-in help request: /HELP,
-**	-HELP, --help (any case) or the short -h / --h form.
-**
-**	The leading '-' or '/' is REQUIRED. A bare "help" is an ordinary token: it
-**	may be a verb of the caller's own grammar - HELP is the natural DCL spelling -
-**	or the value of a positional parameter, e.g. a file named "help". Neither
-**	must be swallowed by the built-in generator.
-**
-**  FORMAL PARAMETERS:
-**
-**	a_arg	The raw command-line token
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE
-**
-**  RETURN VALUE:
-**	Non-zero when the token requests help, zero otherwise.
-**--
-*/
+/* __CLI$PARSE_QUALS - parse the /qualifier[=value] words against the qualifier table of the verb, validating the values; helper of __cli$parse() */
+/* S_CLI$IS_HELP - non-zero for /HELP, -HELP, --help, -h; the leading '-' or '/' is required, a bare "help" is an ordinary token (a verb or a value) */
 static	int	s_cli$is_help	(const char *a_arg)
 {
 const char	*l_p = a_arg;
@@ -830,29 +722,7 @@ const char	*l_p = a_arg;
 }
 
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	Locate a qualifier in a verb's qualifier table by an unambiguous prefix
-**	of its name.  A helper of __cli$parse_quals().
-**
-**  FORMAL PARAMETERS:
-**
-**	verb	The verb whose qualifier table is searched
-**	name	The qualifier name from the command line
-**	len	Length of <name>
-**	reqflag	If non-zero, only qualifiers whose flag has this bit set are
-**		considered (used to restrict a /NO<name> search to CLI$M_NEGATABLE)
-**	ambig	Receives 1 when the prefix is ambiguous, 0 otherwise
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE
-**
-**  RETURN VALUE:
-**	Address of the single matching descriptor, or NULL if none/ambiguous.
-**--
-*/
+/* S_CLI$FIND_QUAL - find a qualifier by an unambiguous prefix of its name (reqflag restricts the search to flagged ones, *ambig reports ambiguity); NULL if none */
 static	CLI_PQDESC *	s_cli$find_qual	(
 	CLI_VERB	*verb,
 	const char	*name,
@@ -921,7 +791,8 @@ static	int	__cli$parse_quals(
 {
 CLI_PQDESC	*qsel;
 int		status, len, i, ambig, negated, qlog = clictx->opts & CLI$M_OPTRACE;
-char		*aptr, *vptr;
+char		*aptr, *vptr, l_canon[ASC$K_SZ + 1];
+const char	*l_cval;
 
 	/*
 	 *  Run over arguments from the command line
@@ -934,16 +805,25 @@ char		*aptr, *vptr;
 			aptr++;					/* VMS form:  /name		*/
 		else if ( (aptr[0] == '-') && (aptr[1] == '-') )
 			aptr += 2;				/* GNU long form:  --name	*/
-		else	/*
+		else	{
+			/*
 			 * A bare token here took neither a parameter nor a qualifier -
 			 * the parameters are already filled (or a qualifier stopped the
 			 * scan) and this is not a qualifier. Report it rather than drop it
-			 * silently: it is a surplus parameter, or a qualifier missing its
-			 * '/' or '--'. Symmetric with the unrecognized-qualifier case below.
+			 * silently: it is a surplus parameter, or a value which stands after
+			 * a space instead of '=' ("/blocks 5" - the DCL wants "/blocks=5" as well).
 			 */
+			char	*l_prev = i ? argv[i - 1] : NULL;
+
+			if ( l_prev && ((l_prev[0] == '/') || ((l_prev[0] == '-') && (l_prev[1] == '-'))) && !strchr(l_prev, '=') )
+				return	(clictx->opts & CLI$M_OPSIGNAL)
+					? $LOG(STS$K_FATAL, "Value '%s' must follow '=' of the qualifier '%s' (write %s=%s)", aptr, l_prev, l_prev, aptr)
+					: STS$K_FATAL;
+
 			return	(clictx->opts & CLI$M_OPSIGNAL)
-				? $LOG(STS$K_FATAL, "Unrecognized token '%s'", aptr)
+				? $LOG(STS$K_FATAL, "Too many parameters, surplus token '%s'", aptr)
 				: STS$K_FATAL;
+			}
 
 		/* Is there a '=' and a value ? */
 		if ( (vptr = strchr(aptr, '=')) )
@@ -993,7 +873,8 @@ char		*aptr, *vptr;
 		 */
 		if ( (qsel->flag & CLI$M_LIST) && vptr && *vptr )
 			{
-			char	*p = vptr, l_elem[ASC$K_SZ + 1];
+			char	*p = vptr, l_elem[ASC$K_SZ + 1], l_canon[ASC$K_SZ + 1];
+			const char *l_pval;
 			int	l_n;
 
 			if ( *p == '(' )
@@ -1008,10 +889,12 @@ char		*aptr, *vptr;
 
 				if ( l_n )
 					{
-					if ( !(1 & (status = __cli$val_check(clictx, qsel, l_elem))) )
+					l_pval = l_elem;
+
+					if ( !(1 & (status = __cli$val_check(clictx, qsel, &l_pval, l_canon))) )
 						return	status;
 
-					if ( !(1 & (status = __cli$add_item2ctx (clictx, CLI$K_QUAL, qsel, l_elem, 0))) )
+					if ( !(1 & (status = __cli$add_item2ctx (clictx, CLI$K_QUAL, qsel, l_pval, 0))) )
 						return	status;
 					}
 
@@ -1025,11 +908,13 @@ char		*aptr, *vptr;
 		/*
 		 *  Ordinary single-valued qualifier.
 		 */
+		l_cval = vptr;
+
 		if ( vptr && *vptr )
-			if ( !(1 & (status = __cli$val_check(clictx, qsel, vptr))) )
+			if ( !(1 & (status = __cli$val_check(clictx, qsel, &l_cval, l_canon))) )
 				return	status;
 
-		if ( !(1 & (status = __cli$add_item2ctx (clictx, CLI$K_QUAL, qsel, vptr, 0))) )
+		if ( !(1 & (status = __cli$add_item2ctx (clictx, CLI$K_QUAL, qsel, l_cval, 0))) )
 			return	status;
 		}
 
@@ -1051,27 +936,7 @@ char		*aptr, *vptr;
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	Bind the positional parameters P1..P8 of a command to a verb's parameter
-**	table, validating each value. A helper of __cli$parse().
-**
-**  FORMAL PARAMETERS:
-**
-**	clictx	The parse context
-**	verb	The matched verb descriptor
-**	argc	Remaining argument count
-**	argv	Remaining argument vector
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Adds the matched parameters to the context.
-**
-**  RETURN VALUE:
-**	STS$K_SUCCESS on success; error on too few arguments or a bad value.
-**--
-*/
+/* __CLI$PARSE_PARAMS - bind the positional parameters P1..P8 to the parameter table of the verb, validating the values; helper of __cli$parse() */
 static	int	__cli$parse_params(
 	CLI_CTX	*	clictx,
 	CLI_VERB	*verb,
@@ -1081,6 +946,8 @@ static	int	__cli$parse_params(
 {
 CLI_PQDESC	*param;
 int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
+char		l_canon[ASC$K_SZ + 1];
+const char	*l_cval;
 
 	/*
 	 * Run firstly over parameters list and extract values
@@ -1113,18 +980,30 @@ int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
 
 				if ( s_cli$find_qual(verb, l_qn, l_qlen, 0, &l_amb) || l_amb )
 					break;
+
+				/* "--name" which is none of the verb's qualifiers is always a mistyped qualifier. So is a
+				** "/NAME", unless the pending parameter is a FILE or a DEVICE: then it is a path (/tmp,
+				** /home, /etc/passwd) and stays that parameter's value. A token which matches a
+				** qualifier, as an abbreviation too, was taken as the qualifier above.
+				*/
+				if ( (l_qlen > 0) && ((argv[pi][0] == '-') || ((param->type != CLI$K_FILE) && (param->type != CLI$K_DEVICE))) )
+					return	(clictx->opts & CLI$M_OPSIGNAL)
+						? $LOG(STS$K_FATAL, "Unrecognized qualifier '%.*s'", l_qlen, l_qn)
+						: STS$K_FATAL;
 				}
 			}
 
 		$IFTRACE(qlog, "P%d(%.*s)='%s'", param->pn, $ASC(&param->name), argv[pi] );
 
 		/* Validate the value against the parameter's declared type */
+		l_cval = argv[pi];
+
 		if ( argv[pi] && *argv[pi] )
-			if ( !(1 & (status = __cli$val_check(clictx, param, argv[pi]))) )
+			if ( !(1 & (status = __cli$val_check(clictx, param, &l_cval, l_canon))) )
 				return	status;
 
 		/* Put parameter's value into the CLI context */
-		if ( !(1 & (status = __cli$add_item2ctx (clictx, param->pn, param, argv[pi], 0))) )
+		if ( !(1 & (status = __cli$add_item2ctx (clictx, param->pn, param, l_cval, 0))) )
 			return	(clictx->opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Error inserting P%d - %.*s into CLI context area", param->pn, $ASC(&param->name)) : STS$K_FATAL;
 		}
 
@@ -1143,27 +1022,20 @@ int		status, pi, qlog = clictx->opts & CLI$M_OPTRACE;
 	return	status;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	Match the leading token of a command against a verb table (honouring
-**	abbreviation) and descend into any sub-verb chain. A helper of __cli$parse().
-**
-**  FORMAL PARAMETERS:
-**
-**	clictx	The parse context
-**	verbs	The verb table
-**	argc	Argument count
-**	argv	Argument vector
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Records the matched verb in the context.
-**
-**  RETURN VALUE:
-**	STS$K_SUCCESS on a match; error on an unknown or ambiguous verb.
-**--
-*/
+/* S_CLI$VERB_SYN - 1 if two verb entries are synonyms (same action, parameters, qualifiers and sub-verbs; entries with none of these are not) */
+static	int	s_cli$verb_syn	(
+	CLI_VERB	*a_v1,
+	CLI_VERB	*a_v2
+			)
+{
+	if ( !(a_v1->act_rtn || a_v1->params || a_v1->quals || a_v1->next) )
+		return	0;
+
+	return	(a_v1->act_rtn == a_v2->act_rtn) && (a_v1->act_arg == a_v2->act_arg) && (a_v1->params == a_v2->params)
+		&& (a_v1->quals == a_v2->quals) && (a_v1->next == a_v2->next);
+}
+
+/* __CLI$PARSE_VERB - match the leading token against a verb table (DCL abbreviation rules) and descend into the sub-verb chain; helper of __cli$parse() */
 static	int	__cli$parse_verb	(
 	CLI_CTX		*clictx,
 	CLI_VERB *	verbs,
@@ -1171,7 +1043,7 @@ static	int	__cli$parse_verb	(
 		char ** argv
 			)
 {
-CLI_VERB	*vrun, *vsel;
+CLI_VERB	*vrun, *vsel, *vexact, *vamb = NULL;
 int		status, len, qlog = clictx->opts & CLI$M_OPTRACE;
 char		*pverb;
 
@@ -1193,37 +1065,47 @@ char		*pverb;
 
 	$IFTRACE(qlog, "argv[1]='%s'->[0:%d]='%.*s'", pverb, len, len, pverb);
 
-	for (vrun = verbs, vsel = NULL; $ASCLEN(&vrun->name); vrun++)
+	/* An empty word would be a prefix of every verb */
+	if ( len < 1 )
+		return	(clictx->opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_FATAL, "Empty command verb") : STS$K_FATAL;
+
+	/*
+	 * Match the verb from the command line against the verbs table by the DCL rules
+	 * (the same as __util$lookup_key() in the ABBREV mode): a verb spelled out in full
+	 * wins - so SET is SET even if SETUP is defined; otherwise the word must be a prefix
+	 * of ONE verb ("setu" -> SETUP), verbs which are synonyms (see s_cli$verb_syn())
+	 * count as one; two different verbs make it ambiguous.
+	 */
+	for (vrun = verbs, vsel = NULL, vexact = NULL; $ASCLEN(&vrun->name); vrun++)
 		{
 		if ( len > $ASCLEN(&vrun->name) )
 			continue;
 
 		$IFTRACE(qlog, "Matching '%.*s' vs '%.*s' ... ", len, pverb, $ASC(&vrun->name));
 
-		/*
-		 * Match verb from command line against given verbs table,
-		 * we are comparing at minimal length, but we must checks for ambiguous verb's definitions like:
-		 *
-		 * SET will match verbs: SET & SETUP
-		 * DEL will match: DELETE & DELIVERY
-		 *
-		 */
-		if ( !strncasecmp(pverb, $ASCPTR(&vrun->name), $MIN(len, $ASCLEN(&vrun->name))) )
+		if ( strncasecmp(pverb, $ASCPTR(&vrun->name), len) )
+			continue;
+
+		if ( len == $ASCLEN(&vrun->name) )
 			{
-			$IFTRACE(qlog, "Matched on length=%d '%.*s' := '%.*s' !", $MIN(len, $ASCLEN(&vrun->name)), len, pverb, $ASC(&vrun->name));
-
-			/* Check that there is not previous matches */
-			if ( vsel )
-				{
-				return	(clictx->opts & CLI$M_OPSIGNAL)
-					? $LOG(STS$K_FATAL, "Ambiguous input '%.*s' (matched to : '%.*s', '%.*s')", len, pverb, $ASC(&vrun->name), $ASC(&vsel->name))
-					: STS$K_FATAL;
-				}
-
-			/* Safe matched verb for future checks */
-			vsel = vrun;
+			if ( !vexact )
+				vexact = vrun;
+			continue;
 			}
+
+		/* An abbreviation: a second DIFFERENT verb makes it ambiguous */
+		if ( vsel && !s_cli$verb_syn(vsel, vrun) )
+			vamb = vrun;
+		else if ( !vsel )
+			vsel = vrun;
 		}
+
+	if ( vexact )
+		vsel = vexact;
+	else if ( vamb )
+		return	(clictx->opts & CLI$M_OPSIGNAL)
+			? $LOG(STS$K_FATAL, "Ambiguous input '%.*s' (matched to : '%.*s', '%.*s')", len, pverb, $ASC(&vamb->name), $ASC(&vsel->name))
+			: STS$K_FATAL;
 
 	/* Found something ?*/
 	if ( !vsel )
@@ -1237,6 +1119,22 @@ char		*pverb;
 	/* Insert new item into the CLI context list */
 	__cli$add_item2ctx (clictx, 0, vsel, pverb, 0);
 
+	/* A container verb (it has sub-verbs): help directly after it, "SHOW /HELP", lists the sub-verbs;
+	** anything else is the sub-verb's word, looked up in vsel->next - the sub-verb owns the rest of
+	** the line, including its own /HELP ("SHOW STATISTICS /HELP"). A sub-verb follows its parent
+	** immediately: no qualifier stands between them.
+	*/
+	if ( vsel->next )
+		{
+		if ( (argc > 1) && s_cli$is_help(argv[1]) )
+			{
+			__cli$help (NULL, vsel);
+			return	STS$K_WARN;
+			}
+
+		return	__cli$parse_verb	(clictx, vsel->next, argc - 1, argv + 1);
+		}
+
 	/* Built-in help: if any following token requests it, show this verb's
 	** usage and stop before parameter/qualifier validation.
 	*/
@@ -1247,18 +1145,18 @@ char		*pverb;
 			return	STS$K_WARN;
 			}
 
-	/* Is there a next subverb ? It follows the parent verb immediately -
-	** no qualifier stands between them - so argv[1] is the sub-verb, looked
-	** up in the parent's sub-verb list vsel->next.
-	*/
-	if ( vsel->next )
-		status = __cli$parse_verb	(clictx, vsel->next, argc - 1, argv + 1);
-	else	{
-		if ( ( !vsel->params) && (!vsel->quals) )
-			return	STS$K_SUCCESS;
+	/* A verb which takes neither parameters nor qualifiers takes no more words: DCL's "too many parameters" */
+	if ( !vsel->params && !vsel->quals )
+		{
+		if ( argc > 1 )
+			return	(clictx->opts & CLI$M_OPSIGNAL)
+				? $LOG(STS$K_FATAL, "Too many parameters for '%.*s', surplus token '%s'", $ASC(&vsel->name), argv[1])
+				: STS$K_FATAL;
 
-		status = __cli$parse_params(clictx, vsel, argc - 1, argv + 1);
+		return	STS$K_SUCCESS;
 		}
+
+	status = __cli$parse_params(clictx, vsel, argc - 1, argv + 1);
 
 	return	status;
 }
@@ -1268,10 +1166,12 @@ char		*pverb;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Match the program arguments against a command-definition table, validating
-**	the verb, positional parameters and qualifiers, and build a context that
-**	records the result. The context is consumed by __cli$dispatch() and
-**	__cli$get_value() and must be released with __cli$cleanup().
+**	Match the program arguments against a command-definition table, validate the verb, parameters and
+**	qualifiers, and build a context for __cli$dispatch() and __cli$get_value(), to be released with
+**	__cli$cleanup().  A verb spelled out in full wins over a longer one it prefixes (SET vs SETUP), a
+**	unique abbreviation selects, an ambiguous one is an error; verbs sharing action, parameters, qualifiers
+**	and sub-verbs are synonyms.  A "/name" with no match is the value of a pending CLI$K_FILE or
+**	CLI$K_DEVICE parameter (a path), otherwise an "Unrecognized qualifier" error, as is any "--name".
 **
 **  FORMAL PARAMETERS:
 **
@@ -1282,11 +1182,13 @@ char		*pverb;
 **	clictx	Receives the address of a newly allocated parse context
 **
 **  IMPLICIT INPUTS/OUTPUTS:
-**	Allocates the parse context (released and set to NULL on failure).
+**	Allocates the context; *clictx is NULL after an error or help.
 **
 **  RETURN VALUE:
-**	STS$K_SUCCESS on a clean parse; error on a bad value/verb/qualifier or an
-**	allocation failure.
+**	STS$K_SUCCESS on a clean parse; STS$K_FATAL (low bit clear) on a bad value/verb/qualifier, a surplus
+**	word or an allocation failure.
+**	STS$K_WARN (low bit clear too) is NOT an error: the command line asked for help, it has been printed
+**	by __cli$help() and the program should exit successfully WITHOUT dispatching.
 **--
 */
 int	__cli$parse	(
@@ -1344,22 +1246,20 @@ CLI_CTX	*ctx;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Retrieve the value string bound to a parameter or qualifier descriptor in
-**	a parse context. For a CLI$M_LIST qualifier, successive calls return
-**	successive values and then report absence. When the item is not present
-**	and the descriptor carries a non-empty <defval>, that default is returned.
+**	Retrieve the value bound to a parameter or qualifier.  For a CLI$M_LIST qualifier successive calls
+**	return successive values, then report absence.  An absent item with a non-empty <defval> returns
+**	the default.
 **
 **  FORMAL PARAMETERS:
 **
 **	clictx	The parse context
-**	pq	The parameter/qualifier descriptor whose value is wanted
+**	pq	The parameter/qualifier descriptor
 **	val	Receives the value as an ASCIC string
 **
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE.
-**
 **  RETURN VALUE:
-**	STS$K_SUCCESS if a value was returned; STS$K_WARN if it was not present.
+**	STS$K_SUCCESS if a value was returned; STS$K_WARN if the item is present with an empty value;
+**	STS$K_ERROR if the item is absent (no default) or the list is drained - not logged, with
+**	CLI$M_OPSIGNAL either.  A NULL context or descriptor is a programming error and is logged.
 **--
 */
 int	__cli$get_value	(
@@ -1417,32 +1317,89 @@ int	 seen = 0;
 		return	STS$K_SUCCESS;
 		}
 
-	return	(clictx->opts & CLI$M_OPSIGNAL) ? $LOG(STS$K_ERROR, "No parameter/qualifier ('%.*s') is present in command line",
-						       $ASC(&pq->name)) : STS$K_ERROR;
+	/* Absent, or a list drained: a normal answer to a probe, so it is never logged, OPSIGNAL or not */
+	return	STS$K_ERROR;
 }
 
 /*
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Report whether a parameter or qualifier was supplied on the command line,
-**	and in what form.  The analogue of the OpenVMS CLI$PRESENT service.
+**	Resolve the value of a CLI$K_KWD item to its entry of the keyword table (CLI_PQDESC.kwd): the full
+**	keyword name and its <val>.  The parse stores the FULL keyword, not what was typed.  Does not advance
+**	the CLI$M_LIST cursor of __cli$get_value().
+**
+**  FORMAL PARAMETERS:
+**
+**	clictx	The parse context
+**	pq	The descriptor, a CLI$K_KWD one with a keyword list
+**	val	A value from __cli$get_value(), or NULL for the first value of the item (or its default)
+**	kwd	Receives the keyword entry (inside the table of <pq>)
+**
+**  RETURN VALUE:
+**	STS$K_SUCCESS; STS$K_WARN if the item is present with an empty value (/mode, /mode=), as __cli$get_value()
+**	says it; STS$K_ERROR if there is no keyword list, the item is absent without a default, or
+**	the value is not a keyword of the table (nothing is logged).
+**--
+*/
+int	__cli$get_keyword	(
+	CLI_CTX		*clictx,
+	CLI_PQDESC	*pq,
+	const ASC	*val,
+	CLI_KEYWORD	**kwd
+			)
+{
+CLI_ITEM	*item;
+const ASC	*l_val = val;
+CLI_KEYWORD	*krun;
+
+	if ( !clictx || !pq || !kwd )
+		return	$LOG(STS$K_FATAL, "Illegal parameter(s) of __cli$get_keyword()");
+
+	*kwd = NULL;
+
+	if ( !pq->kwd )
+		return	STS$K_ERROR;
+
+	if ( !l_val )
+		{
+		for ( item = clictx->avlist; item && (item->pqdesc != pq); item = item->next);
+
+		if ( item )
+			l_val = &item->val;
+		else if ( $ASCLEN(&pq->defval) )
+			l_val = &pq->defval;
+		else	return	STS$K_ERROR;
+		}
+
+	if ( !$ASCLEN(l_val) )
+		return	STS$K_WARN;
+
+	for ( krun = pq->kwd; $ASCLEN(&krun->name); krun++ )
+		if ( ($ASCLEN(&krun->name) == $ASCLEN(l_val)) && !strncasecmp($ASCPTR(&krun->name), $ASCPTR(l_val), $ASCLEN(l_val)) )
+			{
+			*kwd = krun;
+			return	STS$K_SUCCESS;
+			}
+
+	return	STS$K_ERROR;
+}
+
+/*
+**++
+**  FUNCTIONAL DESCRIPTION:
+**
+**	Report whether a parameter or qualifier was supplied, and in what form (the CLI$PRESENT analogue).
 **
 **  FORMAL PARAMETERS:
 **
 **	clictx	The parse context
 **	pq	The parameter/qualifier descriptor to test
-**	state	Optional; receives the item state - CLI$M_PRESENT, plus
-**		CLI$M_NEGATED when the qualifier was given as /NO<name>.  Set to
-**		zero when the item is absent.  When a qualifier is repeated - most
-**		usefully /HIGHLIGHT then /NOHIGHLIGHT - the LAST occurrence on the
-**		command line wins, as it does in the DCL.
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE
+**	state	Optional; receives CLI$M_PRESENT, plus CLI$M_NEGATED for /NO<name>; zero when absent.
+**		A repeated qualifier reports its LAST occurrence (/HIGHLIGHT /NOHIGHLIGHT)
 **
 **  RETURN VALUE:
-**	STS$K_SUCCESS if present (in any form); STS$K_WARN if absent.
+**	STS$K_SUCCESS if present in any form; STS$K_WARN if absent.
 **--
 */
 int	__cli$present	(
@@ -1487,15 +1444,11 @@ CLI_ITEM	*item, *l_found = NULL;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Free all memory owned by a parse context. After the call the context
-**	pointer must not be used.
+**	Free a parse context and its items; the pointer must not be used afterwards.
 **
 **  FORMAL PARAMETERS:
 **
 **	clictx	The context to release
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Frees the context and its items.
 **
 **  RETURN VALUE:
 **	STS$K_SUCCESS.
@@ -1538,19 +1491,14 @@ CLI_ITEM	*avp, *avp2;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Invoke the action routine registered in the matched verb, passing the
-**	context and the verb's act_arg. Within the action, values are retrieved
-**	with __cli$get_value().
+**	Invoke the action routine of the matched verb with the context and the verb's act_arg.
 **
 **  FORMAL PARAMETERS:
 **
 **	clictx	A context produced by __cli$parse()
 **
-**  IMPLICIT INPUTS/OUTPUTS:
-**	NONE.
-**
 **  RETURN VALUE:
-**	Whatever condition value the action routine returns.
+**	The condition value the action routine returns.
 **--
 */
 int	__cli$dispatch	(
@@ -1756,24 +1704,7 @@ CLI_VERB	top_commands []  = {
 ASC	prompt = {$ASCINI("CRYPTORCP>")};
 
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__CLI_DEBUG__ demo harness - not part of the library API.]
-**
-**	Action routine bound to the demo DIFF verb: fetch its parameters and
-**	qualifiers from the context and report them.
-**
-**  FORMAL PARAMETERS:
-**
-**	clictx	The parse context
-**	arg	The verb's act_arg
-**
-**  RETURN VALUE:
-**	A condition code.
-**--
-*/
+/* DIFF_ACTION - action routine of the demo DIFF verb (__CLI_DEBUG__ harness, not library API) */
 int	diff_action	(
 		CLI_CTX		*clictx,
 			void	*arg
@@ -1799,23 +1730,7 @@ ASC	fl1, fl2;
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__CLI_DEBUG__ demo harness - not part of the library API.]
-**
-**	Action routine bound to the demo SORT verb.
-**
-**  FORMAL PARAMETERS:
-**
-**	clictx	The parse context
-**	arg	The verb's act_arg
-**
-**  RETURN VALUE:
-**	A condition code.
-**--
-*/
+/* SORT_ACTION - action routine of the demo SORT verb (__CLI_DEBUG__ harness, not library API) */
 int	sort_action	(
 		CLI_CTX		*clictx,
 			void	*arg
@@ -1828,23 +1743,7 @@ int	sort_action	(
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__CLI_DEBUG__ demo harness - not part of the library API.]
-**
-**	Action routine bound to the demo SHOW verb.
-**
-**  FORMAL PARAMETERS:
-**
-**	clictx	The parse context
-**	arg	The verb's act_arg
-**
-**  RETURN VALUE:
-**	A condition code.
-**--
-*/
+/* SHOW_ACTION - action routine of the demo SHOW verb (__CLI_DEBUG__ harness, not library API) */
 int	show_action	( CLI_CTX *clictx, void *arg)
 {
 int	what = (int)(intptr_t) arg;
@@ -1869,24 +1768,7 @@ int	what = (int)(intptr_t) arg;
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__CLI_DEBUG__ demo harness - not part of the library API.]
-**
-**	Entry point of the demo: define a small grammar, parse argv with
-**	__cli$parse() and dispatch the matched verb with __cli$dispatch().
-**
-**  FORMAL PARAMETERS:
-**
-**	argc	Argument count
-**	argv	Argument vector
-**
-**  RETURN VALUE:
-**	Process exit status.
-**--
-*/
+/* MAIN - __CLI_DEBUG__ demo: define a small grammar, __cli$parse() argv, __cli$dispatch() the verb; not library API */
 int main	(int	argc, char **argv)
 {
 int	status;

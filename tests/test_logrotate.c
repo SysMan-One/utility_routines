@@ -11,8 +11,7 @@
 **
 **  MODULE:  test_logrotate.c
 **
-**	22-OCT-2026	RRL	Builds for Windows: mkdtemp() made of _mktemp() + _mkdir(),
-**				the files under the current directory there.
+**	22-OCT-2026	RRL	Builds for Windows: mkdtemp() made of _mktemp() + _mkdir().
 **--
 */
 #define __MODULE__ "LRT$"
@@ -126,7 +125,7 @@ int	l_out;
 	CHECK( strstr(l_buf, "record one") != NULL, "t.log.1 holds the old record");
 
 	__util$out("record two");
-	write(STDOUT_FILENO, "stdout two\n", 11);
+	CHECK( 11 == write(STDOUT_FILENO, "stdout two\n", 11), "stdout written");
 	s_slurp(s_log, l_buf, sizeof(l_buf));
 	CHECK( strstr(l_buf, "has been rotated") != NULL, "the new t.log starts with the rotation record");
 	CHECK( strstr(l_buf, "record two") != NULL, "$LOG goes to the new t.log");

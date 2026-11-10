@@ -1,6 +1,6 @@
 #define	__MODULE__	"AVPROTO"
-#define	__IDENT__	"X.94-11ECO2"
-#define	__REV__		"94.11.2"
+#define	__IDENT__	"X.94-12ECO1"
+#define	__REV__		"94.12.1"
 
 
 /*
@@ -8,47 +8,10 @@
 **
 **  FACILITY:  AVProto - Attribute/Value Pair (Tag Length Value) based protocol
 **
-**  ABSTRACT: Carrying data encapsulated in to the AVP microcontainers as payload of the protocol data unit (PDU)
-**
-**  DESCRIPTION: This module contains data structures and constant definition is supposed to be used
-**	in the core AVProto routines as well as in general API routines.
-**
-**  DESIGN ISSUE:
-**	This API - is a set of routines to performs encapsulation data into the TVL containers
-**	and extract data.
-**
-**	See example of using this API at end of this module!
-**
-**
-**  SET OF ROUTINES:
-**
-**	int	__tlv$hset (void *pdu, char *sig, unsigned u_csr, unsigned u_seq);
-**		- Initialize PDU with given values, reset PDU's length field to initial state.
-**
-**
-**	int	__tlv$hget (void *pdu, char *sig, unsigned *u_len, unsigned *u_csr, unsigned *u_seq);
-**		- Retrieve values from the PDU
-**
-**	int	__tlv$put  (void *pdu, unsigned short pdusz, unsigned v_tag, unsigned v_type, void *val, unsigned valsz);
-**		- Add new TLV into the PDU (at end);
-**
-**	int	__tlv$get  (void *pdu, [int *context], unsigned v_tag, unsigned *v_type, void *val, [unsigned *valsz]);
-**		- Retrieve TLV from the given PDU
-**
-**	int	__tlv$lookup  (void *pdu, [int *context], unsigned v_tag, unsigned *v_type, void **val, [unsigned *valsz]);
-**		- Lookup TLV with specified Tag Id (v_tag), return an address of the value (unconverted !)  in the PDU's area and size.
-**
-**
-**	unsigned short __tlv$encode_tag( unsigned short v_type, unsigned short v_tag);
-**		- Encapsulate Tag Id and Value Type into the 16-bits variable;
-**
-**	unsigned short __tlv$decode_tag (unsigned short w_tag, unsigned short	*v_type, unsigned short	*v_tag);
-**		- Decode Tag Id and Value Type from the 16-bits opaque;
-**
-**
-**   USAGE:
-**		#include	"avproto.h"
-**		add avproto.c module into project
+**  ABSTRACT: Routines to put data into a PDU as TLV records (__tlv$hset/__tlv$hget/__tlv$put) and to extract it
+**	(__tlv$get, __tlv$lookup, __tlv$dump); the tag id (12 bits) and the value type (4 bits) share one 16-bit word.
+**	Every reader takes the REAL size of the PDU area and validates each record against it: a hostile PDU gives
+**	an error status, never an overrun.  An example of the use is the __AVPROTO_MAIN__ harness at the end of the module.
 **
 **  AUTHORS: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
@@ -56,12 +19,14 @@
 **
 **  MODIFICATION HISTORY:
 **
-**	22-OCT-2026	RRL	X.94-11ECO2 : <endian.h> comes through avproto.h only - Windows has none,
-**		avproto.h gives the _byteswap_*() stand-ins there (MinGW-w64 cross build from Linux (yaVNA for Windows x64)).
+**	31-OCT-2026	CLD	X.94-12ECO1 : StarLet 1.7.1: __tlv$lookup() checks the wire length of a fixed-size record (WORD 2, LONGWORD 4, QWORD 8, UUID 16) as __tlv$get() does.
 **
-**	14-AUG-2026	RRL	X.94-11ECO1 : the mandatory __REV__ was absent from the module
-**		header; per the Xaa-bbECOc -> aa.bb.c rule it is "94.11.1" (this very
-**		addition being the ECO).
+**	31-OCT-2026	CLD	X.94-12 : StarLet 1.7.0 hostile-input hardening: __tlv$put() checks free space by the real record length and the tag id
+**				range, __tlv$get()/__tlv$lookup() check the wire length and report a truncated record as an error, __tlv$dump() in 64-octet chunks.
+**
+**	22-OCT-2026	RRL	X.94-11ECO2 : <endian.h> comes through avproto.h only (Windows has none; MinGW-w64 cross build gets _byteswap_*() stand-ins).
+**
+**	14-AUG-2026	RRL	X.94-11ECO1 : the mandatory __REV__ was absent from the module header; per the Xaa-bbECOc -> aa.bb.c rule it is "94.11.1".
 **
 **	 6-FEB-2019	SYS	Some redesigning according changes in the AVP's structure.
 **
@@ -69,36 +34,22 @@
 **
 **	18-FEB-2019	RRL	Added API routine to lookup functionality.
 **
-**	22-FEB-2019	RRL	X.94-02 : Added destination buffer checking in the __tlv$get();
-**				moved __tlv$hget()/__tlv$hset() to .H;
-**				unhardcoded "Z0magic" signature - now it's parameter;
+**	22-FEB-2019	RRL	X.94-02 : Destination buffer checking in __tlv$get(); __tlv$hget()/__tlv$hset() moved to .H; the "Z0magic" signature is a parameter.
 **
 **	25-FEB-2019	SYS	X.94-03 : Fixed bug with ptlv pointer computation in the __tlv$get(), __tlv$lookup()
 **
-**	26-FEB-2019	SYS	X.94-04 : Recoded to make 'context' parameter is optional in the __tlv$get()/__tlv$lookup()
+**	26-FEB-2019	SYS	X.94-04 : 'context' parameter is optional in the __tlv$get()/__tlv$lookup()
 **
-**	 6-JUN-2019	RRL	X.94-05 : Added zeroing area before copying  attribute value in the __tlv$put()
+**	 6-JUN-2019	RRL	X.94-05 : Added zeroing area before copying attribute value in the __tlv$put()
 **
-**	 2-JUL-2019	RRL	X.94-06 : Parameter 'valsz' of the __tlv$put() is optional now for fixed size arguments (WORD, LONGWORD, QUADWORD, UUID)
+**	 2-JUL-2019	RRL	X.94-06 : Parameter 'valsz' of the __tlv$put() is optional for fixed size arguments (WORD, LONGWORD, QUADWORD, UUID)
 **
 **	29-JUL-2019	RRL	X.94-07 : Redeclared __tlv$dump();
 **
-**	27-JUL-2026	RRL	X.94-08 : Security/robustness fixes:
-**				- __tlv$get()/__tlv$lookup()/__tlv$dump() take real PDU area
-**				  size <pdusz> and validate every TLV against it (no OOB on a
-**				  malformed/hostile PDU with a lying u_len/w_len);
-**				- fixed 'next TLV' pointer computation in __tlv$lookup() (was
-**				  based on <pdu> instead of <ptlv>), set returned value length;
-**				- __tlv$get(): require <valsz> for variable-length tags, clamp
-**				  UUID copy to the destination buffer;
-**				- __tlv$put(): fixed unsigned-short underflow of the free-space
-**				  computation.
+**	27-JUL-2026	RRL	X.94-08 : Security/robustness fixes: get/lookup/dump take the real PDU size and validate every TLV against it, 'next TLV' pointer
+**				in __tlv$lookup() fixed, <valsz> required for variable-length tags in get, UUID copy clamped, free-space underflow in put fixed.
 **
-**
-**
-**	28-JUL-2026	RRL	X.94-09 : Renamed the routine prefix avproto_ to __tlv$ (the module
-**				implements a Tag-Length-Value protocol). Uppercase types
-**				AVPROTO_PDU/AVPROTO_HDR/AVPROTO_TLV are unchanged.
+**	28-JUL-2026	RRL	X.94-09 : Routine prefix avproto_ renamed to __tlv$ (uppercase types AVPROTO_PDU/HDR/TLV unchanged).
 **
 **--
 */
@@ -117,44 +68,83 @@
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Append one Tag-Length-Value record to a PDU. Word, longword and quadword
-**	values are stored in network byte order; the header payload length is
-**	updated. Fails if the value does not fit in the remaining buffer space.
+**	Append one TLV record to a PDU.  WORD/LONGWORD/QWORD values are stored in network byte order.  Never
+**	writes past <a_pdusz>: the free space is checked against the REAL record length (2/4/8/16 or <a_valsz>
+**	for an octet block); the PDU length grows by exactly that plus the four octets of the TLV header.
 **
 **  FORMAL PARAMETERS:
 **
 **	a_pdup	Address of the PDU buffer
-**	a_pdusz	Total size of the PDU buffer in octets
-**	a_v_tag	Application tag identifier
-**	a_v_type	Tag type (TAG$K_*)
-**	a_val	Address of the value to store
-**	a_valsz	Size of the value in octets
+**	a_pdusz	Size of the PDU buffer in octets
+**	a_v_tag	Tag identifier, 0..4095
+**	a_v_type	Tag type (TAG$K_*, 0..15)
+**	a_val	Address of the value (host byte order for WORD/LONGWORD/QWORD)
+**	a_valsz	Size of the value.  Fixed-size type: at least 2/4/8/16, only the type size is stored.
+**		Octet block: the record length, 0..65535
 **
 **  IMPLICIT INPUTS/OUTPUTS:
 **	Updates the length field in the PDU header.
 **
 **  RETURN VALUE:
-**	STS$K_SUCCESS on success; error if the buffer is too small or the header
-**	length is corrupt.
+**	STS$K_SUCCESS; STS$K_ERROR if the buffer is too small, the header length is corrupt, the tag id/type
+**	does not fit its bits, or a_valsz is missing/too small.  Nothing is written on error.
 **--
 */
 int	__tlv$put (
 	void *		a_pdup,
-	unsigned short	a_pdusz,
+	unsigned	a_pdusz,
 	unsigned	a_v_tag,
 	unsigned	a_v_type,
 	void	*	a_val,
 	unsigned	a_valsz
 		)
 {
-unsigned	l_len = 0, l_used, l_free;
+unsigned	l_len = 0, l_used, l_free, l_fixed = 0;
 char	*	l_pchar;
 AVPROTO_TLV *	l_ptlv;
 AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 
 	/* The PDU area must hold at least the fixed header */
 	if ( a_pdusz < sizeof(AVPROTO_HDR) )
-		return	$LOG(STS$K_ERROR, "PDU area too small: %u octets", (unsigned) a_pdusz);
+		return	$LOG(STS$K_ERROR, "PDU area too small: %u octets", a_pdusz);
+
+	/* The tag id owns twelve bits and the type four: a wider value would corrupt the neighbouring field */
+	if ( (a_v_tag > 0x0fff) || (a_v_type > 0xf) )
+		return	$LOG(STS$K_ERROR, "Tag id/type out of range: tag=%u, type=%u", a_v_tag, a_v_type);
+
+	/* The real length of the record: the size of the type, or the caller's size for an octet block */
+	switch ( a_v_type )
+		{
+		case	TAG$K_WORD:
+			l_len = sizeof(uint16_t), l_fixed = 1;
+			break;
+
+		case	TAG$K_LONGWORD:
+			l_len = sizeof(uint32_t), l_fixed = 1;
+			break;
+
+		case	TAG$K_QWORD:
+			l_len = sizeof(uint64_t), l_fixed = 1;
+			break;
+
+		case	TAG$K_UUID:
+			l_len = 16, l_fixed = 1;
+			break;
+
+		default:
+			l_len = a_valsz;
+
+			/* The length field of the TLV is sixteen bits wide */
+			if ( l_len > USHRT_MAX )
+				return	$LOG(STS$K_ERROR, "Value too long for tag=%u: %u octets", a_v_tag, a_valsz);
+		}
+
+	/* A fixed-size value must be supplied in full; 0 or a short size is the caller's bug, never guessed */
+	if ( l_fixed && (a_valsz < l_len) )
+		return	$LOG(STS$K_ERROR, "Value size %u is less than %u required for tag=%u, type=%u", a_valsz, l_len, a_v_tag, a_v_type);
+
+	if ( l_len && !a_val )
+		return	$LOG(STS$K_ERROR, "No value for tag=%u, type=%u", a_v_tag, a_v_type);
 
 	/* Get current PDU's payload size from the header */
 	l_used = be32toh(l_pdu->r_hdr.u_len);
@@ -169,75 +159,58 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 	/* Compute pointer to "first free byte" of the PDU's area */
 	l_pchar = (char *) l_pdu->r_tlv + l_used;
 
-	/* Check for free space in the PDU's area */
-	if ( (sizeof (AVPROTO_TLV) + a_valsz) > l_free )
-		return	$LOG(STS$K_ERROR, "No free space for tag=%d, type=%d, len=%d", a_v_tag, a_v_type, a_valsz);
+	/* Check for free space by the real length of the record (l_len <= 65535, no wrap) */
+	if ( (sizeof (AVPROTO_TLV) + l_len) > l_free )
+		return	$LOG(STS$K_ERROR, "No free space for tag=%u, type=%u, len=%u", a_v_tag, a_v_type, l_len);
 
 	/* Set TLV pointer to end of the current PDU  */
 	l_ptlv = (AVPROTO_TLV *) (l_pchar);
 
 	/* Pack Tag type and Tag id into the field */
 	l_ptlv->w_tag = __tlv$encode_tag (a_v_type, a_v_tag);
+	l_ptlv->w_len = htobe16( (uint16_t) l_len );
 
-	/* Put value into the TLV container */
+	/* Put value into the TLV container; the numeric types cross to network byte order */
 	switch ( a_v_type )
 		{
 		case	TAG$K_WORD:	/* 16 bits */
 			{
-			uint16_t l_v = 0;				/* unaligned-safe: b_val may sit at an odd offset */
+			uint16_t l_v;				/* unaligned-safe: b_val may sit at an odd offset */
 
-			memcpy(&l_v, a_val, a_valsz ? (size_t) $MIN(a_valsz, sizeof(l_v)) : sizeof(l_v));
+			memcpy(&l_v, a_val, sizeof(l_v));
 			l_v = htobe16(l_v);
 			memcpy(l_ptlv->b_val, &l_v, sizeof(l_v));
-
-			l_ptlv->w_len = htobe16( l_len = sizeof(uint16_t) );
-
 			break;
 			}
 
 		case	TAG$K_LONGWORD:	/* 32 bits */
 			{
-			uint32_t l_v = 0;
+			uint32_t l_v;
 
-			memcpy(&l_v, a_val, a_valsz ? (size_t) $MIN(a_valsz, sizeof(l_v)) : sizeof(l_v));
+			memcpy(&l_v, a_val, sizeof(l_v));
 			l_v = htobe32(l_v);
 			memcpy(l_ptlv->b_val, &l_v, sizeof(l_v));
-
-			l_ptlv->w_len = htobe16( l_len = sizeof(uint32_t) );
-
 			break;
 			}
 
 		case	TAG$K_QWORD:	/* 64 bits */
 			{
-			uint64_t l_v = 0;
+			uint64_t l_v;
 
-			memcpy(&l_v, a_val, a_valsz ? (size_t) $MIN(a_valsz, sizeof(l_v)) : sizeof(l_v));
+			memcpy(&l_v, a_val, sizeof(l_v));
 			l_v = htobe64(l_v);
 			memcpy(l_ptlv->b_val, &l_v, sizeof(l_v));
-
-			l_ptlv->w_len = htobe16( l_len = sizeof(uint64_t) );
-
 			break;
 			}
 
-		case	TAG$K_UUID:	/* 16 octets  */
-			memset(l_ptlv->b_val, 0, 16);
-
-			memcpy(l_ptlv->b_val, a_val, l_len = $MIN(a_valsz, 16));
-			l_ptlv->w_len = htobe16( 16 );
-
-			break;
-
-		default:
-			memcpy(l_ptlv->b_val, a_val, l_len = a_valsz);
-			l_ptlv->w_len = htobe16( a_valsz );
-
+		default:		/* UUID and octet blocks: copied as is */
+			if ( l_len )
+				memcpy(l_ptlv->b_val, a_val, l_len);
 			break;
 		}
 
-	/* Adjust PDU's length  */
-	l_pdu->r_hdr.u_len = htobe32(sizeof (AVPROTO_TLV) + l_len + be32toh(l_pdu->r_hdr.u_len) );
+	/* Adjust PDU's length by exactly the octets written: header + value */
+	l_pdu->r_hdr.u_len = htobe32(l_used + sizeof (AVPROTO_TLV) + l_len);
 
 	return	STS$K_SUCCESS;
 }
@@ -247,14 +220,13 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Find a TLV by tag and copy its value into a caller buffer. Word, longword
-**	and quadword values are converted from network to host byte order. Every
-**	record is validated against <a_pdusz> so a malformed PDU cannot overrun.
+**	Find a TLV by tag and copy its value to a caller buffer; WORD/LONGWORD/QWORD are converted to host
+**	byte order.  The wire length of a fixed-size record must equal the size of its type.
 **
 **  FORMAL PARAMETERS:
 **
 **	a_pdup	Address of the received PDU
-**	a_pdusz	REAL size of the PDU area (received octets)
+**	a_pdusz	REAL size of the PDU area
 **	a_context	Iteration context; -1 on the first call
 **	a_v_tag	Tag identifier to find
 **	a_v_type	Receives the tag type
@@ -265,8 +237,8 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 **	Advances <a_context> through the PDU.
 **
 **  RETURN VALUE:
-**	STS$K_SUCCESS if found and copied; STS$K_WARN if absent; error if the
-**	destination is too small or <a_valsz> was omitted for a variable-length type.
+**	STS$K_SUCCESS; STS$K_WARN if absent; STS$K_ERROR if the destination is too small, <a_valsz> is
+**	missing for a variable-length type, a fixed-size record has a wrong length, or a record runs past the PDU.
 **--
 */
 int	__tlv$get (
@@ -304,22 +276,30 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 	/* Find TLV with a given Tag Id */
 	for ( l_status = STS$K_WARN; (unsigned) l_pos < l_limit; )
 		{
-		/* The fixed TLV header itself must fit into the remaining area */
+		/* The fixed TLV header itself must fit into the remaining area; a torn record is an error, not "absent" */
 		if ( ((unsigned) l_pos + sizeof(AVPROTO_TLV)) > l_limit )
+			{
+			l_status = STS$K_ERROR;
+			l_pos = l_limit;
 			break;
+			}
 
 		__tlv$decode_tag (l_ptlv->w_tag, &l_type, &l_tag);
 		l_wlen = be16toh(l_ptlv->w_len);
 
 		/* The whole TLV (header + value) must fit too */
 		if ( ((unsigned) l_pos + sizeof(AVPROTO_TLV) + l_wlen) > l_limit )
+			{
+			l_status = STS$K_ERROR;
+			l_pos = l_limit;
 			break;
+			}
 
 		/* Adjust context */
 		l_pos += sizeof(AVPROTO_TLV) + l_wlen;
 
 		/* Note: intentional assignment (not ==): l_status becomes 1 on a Tag Id match */
-		if ( l_status = (a_v_tag == l_tag) )
+		if ( (l_status = (a_v_tag == l_tag)) )
 			break;
 
 		/* Jump to next TLV */
@@ -333,6 +313,14 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 	/* Not found ? */
 	if ( !(1 & l_status) )
 		return	l_status;
+
+	/* The wire length of a fixed-size record must match its type: a hostile record must not be over-read or half-copied */
+	if ( ((l_type == TAG$K_WORD) && (l_wlen != sizeof(uint16_t))) || ((l_type == TAG$K_LONGWORD) && (l_wlen != sizeof(uint32_t)))
+		|| ((l_type == TAG$K_QWORD) && (l_wlen != sizeof(uint64_t))) || ((l_type == TAG$K_UUID) && (l_wlen != 16)) )
+		return	$LOG(STS$K_ERROR, "Bad length %u of the record tag=%u, type=%u", l_wlen, l_tag, l_type);
+
+	if ( !a_val || !a_v_type )
+		return	STS$K_ERROR;
 
 	/*
 	 * Destination buffer size check. For variable-length values (UUID, octet block, unknown)
@@ -396,11 +384,9 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 
 		case	TAG$K_UUID:	/* 16 octets  */
 			{
-			unsigned short l_dstlen = (unsigned short) $MIN(*a_valsz, 16);
-			unsigned short l_srclen = $MIN(l_wlen, l_dstlen);
-
-			__util$movc5 (&l_srclen, (char *) l_ptlv->b_val, 0, &l_dstlen, a_val);
-			l_len = l_dstlen;
+			/* l_wlen == 16 is proven above and *a_valsz >= l_wlen by the destination check */
+			memcpy(a_val, l_ptlv->b_val, 16);
+			l_len = 16;
 			}
 
 			break;
@@ -423,14 +409,13 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Find a TLV by tag and return a pointer to its value inside the PDU, with
-**	no copy. The data is NOT byte-order converted. The pointer is valid only
-**	while the caller's PDU buffer lives. Suitable for large octet blocks.
+**	Find a TLV by tag and return a pointer to its value inside the PDU, no copy, NOT byte-order converted;
+**	valid only while the caller's PDU buffer lives.
 **
 **  FORMAL PARAMETERS:
 **
 **	a_pdup	Address of the received PDU
-**	a_pdusz	REAL size of the PDU area (received octets)
+**	a_pdusz	REAL size of the PDU area
 **	a_context	Iteration context; -1 on the first call
 **	a_v_tag	Tag identifier to find
 **	a_v_type	Receives the tag type
@@ -441,7 +426,8 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 **	Advances <a_context> through the PDU.
 **
 **  RETURN VALUE:
-**	STS$K_SUCCESS if the record was found; STS$K_WARN otherwise.
+**	STS$K_SUCCESS; STS$K_WARN if absent; STS$K_ERROR if a record runs past the PDU or a fixed-size record
+**	(WORD 2, LONGWORD 4, QWORD 8, UUID 16) has a wrong wire length.
 **--
 */
 int	__tlv$lookup (
@@ -479,22 +465,30 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 	/* Find TLV with a given Tag Id */
 	for ( l_status = STS$K_WARN; (unsigned) l_pos < l_limit; )
 		{
-		/* The fixed TLV header itself must fit into the remaining area */
+		/* The fixed TLV header itself must fit into the remaining area; a torn record is an error, not "absent" */
 		if ( ((unsigned) l_pos + sizeof(AVPROTO_TLV)) > l_limit )
+			{
+			l_status = STS$K_ERROR;
+			l_pos = l_limit;
 			break;
+			}
 
 		__tlv$decode_tag (l_ptlv->w_tag, &l_type, &l_tag);
 		l_wlen = be16toh(l_ptlv->w_len);
 
 		/* The whole TLV (header + value) must fit too */
 		if ( ((unsigned) l_pos + sizeof(AVPROTO_TLV) + l_wlen) > l_limit )
+			{
+			l_status = STS$K_ERROR;
+			l_pos = l_limit;
 			break;
+			}
 
 		/* Adjust context */
 		l_pos += sizeof(AVPROTO_TLV) + l_wlen;
 
 		/* Note: intentional assignment (not ==): l_status becomes 1 on a Tag Id match */
-		if ( l_status = (a_v_tag == l_tag) )
+		if ( (l_status = (a_v_tag == l_tag)) )
 			break;
 
 		/* Jump to next TLV - relative to the CURRENT TLV, not to the PDU base ! */
@@ -507,6 +501,11 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 	/* Not found ? */
 	if ( !(1 & l_status) )
 		return	l_status;
+
+	/* The wire length of a fixed-size record must match its type, as in __tlv$get(): never a pointer to a short record */
+	if ( ((l_type == TAG$K_WORD) && (l_wlen != sizeof(uint16_t))) || ((l_type == TAG$K_LONGWORD) && (l_wlen != sizeof(uint32_t)))
+		|| ((l_type == TAG$K_QWORD) && (l_wlen != sizeof(uint64_t))) || ((l_type == TAG$K_UUID) && (l_wlen != 16)) )
+		return	$LOG(STS$K_ERROR, "Bad length %u of the record tag=%u, type=%u", l_wlen, l_tag, l_type);
 
 	l_len = l_wlen;			/* Length of the found TLV's value block */
 
@@ -527,19 +526,13 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdup;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Write a human-readable listing of every TLV in a PDU to the log: each
-**	record with its tag, type, length and a hex dump of the value. For debugging.
+**	Write every TLV of a PDU to the log: tag, type, length and a hex dump of the value (continued in
+**	64-octet lines).  For debugging.
 **
 **  FORMAL PARAMETERS:
 **
 **	a_pdu	Address of the PDU
-**	a_pdusz	REAL size of the PDU area (received octets)
-**
-**  IMPLICIT INPUTS/OUTPUTS:
-**	Writes to the current log destination.
-**
-**  RETURN VALUE:
-**	NONE.
+**	a_pdusz	REAL size of the PDU area
 **--
 */
 void	__tlv$dump	(
@@ -547,9 +540,9 @@ void	__tlv$dump	(
 		unsigned a_pdusz		/* Real size of the PDU area (received octets) */
 			)
 {
-char		l_hexbuf1[512], l_hexbuf2[512];
+char		l_hexbuf1[2 * sizeof(AVPROTO_TLV) + 1], l_hexbuf2[2 * 64 + 1];
 char	*	l_pchar;
-unsigned	l_limit, l_count, l_pos;
+unsigned	l_limit, l_count, l_pos, l_off, l_chunk;
 unsigned short	l_wlen, l_wtag, l_vtype, l_vtag;
 AVPROTO_TLV *	l_ptlv;
 AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdu;
@@ -586,9 +579,22 @@ AVPROTO_PDU *	l_pdu = (AVPROTO_PDU *) a_pdu;
 			}
 
 		__util$bin2hex (l_ptlv, l_hexbuf1, sizeof(AVPROTO_TLV));
-		__util$bin2hex (l_ptlv->b_val, l_hexbuf2, $MIN(l_wlen, sizeof(l_hexbuf2)/2) );
-		$LOG(STS$K_INFO, "[%04.4d] TLV [tag=%04x(id=%04x, type=%04x), len=%02d] 0x%s:0x%s",
-		     l_count, l_wtag, l_vtag, l_vtype, l_wlen, l_hexbuf1, l_hexbuf2);
+		/* The value goes out in chunks of 64 octets, so a long one can not overflow the hex buffer */
+		l_off = 0;
+		do	{
+			l_chunk = $MIN(l_wlen - l_off, (sizeof(l_hexbuf2) - 1) / 2);
+
+			__util$bin2hex (l_ptlv->b_val + l_off, l_hexbuf2, l_chunk);
+			l_hexbuf2[2 * l_chunk] = '\0';
+
+			if ( !l_off )
+				$LOG(STS$K_INFO, "[%04.4d] TLV [tag=%04x(id=%04x, type=%04x), len=%02d] 0x%s:0x%s",
+				     l_count, l_wtag, l_vtag, l_vtype, l_wlen, l_hexbuf1, l_hexbuf2);
+			else
+				$LOG(STS$K_INFO, "[%04.4d]   +%04u: 0x%s", l_count, l_off, l_hexbuf2);
+
+			l_off += l_chunk;
+			} while ( l_off < l_wlen );
 
 		l_pos   += sizeof(AVPROTO_TLV) + l_wlen;
 		l_pchar += sizeof(AVPROTO_TLV) + l_wlen;
@@ -634,23 +640,7 @@ char	pdubuf[8192];	/* This buffer will keep the PDU is shared between
 AVPROTO_PDU *pdu = (AVPROTO_PDU *) pdubuf;
 
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
-**
-**	Demo TLS client: build an SSL context, connect to the server, then
-**	exchange a request/response PDU pair over the encrypted channel.
-**
-**  FORMAL PARAMETERS:
-**
-**	NONE
-**
-**  RETURN VALUE:
-**	A condition code (STS$K_*).
-**--
-*/
+/* __CLIENT - demo TLS client: connect and exchange a request/response PDU pair (__AVPROTO_MAIN__ harness, not library API) */
 int	__client	(void)
 {
 unsigned char	username[] = "Ruslan (BadAss SysMan) Laishev",
@@ -678,23 +668,7 @@ long long	q_val = 0x1234abcddeadbeef;
 	return	STS$K_SUCCESS;
 }
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
-**
-**	Demo TLS server: build an SSL context, listen and accept a connection,
-**	then read a request PDU and answer with a response PDU.
-**
-**  FORMAL PARAMETERS:
-**
-**	NONE
-**
-**  RETURN VALUE:
-**	A condition code (STS$K_*).
-**--
-*/
+/* __SERVER - demo TLS server: accept a connection, read a request PDU, answer with a response PDU (__AVPROTO_MAIN__ harness, not library API) */
 int	__server	(void)
 {
 unsigned context = -1, u_len, u_csr, u_seq, v_type, mlen;
@@ -933,26 +907,7 @@ struct pollfd pfd = {sd, POLLOUT, 0};
 
 
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
-**
-**	Read exactly one PDU from a TLS-protected socket: first the fixed header,
-**	then the payload whose length the header declares.
-**
-**  FORMAL PARAMETERS:
-**
-**	sd	Connected socket descriptor
-**	ssl	OpenSSL connection object
-**	pdubuf	Buffer that receives the PDU
-**	pdusz	Capacity of <pdubuf> in octets
-**
-**  RETURN VALUE:
-**	A condition code (STS$K_*).
-**--
-*/
+/* PDU_RECV - read exactly one PDU from a TLS socket: the fixed header, then the payload its length declares (__AVPROTO_MAIN__ harness, not library API) */
 int	pdu_recv	(
 		int	sd,
 		SSL	*ssl,
@@ -985,24 +940,7 @@ unsigned status, u_len, u_csr, u_seq;
 }
 
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
-**
-**	Write one complete PDU (header plus payload) to a TLS-protected socket.
-**
-**  FORMAL PARAMETERS:
-**
-**	sd	Connected socket descriptor
-**	ssl	OpenSSL connection object
-**	pdubuf	The PDU to send
-**
-**  RETURN VALUE:
-**	A condition code (STS$K_*).
-**--
-*/
+/* PDU_XMIT - write one complete PDU (header plus payload) to a TLS socket (__AVPROTO_MAIN__ harness, not library API) */
 int	pdu_xmit	(
 		int	sd,
 		SSL	*ssl,
@@ -1024,23 +962,7 @@ unsigned status, u_len, u_csr, u_seq;
 }
 
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
-**
-**	Create and configure an OpenSSL context for the demo: pick the method,
-**	load the certificate and private key, and set the verification mode.
-**
-**  FORMAL PARAMETERS:
-**
-**	__ctx	Receives the newly created SSL_CTX
-**
-**  RETURN VALUE:
-**	A condition code (STS$K_*).
-**--
-*/
+/* INIT_SSL - create and configure the demo OpenSSL context (method, certificate, key, verification mode) (__AVPROTO_MAIN__ harness, not library API) */
 int	init_ssl (SSL_CTX ** __ctx )
 {
 const SSL_METHOD *method = NULL;
@@ -1085,25 +1007,7 @@ const SSL_METHOD *method = NULL;
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
-**
-**	Fetch a drive key from a KDEPO (key-depot) server: connect, send the
-**	computer UUID and receive the key block for each drive.
-**
-**  FORMAL PARAMETERS:
-**
-**	rsock	Address of the KDEPO server socket
-**	cuu	Computer UUID identifying the caller
-**	dk	Array that receives the returned drive keys
-**
-**  RETURN VALUE:
-**	A condition code (STS$K_*).
-**--
-*/
+/* KDEPO_GET_KEY - fetch the drive keys from a KDEPO server: send the computer UUID, receive a key block per drive (__AVPROTO_MAIN__ harness, not library API) */
 int	kdepo_get_key	(
 	struct sockaddr_in *	rsock,
 		uuid_t		cuu,
@@ -1193,24 +1097,7 @@ end:
 
 
 
-/*
-**++
-**  FUNCTIONAL DESCRIPTION:
-**
-**	[__AVPROTO_MAIN__ demo harness - not part of the library API.]
-**
-**	Entry point of the demo: obtain the drive keys from the KDEPO server
-**	and print them, exercising the TLV and TLS helpers above.
-**
-**  FORMAL PARAMETERS:
-**
-**	argc	Argument count
-**	argv	Argument vector
-**
-**  RETURN VALUE:
-**	Process exit status.
-**--
-*/
+/* MAIN - demo entry point: get the drive keys from the KDEPO server and print them (__AVPROTO_MAIN__ harness, not library API) */
 int	main	(int argc, char ** argv)
 {
 int	status, i;
@@ -1248,7 +1135,7 @@ char	buf[512];
 	/* Request keys ...*/
 	if ( 1 & (status = kdepo_get_key(&rsock, cuu, dk)) )
 		{
-		/* Dump secret keys to the SYS$OUTPUT - suprize mutafaqa! */
+		/* Print the disk keys received (demo only) */
 		for (i = 0; i < DRIVES_MAX; i++ )
 			{
 			__util$bin2hex (dk[i].disk_id, buf, sizeof(dk[i].disk_id));

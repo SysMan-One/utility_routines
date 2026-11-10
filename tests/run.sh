@@ -10,7 +10,7 @@
 set -eu
 
 CC=${CC:-cc}
-CFLAGS=${CFLAGS:--std=gnu11 -O2 -Wall -Wextra}
+CFLAGS=${CFLAGS:--std=gnu11 -O2 -Wall -Wextra -pthread}
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 OUT=$(mktemp -d)
@@ -19,7 +19,8 @@ trap 'rm -rf "$OUT"' EXIT
 SRC="$HERE/utility_routines.c $HERE/cli_routines.c $HERE/starlet.c $HERE/avproto.c"
 rc=0
 
-for t in status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64 crc32
+for t in status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr log_prefix pattern_match log_fao base64 crc32 \
+	lookup_key logrotate fao_edge tlv_hostile cli_rules queue strings params log_misc
 do
 	printf '\n>>> test_%s\n' "$t"
 	# shellcheck disable=SC2086

@@ -164,13 +164,41 @@
 #					the log file on Windows shares delete, so rotation works there;
 #					tests/test_logrotate passes on Windows 11 and is built for
 #					Windows, but not run under Wine (its delete-pending differs).
+#
+#		31-OCT-2026	CLD	VERSION -> 1.6.11. utility_routines V.01-33ECO5: the ABBREV mode
+#					of __util$lookup_key() fixed (it returned the entry past the
+#					table); test_lookup_key added.
+#
+#		31-OCT-2026	CLD	VERSION -> 1.7.0. The defects found writing the new manuals are
+#					fixed: utility_routines V.01-34 (queues, bzero, strelem, fill,
+#					off-by-one writes, getparams/readconfig strict and abbreviating,
+#					log severity/syslog/ms fraction, syslog no-host, thread-safe
+#					inimsg; the movc5 and pattern-match headers rewritten), starlet
+#					X.01-16 (FAO bounds, FAO$K_* condition values, time rules),
+#					avproto X.94-12 (bounds-safe TLV), cli_routines X.00-17 (DCL
+#					verb matching, strict values, __cli$get_keyword). Tests
+#					fao_edge, tlv_hostile, cli_rules, queue, strings, params,
+#					log_misc added; the manuals in doc/.
+#
+#		31-OCT-2026	CLD	VERSION -> 1.7.1. The eight items left from 1.7.0: avproto
+#					X.94-12ECO1 (__tlv$lookup checks the wire length of fixed-size
+#					records), utility_routines V.01-34ECO1 (an undefined log severity
+#					returns STS$K_ERROR, a bad FAO status adds " [FAO <mnemonic>]" to
+#					the record, OPTS$K_INT 1/2/8 unsigned and 4/0 signed int32, matching
+#					quotes dropped from a value, __util$hex2bin validates, __util$deflog
+#					comment), cli_routines X.00-17ECO1 (__cli$get_keyword WARN on an
+#					empty value). Tests extended; the manuals brought to 1.7.1.
+#		01-NOV-2026	CLD	VERSION -> 1.7.2. utility_routines V.01-34ECO2: UTIL$TLS by the
+#					compiler, not by the platform - under MinGW GCC __declspec(thread)
+#					was ignored and the log prefix cache (time, tid) was shared by all
+#					the threads. test_log_tls added (Linux and Windows/Wine).
 #---
 
 
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.6.10 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.7.2 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.
@@ -269,7 +297,8 @@ option (BUILD_TESTING "Build the regression tests" ON)
 if (BUILD_TESTING)
 	enable_testing()
 
-	set (STARLET_TESTS status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr pattern_match log_fao base64 crc32)
+	set (STARLET_TESTS status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr pattern_match log_fao base64 crc32 lookup_key
+		fao_edge tlv_hostile cli_rules queue strings params log_misc log_tls)
 	# logrotate: Windows passes it (Windows 11, 22-OCT-2026); Wine does not - its delete-pending name of a removed,
 	# still-open file differs from Windows, so a cross build that runs its tests under Wine leaves it out
 	if (NOT (WIN32 AND CMAKE_CROSSCOMPILING_EMULATOR MATCHES "wine"))
@@ -280,9 +309,16 @@ if (BUILD_TESTING)
 		list (APPEND STARLET_TESTS log_prefix)
 	endif()
 
+	if (NOT WIN32)
+		find_package (Threads REQUIRED)
+	endif()
+
 	foreach (t ${STARLET_TESTS})
 		add_executable (test_${t} tests/test_${t}.c)
 		target_link_libraries (test_${t} starlet)
+		if (NOT WIN32)
+			target_link_libraries (test_${t} Threads::Threads)	# test_log_misc runs threads
+		endif()
 		add_test (NAME ${t} COMMAND test_${t})
 	endforeach()
 
@@ -328,6 +364,16 @@ install (FILES
 	cli_routines.h
 	starlet.h
 	DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+# The manuals (doc/), where they were rendered: <prefix>/share/doc/starlet
+install (FILES
+	doc/starlet_programmers_guide.pdf
+	doc/starlet_programmers_guide_ru.pdf
+	doc/starlet_reference_manual.pdf
+	doc/starlet_reference_manual_ru.pdf
+	DESTINATION ${CMAKE_INSTALL_DOCDIR}
+	OPTIONAL
 )
 
 # The exported targets, under the StarLet:: namespace.

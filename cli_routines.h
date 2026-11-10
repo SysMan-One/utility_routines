@@ -10,26 +10,20 @@ extern "C" {
 **
 **  FACILITY:  Command Language Interface (CLI) Routines
 **
-**  ABSTRACT: A portable API to implement command line parameters parsing, primary syntax checking,
-**	and dispatching of processing. This true story is based on the OpenVMS CDU/CLI facilities.
+**  ABSTRACT: A portable API to parse command line parameters, check the syntax and dispatch
+**	processing, modelled on the OpenVMS CDU/CLI facilities:
+**	<verb> [p1 p2 ... p8] [/qualifiers[=<value> ...]]
 **
-**  DESCRIPTION: Command Language Interface (CLI) Routines - an API is supposed to be used to parse and
-**	dispatch processing.
-**
-**	This set of routines help to implement a follows syntax:
-**
-**	<verb> [p1 p2 ... p8] [/qualifiers[=<value> ...]
-**
-**	...
-**
-**  DESIGN ISSUE:
-**	{tbs}
-**
-**  AUTHORS: Ruslan R. Laishev (RRL)
+**  AUTHORS: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  CREATION DATE:  22-AUG-2018
 **
 **  MODIFICATION HISTORY:
+**
+**	31-OCT-2026	CLD	X.00-17ECO1 : __cli$get_keyword() returns STS$K_WARN for an item present with an empty value.
+**
+**	31-OCT-2026	CLD	X.00-17 : CLI_PQDESC.flag comment corrected (the field is live);
+**				__cli$show_ctx() and the new __cli$get_keyword() declared.
 **
 **--
 */
@@ -96,7 +90,7 @@ typedef	struct __cli_pqdesc__	{
 
 	unsigned short	type;	/* FILE, DATE ...		*/
 	unsigned char	pn;	/* P1, P2, ... P8		*/
-	unsigned char	flag;	/* Reserved			*/
+	unsigned char	flag;	/* CLI$M_NEGATABLE, CLI$M_LIST, CLI$M_REQUIRED	*/
 
 	ASC		defval;	/* Default value string		*/
 
@@ -167,6 +161,22 @@ int	__cli$cleanup	(CLI_CTX *clictx);
 int	__cli$get_value	(CLI_CTX *clictx, CLI_PQDESC *pq, ASC *val);
 int	__cli$present	(CLI_CTX *clictx, CLI_PQDESC *pq, unsigned *state);
 int	__cli$help	(CLI_VERB *verbs, CLI_VERB *verb);
+void	__cli$show_ctx	(CLI_CTX *clictx);
+
+/*
+ * __cli$get_keyword - resolve a CLI$K_KWD value to its entry of the keyword table.
+ *	The parse stores the FULL keyword of the table (not an abbreviation as typed), so
+ *	a value from __cli$get_value() - or NULL for the item's first value/default - is
+ *	looked up exactly. *kwd receives the CLI_KEYWORD (name and .val); nothing is logged.
+ *	Returns STS$K_SUCCESS; STS$K_WARN when the item is present with an empty value (as __cli$get_value()); STS$K_ERROR when absent or not a keyword of the table.
+ *
+ * __cli$parse - returns STS$K_SUCCESS; STS$K_WARN (low bit clear, NOT an error) when help
+ *	has been printed and nothing must be dispatched; STS$K_FATAL on a bad command line.
+ *
+ * __cli$get_value - STS$K_SUCCESS; STS$K_WARN present with an empty value; STS$K_ERROR
+ *	absent or list drained (never logged, whatever CLI$M_OPSIGNAL says).
+ */
+int	__cli$get_keyword	(CLI_CTX *clictx, CLI_PQDESC *pq, const ASC *val, CLI_KEYWORD **kwd);
 
 #ifdef __cplusplus
     }

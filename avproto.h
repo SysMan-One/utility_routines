@@ -1,13 +1,6 @@
 #ifndef	__AVPROTO$DEF__
 #define	__AVPROTO$DEF__	1
 
-#ifdef	__GNUC__
-	#pragma GCC diagnostic ignored  "-Wparentheses"
-	#pragma	GCC diagnostic ignored	"-Wdate-time"
-	#pragma	GCC diagnostic ignored	"-Wunused-variable"
-#endif
-
-
 #ifdef _WIN32
 	#pragma once
 	#define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers
@@ -21,37 +14,11 @@
 **
 **  ABSTRACT: Carrying data encapsulated in to the AVP microcontainers
 **
-**  DESCRIPTION: This module contains data structures and constant definition is supposed to be used
-**	in the core AVProto routines as well as in general API routines.
+**  DESCRIPTION: Data structures and constants of the AVProto core and API routines.
+**	A PDU is a Header (magic[8], len, csr, seq - all NBO) followed by a payload of
+**	TLVs; a TLV is a tag (type:4 | id:12 bits), a 16-bit length and the value.
 **
-**  DESIGN ISSUE:
-**
-**	A main idea is imagined follows :
-**
-	PDU (protocol/packet data unit ) - is a block is supposed to be send to remote peer over network
-
-		 |<- Payload (see Header.len field)-->|
-	+--------+-------+-------+--    ...  ----+-------+
-	| Header | TLV 0 | TLV 1 |          .... | TLV N |
-	+--------+-------+-------+----  ...    --+-------+
-
-	PDU's Header :
-	+-----------+-----------+-----------+-----------+
-	| magic     |  len      |  csr      |   seq     |
-	| 8 octets  |  4 octets |  4 octets |   4 octets
-	+-----------+-----------+-----------+-----------+
-
-	T[ag] L[ength] V[alue] :
-	0                    16                  32
-	+---------+-----------+-------------------+
-	| Type    |   Id      |      Length       |
-	| 4 bits  |   12 bits |      16 bits      |
-	+---------+-----------+-------------------+
-	|    optional data (value)                |
-	|      0 - 'Length' octets                |
-	+---------+-----------+-------------------+
-**
-**  AUTHORS: Ruslan R. Laishev (RRL)
+**  AUTHORS: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  CREATION DATE:  20-JUL-2018
 **
@@ -59,18 +26,17 @@
 **
 **	15-FEB-2019	RRL	Removed bitfields.
 **
-**	22-FEB-2019	RRL	Added closing for "#ifdef __cplusplus"
-**				some code reorganizing;
+**	22-FEB-2019	RRL	Added closing for "#ifdef __cplusplus", some code reorganizing.
 **
-**	29-JUL-2019	RRL	Added declaration for __tlv$dump();
-**				improved error handling in the __tlv$hget();
+**	29-JUL-2019	RRL	__tlv$dump() declared; improved error handling in __tlv$hget().
 **
-**	01-AUG-2026	DN	__tlv$hget() compared the magic against a_sig over the full
-**				magic width, reading past a signature string shorter than the field;
-**				it now compares a local zero-padded copy, mirroring __tlv$hset().
+**	01-AUG-2026	CLD	__tlv$hget() compared the magic over its full width, reading past a short signature;
+**				it now compares a zero-padded copy, as __tlv$hset() stores it.
 **
-**	22-OCT-2026	RRL	Windows has no <endian.h>: be16/be32/be64toh() and htobe16/32/64()
-**				through _byteswap_ushort/_ulong/_uint64() (MSVC and MinGW-w64).
+**	22-OCT-2026	RRL	Windows: be16/be32/be64toh(), htobe16/32/64() through _byteswap_*() (MSVC, MinGW-w64).
+**
+**	31-OCT-2026	CLD	StarLet 1.7.0: GCC diagnostic pragmas no longer leak to includers; __tlv$put() size is
+**				<unsigned>; __tlv$hset() rejects a signature over 8 octets; __tlv$hget() leaves *a_u_csr on error.
 **
 **--
 */
@@ -152,8 +118,7 @@ typedef struct ____tlv$pdu__ {
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Pack a tag type and tag identifier into the sixteen-bit tag field of a
-**	TLV. The layout is [ type : 4 | id : 12 ], returned in network byte order.
+**	Pack a tag type and identifier into a TLV tag field, [ type : 4 | id : 12 ], in NBO.
 **
 **  FORMAL PARAMETERS:
 **
@@ -181,8 +146,7 @@ inline	static unsigned short __tlv$encode_tag
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Extract the tag type and tag identifier from a TLV tag field. The high
-**	four bits give the type, the low twelve bits the identifier.
+**	Extract the tag type (high 4 bits) and identifier (low 12 bits) from a TLV tag field.
 **
 **  FORMAL PARAMETERS:
 **
@@ -216,7 +180,7 @@ unsigned short	l_tag = 0;
 }
 
 
-int	__tlv$put    (void *a_pdu, unsigned short a_pdusz, unsigned a_v_tag, unsigned a_v_type, void *a_val, unsigned a_valsz);
+int	__tlv$put    (void *a_pdu, unsigned a_pdusz, unsigned a_v_tag, unsigned a_v_type, void *a_val, unsigned a_valsz);
 int	__tlv$get    (void *a_pdu, unsigned a_pdusz, int *a_context, unsigned a_v_tag, unsigned *a_v_type, void *a_val, unsigned *a_valsz);
 int	__tlv$lookup (void *a_pdu, unsigned a_pdusz, int *a_context, unsigned a_v_tag, unsigned *a_v_type, void **a_val, unsigned *a_valsz);
 void	__tlv$dump   (void *a_pdu, unsigned a_pdusz);
@@ -226,14 +190,13 @@ void	__tlv$dump   (void *a_pdu, unsigned a_pdusz);
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Initialise the fixed header of a PDU and reset its payload length to zero.
-**	Must be called before the first __tlv$put(). All header fields are stored
-**	in network byte order.
+**	Initialise the PDU header (payload length 0, fields in NBO); call it before the first __tlv$put().
 **
 **  FORMAL PARAMETERS:
 **
 **	a_pdup	Address of the PDU buffer
-**	a_sig	Eight-octet protocol signature written into the header
+**	a_sig	Protocol signature, a NUL-terminated string of 1 to 8 octets, zero-padded into the
+**		eight-octet magic field; a longer one (or NULL) is an error and the PDU is not touched
 **	a_u_csr	Command/status register value
 **	a_u_seq	PDU sequence number
 **
@@ -241,7 +204,7 @@ void	__tlv$dump   (void *a_pdu, unsigned a_pdusz);
 **	NONE.
 **
 **  RETURN VALUE:
-**	STS$K_SUCCESS.
+**	STS$K_SUCCESS; STS$K_ERROR if the signature is NULL or longer than eight octets.
 **--
 */
 inline static int	__tlv$hset	(
@@ -254,7 +217,12 @@ inline static int	__tlv$hset	(
 size_t		l_siglen;
 AVPROTO_PDU	*l_pdu = (AVPROTO_PDU *) a_pdup;
 
-	l_siglen = strnlen((const char *) a_sig, sizeof(l_pdu->r_hdr.magic));
+	if ( !a_sig )
+		return	STS$K_ERROR;
+
+	/* A signature longer than the magic field is rejected, exactly as __tlv$hget() does - never cut silently */
+	if ( (l_siglen = strnlen((const char *) a_sig, sizeof(l_pdu->r_hdr.magic) + 1)) > sizeof(l_pdu->r_hdr.magic) )
+		return	STS$K_ERROR;
 
 	memset(&l_pdu->r_hdr, 0, sizeof(AVPROTO_HDR));
 	memcpy(l_pdu->r_hdr.magic, a_sig, l_siglen);		/* rest stays zero-padded by memset above */
@@ -270,13 +238,12 @@ AVPROTO_PDU	*l_pdu = (AVPROTO_PDU *) a_pdup;
 **++
 **  FUNCTIONAL DESCRIPTION:
 **
-**	Validate a PDU signature and extract the header fields. All returned
-**	fields are converted from network to host byte order.
+**	Validate a PDU signature and extract the header fields (converted to host byte order).
 **
 **  FORMAL PARAMETERS:
 **
 **	a_pdup	Address of the received PDU
-**	a_sig	Expected eight-octet signature; a mismatch is an error
+**	a_sig	Expected signature (1 to 8 octets, NUL-terminated); a mismatch or a longer one is an error
 **	a_u_len	Receives the payload length declared in the header
 **	a_u_csr	Receives the command/status register
 **	a_u_seq	Receives the sequence number
@@ -285,7 +252,8 @@ AVPROTO_PDU	*l_pdu = (AVPROTO_PDU *) a_pdup;
 **	NONE.
 **
 **  RETURN VALUE:
-**	STS$K_SUCCESS if the signature matched; error otherwise.
+**	STS$K_SUCCESS if the signature matched; STS$K_ERROR otherwise. On error NONE of the
+**	output parameters (a_u_len, a_u_csr, a_u_seq) is written.
 **--
 */
 inline static int	__tlv$hget	(
@@ -300,7 +268,8 @@ size_t		l_len;
 AVPROTO_PDU	*l_pdu = (AVPROTO_PDU *) a_pdup;
 unsigned char	l_sigbuf[sizeof(l_pdu->r_hdr.magic)];	/* zero-padded copy of a_sig	*/
 
-	*a_u_csr = STS$K_ERROR;
+	if ( !a_sig )
+		return	STS$K_ERROR;
 
 	if ( (l_len = strnlen((const char *) a_sig, sizeof(l_pdu->r_hdr.magic) + 1)) > sizeof(l_pdu->r_hdr.magic) )
 		return	STS$K_ERROR;

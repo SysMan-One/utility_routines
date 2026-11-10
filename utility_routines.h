@@ -4,9 +4,9 @@
 #endif
 
 /*
-**  Abstract: An API declaration for the general purpose and utility routines and  stuff ...
+**  Abstract: An API declaration for the general purpose and utility routines: queues, ILE, messages and logging, string and time helpers.
 **
-**  Author: Ruslan R. Laishev
+**  Author: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 **
 **  Creation date: 4-SEP-2017
 **
@@ -20,8 +20,8 @@
 **
 **	20-OCT-2017	RRL	Added __util$uuid2str() - convert UUID into from binary form to ASCII text string.
 **
-**	27-OCT-2017	RRL	Added __util$movc5 (stolen OpenVMS version of the lib$movc5) - copy source string to destionation
-**				place, fill rest of output buffer with a given character.
+**	27-OCT-2017	RRL	Added __util$movc5 - copy source string to destionation place, fill rest of output
+**				buffer with a given character.
 **
 **	14-NOV-2017	RRL	Added __util$str2asc() - copy ASCIZ string to the ASCIC container.
 **
@@ -63,6 +63,15 @@
 **	22-OCT-2026	RRL	Windows (MinGW-w64 cross build): <windows.h> in lower case; the time
 **				routine is s___time() as on POSIX (clock_gettime() under MinGW-w64,
 **				timespec_get() otherwise), tv_nsec no longer divided by 1024.
+**
+**	31-OCT-2026	CLD	__util$lookup_key: UTIL$K_LOOKUP_ABBREV fixed (past-the-match, shorter keyword never compared);
+**				a full spelling wins, an abbreviation must select one keyword, else STS$K_WARN.
+**
+**	31-OCT-2026	CLD	1.7.1 : __util$hex2bin() validates its input (-1, nothing written); OPTS$K_INT signedness documented.
+**
+**	31-OCT-2026	CLD	1.7.0 : defects fixed in the queue routines (movqtail/movqhead, empty-queue remq*, UTIL$S_NOLOCK),
+**				$ILE3INI, bzero/iszero, strelem, str2asc, isinrange2, cmp_time/sub_time, uncomment, collapse,
+**				strcat_rx, mask2sym, fill; __util$readparams no longer declared; __util$movc5 rewritten.
 **
 */
 
@@ -186,33 +195,7 @@ static inline pid_t	__gettid(void)
 #define	$ARRSZ(a)	(sizeof(a)/sizeof(a[0]))
 
 
-/*
-	Performs a conditional atomic compare and update operation
-  involving one or two longwords in the same lock region.  The value
-  pointed to by source is compared with the longword old_value.  If
-  they are equal, the longword new_value is conditionally stored into
-  the value pointed to by dest.
-
-  The store will not complete if the compare yields unequal values or
-  if there is an intervening store to the lock region involved.  To
-  be in the same lock region, source and dest must point to aligned
-  longwords in the same naturally aligned 16-byte region.
-
-  The function returns 0 if the store does not complete, and 1 if the
-  store does complete.
-
-  Syntax:
-
-       int __CMP_STORE_LONG (volatile void *source, int old_value,
-       int new_value,
-       volatile void *dest);
-
-	These built-in functions perform an atomic compare and swap. That is,
-  if the current value of *ptr is oldval, then write newval into *ptr.
-
-	The “bool” version returns true if the comparison is successful and newval
-  is written. The “val” version returns the contents of *ptr before the operation.
-*/
+/* Atomic compare-and-swap of an int, 1 if the new value was stored (GCC __sync_bool_compare_and_swap) */
 #define	$CMP_STORE_LONG(src, old_val, new_val)	__sync_bool_compare_and_swap((int *) src, (int) old_val, (int) new_val )
 
 
@@ -317,6 +300,15 @@ typedef	struct	__ile2	{
 		char *	ptr;	/* Pointer to data		*/
 } ILE2;
 
+/*
+** NB: this is NOT the layout of the OpenVMS ILE3, which begins with the length word:
+**
+**	OpenVMS ILE3	: length (word), code (word), address, return length address
+**	this ILE3	: code (word), length (word), address, return length address
+**
+** Both words are 16 bits, so the size is the same, but a list built here must not be handed to a
+** VMS system service as it stands.
+*/
 typedef	struct	__ile3	{
 	unsigned short	code,	/* Item List Element code	*/
 			len;	/* A size of the buffer		*/
@@ -327,7 +319,13 @@ typedef	struct	__ile3	{
 
 /* Macros to initialize Item List with a given values */
 #define	$ILE2INI(code, len, ptr)		{code, len, (char *)ptr}
-#define	$ILE3INI(ile, code, len, ptr, retlen)	{ile.code = code, ile.len = len, ile.ptr = (char *)ptr, ile.retlen = retlen}
+/* Fills the ILE3 object <a_ile> (not a pointer to it), as a statement: $ILE3INI(l_ile, 1, 4, &l_val, &l_retlen); */
+#define	$ILE3INI(a_ile, a_code, a_len, a_ptr, a_retlen)	do {			\
+		(a_ile).code = (unsigned short) (a_code);			\
+		(a_ile).len = (unsigned short) (a_len);			\
+		(a_ile).ptr = (char *) (a_ptr);				\
+		(a_ile).retlen = (a_retlen);					\
+	} while (0)
 #define	$ILENULL	{0}
 
 /*
@@ -338,16 +336,7 @@ typedef	struct	__ile3	{
 #pragma	pack (push)
 #pragma	pack	(8)
 
-/*
-** Special type is supposed to be used as a part of complex types. Typical usage is:
-** struct my_buffer {
-**	ENTRY	links;	// A part to be used by $INSQ/$REMQ macroses
-**
-**	unsigned short	buflen,
-**			bufsz;
-**	char	*pbuf;
-**}
-*/
+/* Links part to embed as the first member of a structure to be queued by the $INSQ/$REMQ macros */
 typedef	struct	__entry	{
 	struct	__entry *left,	/* References (address) to left and right elements in the queue */
 			*right;	/* NULL if the element is first or last in the queue		*/
@@ -488,16 +477,8 @@ unsigned	__util$out	(char *fmt, ...);
 
 
 /*
-**  $PUTMSG_FAO() casts each FAO parameter to fao_prm_t for the caller, so a
-**  value is written plain: $PUTMSG_FAO(sts, l_seq, l_disp).  The cast is
-**  mandatory - the parameters travel through varargs and __util$faol() reads
-**  each as a 64-bit fao_prm_t, so an un-cast 32-bit value would be read wrong -
-**  and folding it in here means it can never be forgotten.  The leading comma
-**  lives inside FAO$_C(), so a zero-parameter call still expands cleanly.
-**  fao_prm_t comes from starlet.h, which a $PUTMSG_FAO() caller already needs.
-**
-**  The count is not written either: FAO$_NARG() below derives it from the
-**  same list, so it cannot disagree with what follows it.
+**  $PUTMSG_FAO()/$LOG_FAO() cast each parameter to fao_prm_t themselves (the parameters travel through
+**  varargs and are read as 64-bit values) and count them with FAO$_NARG(): write them plain.
 */
 #define	FAO$_C(x)	, ((fao_prm_t)(x))
 #define	FAO$_E0()
@@ -519,14 +500,7 @@ unsigned	__util$out	(char *fmt, ...);
 #define	FAO$_E16(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p)	FAO$_C(a) FAO$_C(b) FAO$_C(c) FAO$_C(d) FAO$_C(e) FAO$_C(f) FAO$_C(g) FAO$_C(h) FAO$_C(i) FAO$_C(j) FAO$_C(k) FAO$_C(l) FAO$_C(m) FAO$_C(n) FAO$_C(o) FAO$_C(p)
 #define	FAO$_GET(_0,_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,NAME,...)	NAME
 
-/*
-**  The same selection used to count rather than to name: FAO$_NARG()
-**  yields how many parameters were written, 0 to 16.  It exists so that
-**  $PUTMSG_FAO() need not be told a number the compiler can see for
-**  itself - a number written by hand is a number that can disagree with
-**  the list beside it, and a count larger than the list sends
-**  __util$putmsg_fao() reading arguments that were never passed.
-*/
+/* FAO$_NARG(): the number of parameters written, 0 to 16 */
 #define	FAO$_NARG(...)	FAO$_GET(_0, ##__VA_ARGS__, 16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
 #define	FAO$_EACH(...)	FAO$_GET(_0, ##__VA_ARGS__, FAO$_E16,FAO$_E15,FAO$_E14,FAO$_E13,FAO$_E12,FAO$_E11,FAO$_E10,FAO$_E9,FAO$_E8,FAO$_E7,FAO$_E6,FAO$_E5,FAO$_E4,FAO$_E3,FAO$_E2,FAO$_E1,FAO$_E0)(__VA_ARGS__)
 
@@ -535,13 +509,13 @@ unsigned	__util$out	(char *fmt, ...);
 	#define $PUTMSG_FAO(sts, ...)		__util$putmsgd_fao(sts, __MODULE__, __FUNCTION__ , __LINE__ , FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)
 	#define $LOG_FAO(severity, ctl, ...)	__util$logd_fao(__FAC__, severity, ctl, __MODULE__, __FUNCTION__ , __LINE__ , FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
-	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : severity
+	#define $IFLOG(f, severity, fmt, ...)	((f) ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : (severity))
 #else
 	#define $PUTMSG(sts, ...)		__util$putmsg(sts, ## __VA_ARGS__)
 	#define $PUTMSG_FAO(sts, ...)		__util$putmsg_fao(sts, FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 	#define $LOG(severity, fmt, ...)	__util$log(__FAC__, severity, fmt, ## __VA_ARGS__)
 	#define $LOG_FAO(severity, ctl, ...)	__util$log_fao(__FAC__, severity, ctl, FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
-	#define $IFLOG(f, severity, fmt, ...)	f ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__)	: severity
+	#define $IFLOG(f, severity, fmt, ...)	((f) ? __util$logd(__FAC__, severity, fmt, __MODULE__, __FUNCTION__ , __LINE__ , ## __VA_ARGS__) : (severity))
 
 #endif
 
@@ -606,22 +580,57 @@ inline	static	int __util$unlockspin (void * lock)
 
 
 /*
+ * Condition codes of the queue routines and of __util$inimsg().  They follow the $DEFMSG/$DEFSEV layout: the severity is
+ * in bits 0..2 (here ERROR, so the low bit is clear), the message number above it.
+ */
+#define	UTIL$S_INVARG	0x102		/* A NULL or otherwise unusable argument			*/
+#define	UTIL$S_INQUE	0x202		/* The entry is on another queue already			*/
+#define	UTIL$S_NOLOCK	0x302		/* The spinlock of the queue could not be acquired		*/
+#define	UTIL$S_DUPFAC	0x400		/* __util$inimsg(): a catalogue of this facility is registered already (a warning)	*/
+
+/*
+ * Description: Take an entry out of the chain of the queue it stands in and re-point the head and the
+ *	tail of the queue when the entry was the first or the last one.  The caller holds the spinlock;
+ *	the counter and the entry's own queue link are left to the caller.
+ *
+ * Input:
+ *	que:	A pointer to __QUEUE structure
+ *	ent:	The ENTRY to be unlinked
+ *
+ * Return:
+ *	NONE
+ */
+inline static void __util$q_unlink (__QUEUE * que, ENTRY * ent)
+{
+	if ( ent->left )
+		ent->left->right = ent->right;
+	else	que->head = ent->right;
+
+	if ( ent->right )
+		ent->right->left = ent->left;
+	else	que->tail = ent->left;
+
+	ent->left = ent->right = NULL;
+}
+
+
+/*
  * Description: Remove all entries from the given queue
  *
  * Input:
  *	que:	A pointer to __QUEUE structure
  *
  * Output:
- *	count:	A count of entries in the __QUEUE before cleanuping
+ *	count:	A count of entries in the __QUEUE before cleanuping, 0 for an empty queue
  *
  * Return:
- *	condition code
+ *	condition code: STS$K_SUCCESS (also for an empty queue), STS$K_ERROR for a NULL argument
+ *	or when the spinlock could not be acquired
  */
 inline static int __util$clrqueue (void * que,  unsigned * count)
 {
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	_ent;
-int	nums;
+ENTRY *	_ent, * _next;
 
 	/*
 	 * Sanity check
@@ -629,25 +638,25 @@ int	nums;
 	if ( !_que || !count )
 		return	STS$K_ERROR;
 
-	if ( !_que->count )
-		return	STS$K_SUCCESS;
-
 	/*
 	 * Acquire lock
 	 */
 	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	/* Store entries counter */
-	*count = nums = _que->count;
+	/* Store entries counter, an empty queue reports zero */
+	*count = _que->count;
 
-	/* Run over all entries, zeroing link to queue ... */
-	for ( _ent = _que->head; nums; nums--, _ent = _ent->right)
+	/* Run over all entries, zeroing the links and the reference to the queue ... */
+	for ( _ent = _que->head; _ent; _ent = _next)
+		{
+		_next = _ent->right;
+		_ent->left = _ent->right = NULL;
 		_ent->queue = NULL;
+		}
 
 	_que->count = 0;
 	_que->head = _que->tail = NULL;
-
 
 	/*
 	 * Release the spinlock
@@ -667,13 +676,11 @@ int	nums;
  *	count:	A count of entries in the __QUEUE before inserting
  *
  * Return:
- *	condition code
+ *	STS$K_SUCCESS	- inserted, or the entry is on this queue already (nothing is changed)
+ *	UTIL$S_INVARG	- a NULL argument
+ *	UTIL$S_INQUE	- the entry is on another queue
+ *	UTIL$S_NOLOCK	- the spinlock of the queue could not be acquired
  */
-
-#define	UTIL$S_INVARG	0x102
-#define	UTIL$S_INQUE	0x202
-#define	UTIL$S_NOLOCK	0x202
-
 inline static int __util$insqtail (void * que, void * ent, unsigned * count)
 {
 __QUEUE * _que = (__QUEUE *) que;
@@ -728,7 +735,8 @@ ENTRY *	_entold, *_entnew = (ENTRY *) ent;
  *	count:	A count of entries in the __QUEUE before inserting
  *
  * Return:
- *	condition code
+ *	the same condition codes as __util$insqtail() : STS$K_SUCCESS, UTIL$S_INVARG, UTIL$S_INQUE,
+ *	UTIL$S_NOLOCK
  */
 inline static int __util$insqhead (void * que, void * ent, unsigned * count)
 {
@@ -739,19 +747,19 @@ ENTRY *	_entold, *_entnew = (ENTRY *) ent;
 	 * Sanity check
 	 */
 	if ( !_que || !ent || !count )
-		return	STS$K_ERROR;
+		return	UTIL$S_INVARG;
 
 	/* Check that ENTRY has not been in the a __QUEUE already */
 	if ( _entnew->queue == que )
 		return	STS$K_SUCCESS;	/* Already: in the __QUEUE*/
 	else if ( _entnew->queue )	/*    in other __QUEUE	*/
-		return	STS$K_ERROR;
+		return	UTIL$S_INQUE;
 
 	/*
 	 * Acquire lock
 	 */
 	if ( !(1 & __util$lockspin( &_que->lock)) )
-		return	STS$K_ERROR;
+		return	UTIL$S_NOLOCK;
 
 	*count = _que->count;
 
@@ -774,31 +782,31 @@ ENTRY *	_entold, *_entnew = (ENTRY *) ent;
 
 
 /*
- * Description: Remove an entry from the the current place in the queue
+ * Description: Remove the given entry from the queue it stands in.  An entry which is not on this
+ *	queue - an empty queue included - is an error, since there is nothing to remove; unlike the
+ *	removal at head/tail, where an empty queue is a normal outcome.
  *
  * Input:
  *	que:	A pointer to __QUEUE structure
+ *	ent:	The entry to be removed
  *
  * Output:
- *	ent:	A removed entry
- *	count:	A count of entries in the __QUEUE before inserting
+ *	count:	A count of entries in the __QUEUE before removing
  *
  * Return:
- *	condition code
+ *	STS$K_SUCCESS	- removed
+ *	STS$K_ERROR	- a NULL argument, the entry is not on this queue, or the spinlock could not be
+ *			  acquired
  */
 inline static int __util$remqent (void * que, void *ent, unsigned * count)
 {
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	_ent = (ENTRY *) ent, *_entleft, *_entright;
+ENTRY *	_ent = (ENTRY *) ent;
 
 	/*
 	 * Sanity check
 	 */
 	if ( !_que || !ent || !count )
-		return	STS$K_ERROR;
-
-	/* Check that ENTRY is belong to the __QUEUE	*/
-	if ( _ent->queue != que )
 		return	STS$K_ERROR;
 
 	/*
@@ -807,30 +815,22 @@ ENTRY *	_ent = (ENTRY *) ent, *_entleft, *_entright;
 	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(*count = _que->count) )
+	*count = _que->count;
+
+	/* Check that ENTRY is belong to the __QUEUE	*/
+	if ( (_ent->queue != que) || !_que->count )
 		{
 		__util$unlockspin(&_que->lock);
-		return STS$K_SUCCESS;
+		return	STS$K_ERROR;
 		}
 
-	/*
-	** Main work ...
-	*/
 	/*
 	**  Either neighbour may be absent: the entry being removed can stand at the head of the queue,
 	**  at its tail, or be the only one there. Where a neighbour is absent it is the queue itself
 	**  that has to be re-pointed.
 	*/
-	_entleft  = _ent->left;
-	_entright = _ent->right;
-
-	if ( _entleft )
-		_entleft->right = _entright;
-	else	_que->head	= _entright;
-
-	if ( _entright )
-		_entright->left = _entleft;
-	else	_que->tail	= _entleft;
+	__util$q_unlink(_que, _ent);
+	_ent->queue = NULL;
 
 	/*
 	 * Reset head & tail if queue is empty
@@ -838,40 +838,34 @@ ENTRY *	_ent = (ENTRY *) ent, *_entleft, *_entright;
 	if ( !(--_que->count) )
 		_que->head = _que->tail = NULL;
 
-	_ent->left = _ent->right = NULL;
-	_ent->queue = NULL;
-
 	/*
 	 * Release the spinlock
 	 */
-	__util$unlockspin(&_que->lock);
-
-	return	STS$K_SUCCESS;
+	return	__util$unlockspin(&_que->lock);
 }
 
 
-
-
-
-
-
 /*
- * Description: Remove an entry from the tail of the queue
+ * Description: Remove an entry from the tail of the queue.  An empty queue is not an error: the
+ *	routine returns STS$K_SUCCESS with *ent set to NULL and *count set to zero - the caller tells
+ *	"got an entry" from "nothing there" by *ent (or *count), the way every caller of these macros
+ *	does.  This is the rule of __util$remqhead() as well.
  *
  * Input:
  *	que:	A pointer to __QUEUE structure
  *
  * Output:
- *	ent:	A removed entry
- *	count:	A count of entries in the __QUEUE before inserting
+ *	ent:	A removed entry, NULL when the queue was empty
+ *	count:	A count of entries in the __QUEUE before removing, 0 when it was empty
  *
  * Return:
- *	condition code
+ *	STS$K_SUCCESS	- done (see above)
+ *	STS$K_ERROR	- a NULL argument, or the spinlock could not be acquired (*ent is untouched)
  */
 inline static int __util$remqtail (void * que, void **ent, unsigned * count)
 {
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	_entleft, * _entright = NULL;
+ENTRY *	_ent;
 
 	/*
 	 * Sanity check
@@ -885,62 +879,47 @@ ENTRY *	_entleft, * _entright = NULL;
 	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(*count = _que->count) )
+	*count = _que->count;
+
+	if ( (_ent = _que->tail) )
 		{
-		__util$unlockspin(&_que->lock);
-		return STS$K_SUCCESS;
+		__util$q_unlink(_que, _ent);
+		_ent->queue = NULL;
+
+		/*
+		 * Reset head & tail if queue is empty
+		 */
+		if ( !(--_que->count) )
+			_que->head = _que->tail = NULL;
 		}
 
-	/*
-	** Main work ...
-	*/
-	if ( (_entright = _que->tail) )
-		{
-		if ( (_entleft = _entright->left) )
-			_entleft->right = NULL;
-
-		_que->tail = _entleft;
-		}
-
-	*ent	= _entright;
-	_entright->left = _entright->right = NULL;
-	_entright->queue = NULL;
-
-	/*
-	 * Reset head & tail if queue is empty
-	 */
-	if ( !(--_que->count) )
-		_que->head = _que->tail = NULL;
+	*ent = _ent;
 
 	/*
 	 * Release the spinlock
 	 */
-	__util$unlockspin(&_que->lock);
-
-#ifndef	WIN32
-	assert(_entright);
-#endif
-
-	return	_entright ? STS$K_SUCCESS : STS$K_ERROR;
+	return	__util$unlockspin(&_que->lock);
 }
 
 /*
- * Description: Remove an entry from the head of the queue
+ * Description: Remove an entry from the head of the queue.  The empty-queue rule is that of
+ *	__util$remqtail() : STS$K_SUCCESS, *ent = NULL, *count = 0.
  *
  * Input:
  *	que:	A pointer to __QUEUE structure
  *
  * Output:
- *	ent:	A removed entry
- *	count:	A count of entries in the __QUEUE before inserting
+ *	ent:	A removed entry, NULL when the queue was empty
+ *	count:	A count of entries in the __QUEUE before removing, 0 when it was empty
  *
  * Return:
- *	condition code
+ *	STS$K_SUCCESS	- done (see above)
+ *	STS$K_ERROR	- a NULL argument, or the spinlock could not be acquired (*ent is untouched)
  */
 inline static int __util$remqhead (void * que, void **ent, unsigned * count)
 {
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	_entleft = NULL, * _entright;
+ENTRY *	_ent;
 
 	/*
 	 * Sanity check
@@ -954,67 +933,48 @@ ENTRY *	_entleft = NULL, * _entright;
 	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(*count = _que->count) )
+	*count = _que->count;
+
+	if ( (_ent = _que->head) )
 		{
-		__util$unlockspin(&_que->lock);
-		return STS$K_SUCCESS;
+		__util$q_unlink(_que, _ent);
+		_ent->queue = NULL;
+
+		/*
+		 * Reset head & tail if queue is empty
+		 */
+		if ( !(--_que->count) )
+			_que->head = _que->tail = NULL;
 		}
 
-	/*
-	** Main work ...
-	*/
-	if ( (_entleft = _que->head) )
-		{
-		if ( (_entright = _entleft->right) )
-			_entright->left = NULL;
-
-		_que->head = _entright;
-		}
-#ifndef	WIN32
-	assert(_entleft);
-#endif
-
-	*ent	= _entleft;
-	_entleft->left = _entleft->right = NULL;
-	_entleft->queue = NULL;
-
-	/*
-	 * Reset head & tail if queue is empty
-	 */
-	if ( !(--_que->count) )
-		_que->head = _que->tail = NULL;
+	*ent = _ent;
 
 	/*
 	 * Release the spinlock
 	 */
-	__util$unlockspin(&_que->lock);
-
-#ifndef	WIN32
-	assert(_entleft);
-#endif
-
-
-	return	_entleft ? STS$K_SUCCESS : STS$K_ERROR;
+	return	__util$unlockspin(&_que->lock);
 }
 
 /*
- * Description: Move an existen entry at head of queue.
+ * Description: Move an existent entry to head of the queue.  Moving the entry which is the head
+ *	already is a success and changes nothing.
  *
  * Input:
  *	que:	A pointer to __QUEUE structure
- *	ent:	A pointer to ENTRY to be moved at head of queue
+ *	ent:	A pointer to ENTRY to be moved at head of queue (the entry itself, as $MOVQHEAD passes it)
  *
  * Output:
  *	NONE
  *
  * Return:
- *	condition code
+ *	STS$K_SUCCESS	- done
+ *	STS$K_ERROR	- a NULL argument, the entry is not on this queue, or the spinlock could not be
+ *			  acquired
  */
-inline static int __util$movqhead (void * que, void **ent)
+inline static int __util$movqhead (void * que, void * ent)
 {
-unsigned	i;
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
+ENTRY *	_ent = (ENTRY *) ent;
 
 	/*
 	 * Sanity check
@@ -1028,55 +988,27 @@ ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(_que->count) )
-		{
-		__util$unlockspin(&_que->lock);
-		return STS$K_SUCCESS;
-		}
-
-	/*
-	 * Lookup in the queue an entry with a given address
-	 */
-	for (i = 0, entp = _que->head; i < _que->count; i++, entp = entp->right)
-		{
-		if ( entp == (ENTRY *) ent )
-			break;
-		}
-
-	/*
-	 * Is the entry already on head of the queue?
-	 */
-	if ( !i )
-		return	__util$unlockspin(&_que->lock);
-
 	/*
 	 * Is the entry with a given address live in the queue?
 	 */
-	if ( !entp )
+	if ( (_ent->queue != que) || !_que->head )
 		{
 		__util$unlockspin(&_que->lock);
 		return	STS$K_ERROR;
 		}
 
 	/*
-	 * Exclude has been found entry from the chain
+	 * Exclude the entry from the chain (this re-points the tail if it was the last one),
+	 * put it in front of the old head.
 	 */
-	if ( (_entleft = entp->left) )
-		_entleft->right = entp->right;
-#ifndef	WIN32
-	else	assert ( entp->left );	/* left link can be only on first entry! */
-#endif
+	if ( _que->head != _ent )
+		{
+		__util$q_unlink(_que, _ent);
 
-
-	if ( (_entright= entp->right) )
-		_entright->left = entp->left;
-
-	/*
-	 * Put has been found entry at head of tail
-	 */
-	entp->right = _que->head;
-	entp->left = NULL;
-	_que->head = entp;
+		_ent->right = _que->head;
+		_que->head->left = _ent;
+		_que->head = _ent;
+		}
 
 	/*
 	 * Release the spinlock
@@ -1085,23 +1017,25 @@ ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 }
 
 /*
- * Description: Move an existen entry to end of queue.
+ * Description: Move an existent entry to end of queue.  Moving the entry which is the tail
+ *	already is a success and changes nothing.
  *
  * Input:
  *	que:	A pointer to __QUEUE structure
- *	ent:	A pointer to ENTRY to be moved at head of queue
+ *	ent:	A pointer to ENTRY to be moved at tail of queue (the entry itself, as $MOVQTAIL passes it)
  *
  * Output:
  *	NONE
  *
  * Return:
- *	condition code
+ *	STS$K_SUCCESS	- done
+ *	STS$K_ERROR	- a NULL argument, the entry is not on this queue, or the spinlock could not be
+ *			  acquired
  */
-inline static int __util$movqtail (void * que, void **ent)
+inline static int __util$movqtail (void * que, void * ent)
 {
-unsigned	i;
 __QUEUE * _que = (__QUEUE *) que;
-ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
+ENTRY *	_ent = (ENTRY *) ent;
 
 	/*
 	 * Sanity check
@@ -1115,54 +1049,27 @@ ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 	if ( !(1 & __util$lockspin( &_que->lock)) )
 		return	STS$K_ERROR;
 
-	if ( !(_que->count) )
-		{
-		__util$unlockspin(&_que->lock);
-		return STS$K_SUCCESS;
-		}
-
-	/*
-	 * Lookup in the queue an entry with a given address
-	 */
-	for (i = 0, entp = _que->head; i < _que->count; i++, entp = entp->right)
-		{
-		if ( entp == (ENTRY *) ent )
-			break;
-		}
-
-	/*
-	 * Is the entry already at tail ?
-	 */
-	if ( i == _que->count )
-		return	__util$unlockspin(&_que->lock);
-
 	/*
 	 * Is the entry with a given address live in the queue?
 	 */
-	if ( !entp )
+	if ( (_ent->queue != que) || !_que->tail )
 		{
 		__util$unlockspin(&_que->lock);
 		return	STS$K_ERROR;
 		}
 
 	/*
-	 * Exclude has been found entry from the chain
+	 * Exclude the entry from the chain (this re-points the head if it was the first one),
+	 * put it behind the old tail.
 	 */
-	if ( (_entleft = entp->left) )
-		_entleft->right = _entright;
+	if ( _que->tail != _ent )
+		{
+		__util$q_unlink(_que, _ent);
 
-	if ( (_entright= entp->right) )
-		_entright->left = _entleft;
-#ifndef	WIN32
-	else assert( entp->right );	/* Right link can be on the last entry ! */
-#endif
-
-	/*
-	 * Put has been found entry at tail of queue
-	 */
-	entp->left = _que->tail;
-	entp->right = NULL;
-	_que->tail = entp;
+		_ent->left = _que->tail;
+		_que->tail->right = _ent;
+		_que->tail = _ent;
+		}
 
 	/*
 	 * Release the spinlock
@@ -1171,26 +1078,7 @@ ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 }
 
 /*
- * A set of macros to implement good old hardcore school ... of VMS-ish double linked lists - queue,
- * all queue modifications using interlocking by using GCC spinlocks.
- *
- * Typical scenario of using:
- *
- * __QUEUE	myqueue = QUEUE_INITIALIZER;
- * struct message {
- *	ENTRY		entry;	// A space reservation for stuff has been used my the queue's macros
- *	unsigned short	len;
- *	unsigned char	buf[128];
- * } messages [ 32 ];
- *
- * int	main	(void)
- * {
- * int status, count;
- *
- *	// The queue preinitialization, by inserting element from statical allocated array
- *	for (int i ; i < sizeof(messages)/sizeof(messages[0)]); i++)
- *		$INSQTAIL(&myqueue, &messages[i], &count);
- * }
+ * Macros over the VMS-ish double linked queue (__QUEUE of ENTRY), every modification interlocked by a GCC spinlock.
  *
  */
 
@@ -1227,7 +1115,7 @@ ENTRY *	entp, * _entleft = NULL, * _entright = NULL;
 
 /*	Remove a givent entry from the queueue.
  */
-#define	$REMQENT(que, ent, count)	__util$remqent ((__QUEUE *) que, (void **)ent, (unsigned *) count)
+#define	$REMQENT(que, ent, count)	__util$remqent ((__QUEUE *) (que), (void *) (ent), (unsigned *) (count))
 
 
 /*	Remove all entries form the queue.
@@ -1260,14 +1148,14 @@ int	left = $MIN(__min__, __max__) , right = $MAX(__min__, __max__);
 #define	$ISINRANGE(x, __min__, __max__)	__util$isinrange(x, (__min__), (__max__))
 
 
-/* Return a result of checking value in the given range include border,
- * 0/false - out of range, 1/true - is in range
+/* Return a result of checking value in the given range, the borders [min; max] included (in any
+ * order of the borders), 0/false - out of range, 1/true - is in range
  */
 inline static int __util$isinrange2 (int x, int __min__, int __max__ )
 {
 int	left = $MIN(__min__, __max__) , right = $MAX(__min__, __max__);
 
-	return ( (x <= left) || ( x >= right ) ) ? 0 : 1;
+	return ( (x < left) || ( x > right ) ) ? 0 : 1;
 }
 
 /* Return result of checking value between two borders: min and max	*/
@@ -1291,74 +1179,41 @@ int	left = $MIN(__min__, __max__) , right = $MAX(__min__, __max__);
 
 
 /*
- *
- *  Description: check buffer for consecutive zero octets
- *
- *  Input:
- *
- *	bufp:	buffer to check, address
- *	bufsz:	a length of data in the buffer
- *
- *
- *  Return:
- *	SS$_NORMAL	- the buffer is zero filled
- *	STS$K_WARN	- the buffer is not zero filled
- */
-/*
  *  DESCRIPTION: __util$iszero	- check buffer for consecutive zero octets
  *
  *  INPUT:
  *	bufp:	buffer to check, address
- *	bufsz:	a length of data in the buffer
+ *	bufsz:	a length of data in the buffer, octets; there is nothing to see in a NULL buffer or
+ *		a length of zero - it is "all zero"
  *
  *  RETURN:
- *	condition code
+ *	STS$K_SUCCESS	- the buffer is zero filled
+ *	STS$K_WARN	- the buffer is not zero filled
  */
 inline static int __util$iszero	(
 		void *	bufp,
 		int	bufsz
 			)
 {
-int	i;
-unsigned char *__bufp = (unsigned char *) bufp;
+const unsigned char *__bufp = (const unsigned char *) bufp;
+unsigned long long	l_word;
 
-#if ( (defined ULLONG_MAX && (ULLONG_MAX > UINT_MAX)) || (defined ULONG_LONG_MAX && (ULONG_LONG_MAX > UINT_MAX)) )
+	if ( !bufp )
+		return	STS$K_SUCCESS;
 
-//#pragma message	("%CC-I-ULLONG64, unsigned long long - 64 bits")
-
-	/* Step by 8 octets ... */
-	for (i = bufsz/sizeof(unsigned long long); i; i--, __bufp += sizeof(unsigned long long) )
+	/* Eight octets a time; memcpy() keeps the access aligned and does not depend on the width of long */
+	for ( ; bufsz >= (int) sizeof(l_word); bufsz -= (int) sizeof(l_word), __bufp += sizeof(l_word) )
 		{
-		if ( *((unsigned long long *) __bufp ) )
-			return	STS$K_WARN;
-		}
-#endif // (sizeof(unsigned long long)) > sizeof(unsigned int long) )
+		memcpy(&l_word, __bufp, sizeof(l_word));
 
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned int long);
-
-	/* Step by 4 octets ... */
-	for (i = bufsz/sizeof(unsigned int); i; i--, __bufp += sizeof(unsigned int) )
-		{
-		if ( *((unsigned int *) __bufp ) )
+		if ( l_word )
 			return	STS$K_WARN;
 		}
 
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned int);
-
-	/* Step by 2 octets ... */
-	for (i = bufsz/sizeof(unsigned short); i; i--, __bufp += sizeof(unsigned short) )
-		{
-		if ( *((unsigned short *) __bufp ) )
+	/* The rest, 0...7 octets */
+	for ( ; bufsz > 0; bufsz--, __bufp++ )
+		if ( *__bufp )
 			return	STS$K_WARN;
-		}
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned short);
-
-	if ( bufsz && *__bufp )
-		return	STS$K_WARN;
 
 	return	STS$K_SUCCESS;
 }
@@ -1368,57 +1223,27 @@ unsigned char *__bufp = (unsigned char *) bufp;
  *  DESCRIPTION: __util$bzero	- zeroing memory block
  *
  *  INPUT:
- *	bufp:	buffer to check, address
- *	bufsz:	a length of data in the buffer
+ *	bufp:	buffer to clear, address
+ *	bufsz:	a length of the buffer, octets - every one of them is cleared
  *
  *  RETURN:
- *	condition code
+ *	STS$K_SUCCESS, or STS$K_ERROR for a NULL buffer of a non-zero length
  */
 inline static int __util$bzero	(
 		void *	bufp,
 		size_t	bufsz
 			)
 {
-size_t	i;
-unsigned char *__bufp = (unsigned char *) bufp;
+	if ( !bufsz )
+		return	STS$K_SUCCESS;
 
-	/*
-	 * There is a place for optimization : align a memory address at head
-	 * of the memory block
-	 */
+	if ( !bufp )
+		return	STS$K_ERROR;
 
-#if ( (defined ULLONG_MAX && (ULLONG_MAX > UINT_MAX)) || (defined ULONG_LONG_MAX && (ULONG_LONG_MAX > UINT_MAX)) )
-
-//#pragma message	("%CC-I-ULLONG64, unsigned long long - 64 bits")
-
-	/* Step by 8 octets ... */
-	for (i = bufsz/sizeof(unsigned long long); i; i--, __bufp += sizeof(unsigned long long) )
-		*((unsigned long long *) __bufp ) = 0;
-#endif // (sizeof(unsigned long long)) > sizeof(unsigned int) )
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned long long);
-
-	/* Step by 4 octets ... */
-	for (i = bufsz/sizeof(unsigned int); i; i--, __bufp += sizeof(unsigned int) )
-		*((unsigned int *) __bufp ) = 0;
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned int);
-
-	/* Step by 2 octets ... */
-	for (i = bufsz/sizeof(unsigned short); i; i--, __bufp += sizeof(unsigned short) )
-		if ( *((unsigned short *) __bufp ) )
-
-	/* Compute remainder octets in the buffer */
-	bufsz %= sizeof(unsigned short);
-
-	if ( bufsz )
-		__bufp = (unsigned char *)'\0';
+	memset(bufp, 0, bufsz);
 
 	return	STS$K_SUCCESS;
 }
-
 
 
 
@@ -1524,20 +1349,25 @@ char		l_tmp[16], *l_p;						/* 10 digits is the max for uint32 - 16 is enough */
 }
 
 
-/* Copying ASCIIZ string to ASCIC container */
+/*
+ *  DESCRIPTION: Copy an ASCIIZ string to the ASCIC container.  The container holds ASC$K_SZ octets
+ *	and the copy is NUL-terminated, so a longer text is cut at ASC$K_SZ - 1 octets.
+ *
+ *  RETURN: the length of the text stored
+ */
 inline static int	__util$str2asc
 			(
 	const char *	a_src,
 		void *	a_dst
 			)
 {
-ASC	*l_dst = (ASC *) a_dst;;
+ASC	*l_dst = (ASC *) a_dst;
 
-	$ASCLEN(a_dst) = (unsigned char) strnlen(a_src, ASC$K_SZ);
-	memcpy($ASCPTR(a_dst), a_src, $ASCLEN(a_dst) );
+	l_dst->len = (unsigned char) strnlen(a_src, ASC$K_SZ - 1);
+	memcpy(l_dst->sts, a_src, l_dst->len);
 	l_dst->sts[l_dst->len] = '\0';
 
-	return	$ASCLEN(a_dst);
+	return	l_dst->len;
 }
 
 
@@ -1560,6 +1390,18 @@ inline static int	__util$asc2str
 
 /*
  *  DESCRIPTION: Retrieve a substring with a given index
+ *
+ *  INPUT:
+ *	a_src:		The ASCIC string of separated elements
+ *	a_separator:	The separator octet
+ *	a_idx:		The index of the element, from 0
+ *
+ *  OUTPUT:
+ *	a_dst:		The element (NUL-terminated when it leaves room); an empty one when a_idx is
+ *			negative or the string has fewer elements
+ *
+ *  RETURN:
+ *	the length of the element, 0 if there is no such element
  */
 inline static int	__util$strelem
 			(
@@ -1569,34 +1411,34 @@ inline static int	__util$strelem
 		ASC 	*a_dst
 			)
 {
-char	*l_cp_begin, *l_cp_end;
+const char	*l_cp = a_src->sts, *l_end = a_src->sts + a_src->len, *l_sep;
 int	l_i, l_len;
 
-	l_len = $ASCLEN(a_src);
-	l_cp_begin = $ASCPTR(a_src);
-	if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
-		l_cp_end = l_cp_begin + $ASCLEN(a_src);
+	a_dst->len = 0;
+	a_dst->sts[0] = '\0';
 
-	l_len -= l_cp_end - l_cp_begin;						/* Adjust length of rest buffer to has been processed part */
-
-
-	for ( l_i = 0; l_len && (l_i < a_idx); l_i++ )
-		{
-		l_cp_begin = l_cp_end + 1;
-		if ( !(l_cp_end = memchr(l_cp_begin, a_separator, $ASCLEN(a_src))) )
-			l_cp_end = l_cp_begin + $ASCLEN(a_src);
-
-		l_len -= l_cp_end - l_cp_begin;					/* Adjust length of rest buffer to has been processed part */
-		}
-
-	if ( l_i != a_idx )
+	if ( a_idx < 0 )
 		return	0;
 
+	/* Step over <a_idx> elements, each of them ends with a separator */
+	for ( l_i = 0; l_i < a_idx; l_i++ )
+		{
+		if ( !(l_sep = (const char *) memchr(l_cp, a_separator, (size_t) (l_end - l_cp))) )
+			return	0;
 
-	$ASCLEN(a_dst) = l_cp_end - l_cp_begin;
-	memcpy ( $ASCPTR(a_dst), l_cp_begin, $ASCLEN(a_dst));
+		l_cp = l_sep + 1;
+		}
 
-	return	$ASCLEN(a_dst);
+	l_sep = (const char *) memchr(l_cp, a_separator, (size_t) (l_end - l_cp));
+	l_len = (int) ((l_sep ? l_sep : l_end) - l_cp);
+
+	memcpy(a_dst->sts, l_cp, (size_t) l_len);
+	if ( l_len < ASC$K_SZ )
+		a_dst->sts[l_len] = '\0';
+
+	a_dst->len = (unsigned char) l_len;
+
+	return	l_len;
 }
 
 
@@ -1690,7 +1532,8 @@ long nsec = time1->tv_nsec + time2->tv_nsec;
 
 
 /*
-** @RRL: Perform a subsctration of two times.
+** @RRL: Perform a subsctration of two times: result = time1 - time2.  The result is normalised -
+** tv_nsec is in [0; 999999999], a negative difference of the nanoseconds borrows a second.
 */
 
 /*
@@ -1708,12 +1551,24 @@ struct timespec diff(struct timespec start, struct timespec end)
 }
 */
 
-inline static void __util$sub_time(struct timespec * time1, struct timespec* time2, struct timespec* result_time)
+inline static void __util$sub_time(const struct timespec * time1, const struct timespec* time2, struct timespec* result_time)
 {
 struct timespec temp;
 
 	temp.tv_sec = time1->tv_sec - time2->tv_sec;
 	temp.tv_nsec = time1->tv_nsec - time2->tv_nsec;
+
+	while ( temp.tv_nsec < 0 )
+		{
+		temp.tv_sec--;
+		temp.tv_nsec += 1000000000L;
+		}
+
+	while ( temp.tv_nsec >= 1000000000L )
+		{
+		temp.tv_sec++;
+		temp.tv_nsec -= 1000000000L;
+		}
 
 	*result_time = temp;
 }
@@ -1721,17 +1576,23 @@ struct timespec temp;
 
 
 /*
+ *   Compare two times; only the sign of the result is defined, it is the sign of (time1 - time2)
+ *   and it cannot overflow: the seconds are compared, not subtracted.
+ *
  *   RETURN
  *	0	- time1 == time2
- *	0 >	- time1 < time2
- *	0 <	- time1 > time2
+ *	< 0	- time1 < time2 (time1 is earlier)
+ *	> 0	- time1 > time2 (time1 is later)
  */
-inline static int __util$cmp_time(struct timespec * time1, struct timespec* time2)
+inline static int __util$cmp_time(const struct timespec * time1, const struct timespec* time2)
 {
-	if ( time1->tv_sec - time2->tv_sec )
-		return	(int) (time1->tv_sec - time2->tv_sec);
+	if ( time1->tv_sec != time2->tv_sec )
+		return	(time1->tv_sec < time2->tv_sec) ? -1 : 1;
 
-	return	(int) (time1->tv_nsec - time2->tv_nsec);
+	if ( time1->tv_nsec != time2->tv_nsec )
+		return	(time1->tv_nsec < time2->tv_nsec) ? -1 : 1;
+
+	return	0;
 }
 
 /*
@@ -1743,13 +1604,18 @@ inline static int __util$cmp_time(struct timespec * time1, struct timespec* time
 /*
  * Processing command line options stuff
  */
-#define OPTS$K_INT	0		/* Integer parameter type		*/
+#define OPTS$K_INT	0		/* Integer parameter type: decimal, 0x.. or 0.., exactly <sz> octets stored.
+					   Size 1, 2, 8: UNSIGNED, a minus sign is refused, range 0..2^n-1.
+					   Size 4 and 0 (an int): SIGNED, a minus sign is taken, range int32.
+					   __util$showparams() prints them the same way (1/2/8 unsigned, 4/0 signed)	*/
 #define OPTS$K_STR	1		/* Parameter is string			*/
 #define OPTS$K_OPT	2		/* Presence - is ON, missing - - OFF	*/
-#define	OPTS$K_PORT	3		/* A TCP/IP port number, NBO		*/
+#define	OPTS$K_PORT	3		/* A TCP/IP port number, in HOST byte order (unsigned short);
+					   convert with htons() to put it on the wire	*/
 #define	OPTS$K_IP4	4		/* A TCP/IP IP adddres , NBO		*/
-#define	OPTS$K_CONF	5		/* The options is a name of configuration
-					file to be processed recursively	*/
+#define	OPTS$K_CONF	5		/* The option is a name of configuration file, read at once by
+					   __util$getparams(); inside a configuration file it is
+					   rejected (no nesting)		*/
 #define OPTS$K_PWD	6		/* Parameter is password - don't show it*/
 
 
@@ -1763,7 +1629,6 @@ typedef struct _opts	{
 #define	OPTS_NULL { {0, 0}, NULL, 0, 0}
 
 int	__util$getparams	(int, char *[], const OPTS *);
-int	__util$readparams	(int, char *[], OPTS *);
 int	__util$readconfig	(const char *, OPTS *);
 int	__util$showparams	(const OPTS *opts);
 
@@ -1771,7 +1636,16 @@ int	__util$deflog		(const char *, const char *);
 int	__util$setlogfd	(int);
 int	__util$rewindlogfile	(size_t);
 int	__util$rotatelogfile	(size_t, unsigned);
-int	__util$pattern_match	(char * str$, char * pattern$);
+/*
+ *  DESCRIPTION: __util$pattern_match - match a string against a wildcard pattern.  In the pattern
+ *	'*' is any run of octets (empty too), '%' and '?' are exactly one octet, everything else stands
+ *	for itself; there is no escape.  The string has no wildcards: a '*' in it is an ordinary octet.
+ *	Case-sensitive, the whole string must match; iterative, not recursive.
+ *
+ *  RETURN:
+ *	1 - matches, 0 - does not (also for a NULL argument)
+ */
+int	__util$pattern_match	(char * a_str, char * a_pattern);
 
 /*
  *  DESCRIPTION: __util$base64 / __util$unbase64 - base64 (RFC 4648) encoding and
@@ -1797,20 +1671,47 @@ int	__util$unbase64		(void *src, int srclen, void *dst, int dstsz, int *dstlen);
 
 char *	__util$strstr		(char *s1, size_t s1len, char *s2, size_t s2len);
 
+/*
+ *  DESCRIPTION: __util$crc32c - CRC-32 of a memory region.  Despite the name this is the IEEE 802.3
+ *	(zlib, Ethernet) CRC-32, reflected polynomial 0xEDB88320 - NOT the Castagnoli CRC-32C; the check
+ *	value of "123456789" is 0xCBF43926.  The name is kept, since programs depend on it.
+ *
+ *  INPUT:
+ *	crc:	0 to start, or the result of the previous call to continue
+ *	buf:	an address of the data
+ *	buflen:	a number of octets
+ *
+ *  RETURN:
+ *	the 32-bit checksum (not a condition code)
+ */
 unsigned	__util$crc32c	(unsigned int crc, const void *buf, size_t buflen);
 
+/*
+ *  DESCRIPTION: __util$faohex - format up to 16 octets as one hex-and-ASCII dump line.
+ *
+ *  INPUT:
+ *	src, srclen:	the octets (more than 16 are cut to 16)
+ *	out, outsz:	the output buffer, at least 67 octets
+ *
+ *  OUTPUT:
+ *	outlen:	the length written; optional, may be NULL
+ *
+ *  RETURN:
+ *	the length written, 0 if the buffer is too small or an argument is NULL
+ */
 int	__util$faohex		(const void *src, unsigned short srclen, char *out, unsigned short outsz, unsigned short *outlen);
 
 /*
- *  DESCRIPTION: __util$hex2bin - convert a hexadecimal string in binary representative.
+ *  DESCRIPTION: __util$hex2bin - convert a hexadecimal string in binary representative.  The input is validated
+ *	first: an odd length or a character that is not a hexadecimal digit is an error and NOTHING is written.
  *
  *  INPUT:
  *	a_srchex:	An address of source data buffer to convert from
  *	a_dstbin:	An address of the output buffer to accept converted octets
- *	a_srchexlen:	A length of the source data
+ *	a_srchexlen:	A length of the source data (even)
  *
  *  RETURN:
- *	A length of the data in the output buffer
+ *	A length of the data in the output buffer, a_srchexlen / 2; 0 for an empty text; -1 for an invalid input
  */
 inline	static int __util$hex2bin
 		(
@@ -1819,38 +1720,22 @@ inline	static int __util$hex2bin
 	unsigned short  a_srchexlen
 		)
 {
-unsigned char	c, l = 0, h = 0, *__srchex = (unsigned char *) a_srchex, *__dstbin = (unsigned char *) a_dstbin;
-int	retlen = (a_srchexlen + 1) / 2, i;
+const unsigned char	*__srchex = (const unsigned char *) a_srchex;
+unsigned char	*__dstbin = (unsigned char *) a_dstbin;
+int	i, l_n = a_srchexlen / 2;
 
-	/* We will converting from tail to head */
-	__srchex += (a_srchexlen - 1);
-	__dstbin += (retlen - 1);
+	if ( a_srchexlen % 2 )
+		return	-1;
 
-	for( i = (a_srchexlen / 2); i; i--, __dstbin--, __srchex--)
-		{
-		c = tolower(*__srchex);
-		l = ((c) <= '9') ? (c) - '0' : (c) - 'a' + 10;
+	for ( i = 0; i < a_srchexlen; i++ )
+		if ( !isxdigit(__srchex[i]) )
+			return	-1;
 
-		__srchex--;
+	for ( i = 0; i < l_n; i++, __srchex += 2 )
+		__dstbin[i] = (unsigned char) (((isdigit(__srchex[0]) ? __srchex[0] - '0' : tolower(__srchex[0]) - 'a' + 10) << 4)
+			| (isdigit(__srchex[1]) ? __srchex[1] - '0' : tolower(__srchex[1]) - 'a' + 10));
 
-		c = tolower(*__srchex);
-		h = ((c) <= '9') ? (c) - '0' : (c) - 'a' + 10;
-
-
-		*__dstbin    = c = l | (h << 4);
-		}
-
-	if ( a_srchexlen % 2)
-		{
-		c = tolower(*__srchex);
-		l = ((c) <= '9') ? (c) - '0' : (c) - 'a' + 10;
-
-		*__dstbin    = c = l;
-		}
-
-
-
-	return	retlen;
+	return	l_n;
 }
 
 /*
@@ -1915,13 +1800,20 @@ int	retlen = a_srcbinlen * 2;
 
 /*
  *
- *  Description: removes leading and trailing spaces or tabs (HT and VT, CR, LF) from string
+ *  Description: cuts a trailing comment off a string: the string ends at the first <marker> octet which
+ *	is not inside a quoted part.  A part in double ("...") or single ('...') quotes is skipped as it
+ *	stands; the other kind of quote inside it is an ordinary octet, there is no escape, and a quote
+ *	left open runs to the end of the string.
  *  Input:
- *	src:	a pointer to the buffer wit string to process
+ *	src:	a pointer to the buffer with string to process
  *	srclen:	a length of the source buffer
+ *	marker:	the octet which starts a comment
+ *
+ *  Output:
+ *	src:	the marker is replaced with NUL
  *
  *  Return:
- *	a length of the actual data in the source buffer
+ *	a length of the string without the comment (0 if there is nothing but the comment)
  *
  */
 inline static int	__util$uncomment	(
@@ -1930,22 +1822,30 @@ inline static int	__util$uncomment	(
 		char	marker
 			)
 {
-int	count;
-char *	cp, *cmnt = NULL;
+int	l_i;
+char	l_quote = '\0';
 
 	if ( !srclen || !src )
 		return 0;
 
-	/*
-	 * Remove comments from end of string
-	 */
-	for (count = srclen, cp = src + (srclen - 1); count; count--, cp--)
-		cmnt = *cp == marker ? cp : cmnt;
-
-	if ( cmnt )
+	for ( l_i = 0; l_i < srclen; l_i++ )
 		{
-		*cmnt = '\0';
-		srclen = (int) (cmnt - src);
+		if ( l_quote )
+			{
+			if ( src[l_i] == l_quote )
+				l_quote = '\0';
+
+			continue;
+			}
+
+		if ( src[l_i] == marker )
+			{
+			src[l_i] = '\0';
+			return	l_i;
+			}
+
+		if ( (src[l_i] == '"') || (src[l_i] == '\'') )
+			l_quote = src[l_i];
 		}
 
 	return	srclen;
@@ -2002,7 +1902,8 @@ char *	cp;
 }
 
 /*
- *  Description: removes all spaces or tabs (HT and VT, CR, LF) from string
+ *  Description: removes all spaces or tabs (HT and VT, CR, LF) from string; the result is
+ *	NUL-terminated when something was removed, the buffer of <srclen> octets is never overrun
  *  Input:
  *	src:	a pointer to the buffer with string to process
  *	srclen:	a length of the source buffer
@@ -2016,7 +1917,7 @@ inline static int	__util$collapse	(
 		int	srclen
 			)
 {
-int	count;
+int	count, l_srclen = srclen;
 char *	cp;
 
 	if ( !srclen || !src )
@@ -2026,13 +1927,15 @@ char *	cp;
 	 * Remove all spaces or tabs
 	 */
 	for (count = 0, cp = src; srclen; src++, srclen--)
-		if ( !isspace (*src) )
+		if ( !isspace ((unsigned char) *src) )
 			{
 			*(cp++) = *src;
 			count++;
 			}
 
-	*cp = '\0';
+	/* The NUL goes where a removed octet has been; with nothing removed the buffer has no room for it */
+	if ( count < l_srclen )
+		*cp = '\0';
 
 	return	count;
 }
@@ -2043,10 +1946,16 @@ char *	cp;
  *  INPUT:
  *	dst:	a pointer to area to accept concatenation of the strings
  *	dstsz:	destination area size
- *	dstlen:	a returned actual data length
+ *	...:	pairs <char *string, int length>, ended with a NULL pointer; a zero length is skipped
+ *
+ *  OUTPUT:
+ *	dstlen:	a returned actual data length (without the NUL)
  *
  *  RETURN:
- *	STS$K_SUCCESS
+ *	STS$K_SUCCESS	- all the strings are in the area and the NUL after them, so the strings may fill
+ *			  it up to <dstsz> - 1 octets exactly;
+ *	STS$K_ERROR	- a string does not fit (those before it are kept, NUL-terminated) or a bad
+ *			  argument; nothing is ever written at dst[dstsz]
  */
 inline static	int	__util$strcat_rx	(
 	void	*	dst,
@@ -2057,36 +1966,39 @@ inline static	int	__util$strcat_rx	(
 {
 va_list ap;
 char *	srcp, *dstp = (char *) dst;
-int	srclen, status = STS$K_ERROR;
+int	srclen;
+
+	if ( !dstlen )
+		return	STS$K_ERROR;
+
+	*dstlen = 0;
+
+	if ( !dst || (dstsz < 1) )
+		return	STS$K_ERROR;
 
 	/* Initialize the argument list. */
 	va_start (ap, dstlen);
 
-	/* Looping until destination buffer have a free space */
-	for ( *dstlen = srclen = 0; (dstsz - *dstlen); )
+	/* NULL is a "end-of-list" marker */
+	while ( (srcp = va_arg(ap, char *)) )
 		{
-		/* NULL is a "end-of-list" marker */
-		if ( !(srcp = va_arg(ap, char *)) )
-			{
-			status = STS$K_SUCCESS;
-			break;
-			}
-
 		/* Get source length, zero - skip to next */
 		if ( !(srclen = va_arg(ap, int)) )
 			continue;
 
-		if ( srclen > (dstsz - *dstlen) )
+		/* One octet is kept for the NUL */
+		if ( (srclen < 0) || (srclen > (dstsz - 1 - *dstlen)) )
 			break;
 
 		memmove(dstp + *dstlen, srcp, srclen);
 		*dstlen += srclen;
 		}
 
-	*(dstp + *dstlen) = '\0';
 	va_end(ap);
 
-	return	status;
+	dstp[*dstlen] = '\0';
+
+	return	srcp ? STS$K_ERROR : STS$K_SUCCESS;
 }
 
 
@@ -2098,15 +2010,21 @@ int	srclen, status = STS$K_ERROR;
  *	srclen:	a length of the source buffer
  *	kbtl:	A keyword table
  *	ktblsz:	A size of the keywords table (in elements)
- *	flags:	A bitfield mask for string comparing/matching flag
+ *	flags:	A bitfield mask for string comparing/matching flag:
+ *		UTIL$K_LOOKUP_NCASE	- compare without regard to case
+ *		UTIL$K_LOOKUP_ABBREV	- the string may be an abbreviation (a leading part) of a keyword,
+ *					  as DCL takes them: a keyword spelled out in full wins, else
+ *					  the abbreviation must select one keyword (entries with the same
+ *					  value - synonyms - count as one)
  *
  *  OUTPUTS:
  *	kwd:	A has been found keyword's entry
  *
  *
  *  RETURNS:
- *	SS$-NORMAL	- keywords has been found, result in the <kwd>
- *	condition code
+ *	STS$K_SUCCESS	- keywords has been found, result in the <kwd>
+ *	STS$K_WARN	- ABBREV: an ambiguous abbreviation, <kwd> - the first keyword it matches
+ *	STS$K_ERROR	- no such keyword (or an empty string)
  *
  */
 #define	UTIL$K_LOOKUP_NCASE	(1 << 0)
@@ -2133,46 +2051,47 @@ inline	static	int	__util$lookup_key	(
 			int	a_flags
 			)
 {
-int	l_status = STS$K_ERROR, l_len;
-KWDENT *	l_ktbl = a_ktbl;
+KWDENT	*l_ktbl, *l_found = NULL;
+int	l_ambig = 0;
 
-	for ( l_ktbl = a_ktbl, l_len = 0; a_ktblsz; a_ktblsz--, l_ktbl++)
+	if ( a_srclen <= 0 )
+		return	STS$K_ERROR;
+
+	for ( l_ktbl = a_ktbl; a_ktblsz; a_ktblsz--, l_ktbl++)
 		{
-		/* Exact comparing or abbreviated ? */
-		if ( !(a_flags & UTIL$K_LOOKUP_ABBREV) )
-			if ( a_srclen != l_ktbl->kwd.len )
-				continue;
+		/* Longer than the keyword, or (exact) not the same length - not this one */
+		if ( (a_srclen > l_ktbl->kwd.len) || (!(a_flags & UTIL$K_LOOKUP_ABBREV) && (a_srclen != l_ktbl->kwd.len)) )
+			continue;
 
-		/*
-		* We performs a comparing only in case when a compare length is
-		* more then at previous step.
-		*/
-		if ( l_len <= $MIN(a_srclen, l_ktbl->kwd.len) )
-			l_len = $MIN(a_srclen, l_ktbl->kwd.len);
-		else	continue;
-
-
-		/* Comparing ... */
-		l_status = (a_flags & UTIL$K_LOOKUP_NCASE) ?
+		if ( (a_flags & UTIL$K_LOOKUP_NCASE) ?
 #ifdef	WIN32
-
 			_strnicmp
 #else
 			strncasecmp
 #endif
-			(a_src, l_ktbl->kwd.sts, l_len) : memcmp(a_src, l_ktbl->kwd.sts, l_len);
+			(a_src, l_ktbl->kwd.sts, a_srclen) : memcmp(a_src, l_ktbl->kwd.sts, a_srclen) )
+			continue;
 
-		if ( !l_status &&  !(a_flags & UTIL$K_LOOKUP_ABBREV) )
-			break;
+		/* Spelled out in full - this one, whatever else the abbreviation matches */
+		if ( a_srclen == l_ktbl->kwd.len )
+			{
+			*a_kwd = l_ktbl;
+			return	STS$K_SUCCESS;
+			}
+
+		if ( !l_found )
+			l_found = l_ktbl;
+		else if ( (l_found->val != l_ktbl->val) || (l_found->ptr != l_ktbl->ptr) )
+			l_ambig = 1;						/* Another keyword, not a synonym */
 		}
 
 	/* No matching ... */
-	if ( l_status )
+	if ( !l_found )
 		return	STS$K_ERROR;
 
-	*a_kwd = l_ktbl;
+	*a_kwd = l_found;
 
-	return	STS$K_SUCCESS;
+	return	l_ambig ? STS$K_WARN : STS$K_SUCCESS;
 }
 
 
@@ -2220,7 +2139,8 @@ int	len;
  *	srcsz:	a size of the pattern data
  *
  *  RETURN:
- *	condition code
+ *	STS$K_SUCCESS	- filled, the pattern is repeated and the last copy is cut to fit
+ *	STS$K_ERROR	- a NULL address, a negative <dstsz> or a pattern of zero (or negative) size
  */
 static inline	int	__util$fill	(
 		void	*	dst,
@@ -2231,6 +2151,10 @@ static inline	int	__util$fill	(
 {
 int	fillen = 0;
 char *	_dst = (char *) dst;
+
+	/* An empty pattern would never fill anything */
+	if ( !dst || !src || (srcsz <= 0) || (dstsz < 0) )
+		return	STS$K_ERROR;
 
 	while ( dstsz )
 		{
@@ -2300,90 +2224,46 @@ int	sz = (srcsz > dstsz) ? dstsz : srcsz;
 
 
 
-/*	LIB$MOVC5 - Execute MOVC5 instruction
+/*
 **++
-** FUNCTIONAL DESCRIPTION:
+**  FUNCTIONAL DESCRIPTION:
 **
-**	LIB$MOVC5 makes the VAX MOVC5 instruction available as
-**	a callable procedure.
+**	Copy a source string into a destination of another length and pad the destination.
+**	min(srclen, dstlen) octets are copied; when the destination is longer, the rest of it is
+**	filled with the fill octet.  A source longer than the destination is cut.  The copy is
+**	done with memmove(), so the two areas may overlap.
 **
-**	The source is moved to the destination.  If the destination is
-**	longer than the source, the highest address bytes of the
-**	destination are replaced by the fill argument.  If the
-**	destination is shorter than the source, the highest
-**	addressed bytes of the source are not moved.  The operation is
-**	such that overlap of the source and destination does not
-**	affect the result.
+**  FORMAL PARAMETERS:
 **
-**	For more information, see the VAX-11 Architecture Handbook.
+**	srclen	Address of the length of the source, octets
+**	source	Address of the source
+**	fill	Address of the fill octet; NULL means a zero octet
+**	dstlen	Address of the length of the destination, octets
+**	dest	Address of the destination
 **
-** CALLING SEQUENCE:
-**
-**	status.wlc.v = LIB$MOVC5 (src_len.rwu.r, source.rz.r, fill.rb.r,
-**				  dst_len.rwu.r, dest.wz.r)
-**
-** FORMAL PARAMETERS:
-**
-**	src_len		; The length of source in bytes.  Passed
-**			; by reference.  The maximum length is 65535.
-**
-**	source		; The source to move from.  Passed by reference.
-**
-**	fill		; The fill character.  Passed by reference.
-**
-**	dst_len		; The length of dest in bytes.  Passed by
-**			; reference.  The maximum length is 65535.
-**
-**	dest		; The destination to move to.  Passed by
-**			; reference.
-**
-**
-** IMPLICIT INPUTS:
-**
+**  IMPLICIT INPUTS/OUTPUTS:
 **	NONE
 **
-** IMPLICIT OUTPUTS:
-**
-**	NONE
-**
-** COMPLETION STATUS:
-**
-**	SS$_NORMAL	Procedure successfully completed.
-**
-** SIDE EFFECTS:
-**
-**	NONE
-**
+**  RETURN VALUE:
+**	STS$K_SUCCESS.
 **--
-
-				LIB$MOVC5                       19-NOV-2004 08:39:23  Compaq C V6.5-001-48BCD           Page 4
-								15-DEC-1994 11:02:13  $1$DGA1016:[LIBRTL_2.SRC]LIBMOVC5.C;1
 */
-
 static inline int	__util$movc5	(
-		unsigned short  *srclen,	/* pointer to source length	*/
-		char            *source,	/* pointer to source 		*/
-		unsigned char   *fill,		/* pointer to fill byte 	*/
-		unsigned short  *dstlen,	/* pointer to destination length */
-		char             *dest		/* pointer to destination	*/
+		unsigned short  *srclen,
+		char            *source,
+		unsigned char   *fill,
+		unsigned short  *dstlen,
+		char            *dest
 			)
 {
-	/*
-	*  if the destination is the same size as the source, or shorter
-	*  then this is a simple move.
-	*/
+unsigned short	l_n = (*srclen < *dstlen) ? *srclen : *dstlen;
 
-	if (*srclen >= *dstlen)
-		memmove (dest, source, *dstlen);
-	else	{
-		/*
-		 * destination is larger, do move and fill
-		 */
-		memmove (dest, source, *srclen);
-		memset (&dest[*srclen], *fill, *dstlen - *srclen);
-		}
+	memmove (dest, source, l_n);
 
-	return STS$K_SUCCESS;
+	if ( *dstlen > l_n )
+		memset (dest + l_n, fill ? *fill : 0, (size_t) (*dstlen - l_n));
+
+	return	STS$K_SUCCESS;
 }
 
 
@@ -2430,12 +2310,16 @@ static inline int	__util$mask2sym	(
 {
 int	outlen = 0;
 
+	if ( outsz < 1 )					/* not even room for the NUL */
+		return	0;
+
 	for ( ; sym->val && sym->sym; sym++)
 		{
 		if ( !(mask & sym->val) )
 			continue;
 
-		if ( outsz > sym->len )
+		/* The name, the '|' before it unless it is the first one, and the NUL after all */
+		if ( outsz > (sym->len + (outlen ? 1 : 0)) )
 			{
 			if ( outlen )
 				{
@@ -2483,7 +2367,10 @@ static inline int	__util$val2sym	(
 {
 int	outlen = 0;
 
-	for ( sym = sym; sym->len && sym->sym; sym++)
+	if ( outsz < 1 )					/* not even room for the NUL */
+		return	0;
+
+	for ( ; sym->len && sym->sym; sym++)
 		{
 		if ( (val != sym->val) )
 			continue;

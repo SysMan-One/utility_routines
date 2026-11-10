@@ -6,26 +6,10 @@
 **  MODULE:	test_putmsg_fao.c
 **
 **  ABSTRACT:	Checks that $PUTMSG_FAO reads exactly the parameters it was
-**		given, and no more.
-**
-**  DESCRIPTION: The routine takes its parameters through a variable
-**		argument list, so the only thing that can tell it how many
-**		there are is the caller.  Reading a fixed sixteen of them
-**		is undefined behaviour in itself; worse, it then tells
-**		__util$faol() that sixteen were supplied, which defeats
-**		that routine's own guard against a control string carrying
-**		more directives than there are parameters.  A catalogue
-**		entry and a caller that disagree - which is a mistake, but
-**		an ordinary one - would then format whatever the stack
-**		happened to hold, and an !AZ directive would dereference
-**		it.
-**
-**		The check formats a message whose text carries three
-**		directives while passing one parameter.  With the count
-**		honoured this is harmless: __util$faol() stops where the
-**		parameters stop.  Without it the process reads wild memory,
-**		which is a SEGV under a sanitizer and silence without one -
-**		hence the first check, which pins the visible result too.
+**		given, and no more: a message whose text carries three
+**		directives, passed one parameter, must stop where the
+**		parameters stop (__util$faol() guard) instead of reading
+**		wild memory (a SEGV under a sanitizer).
 **
 **  AUTHOR:	StarLet squad
 **
