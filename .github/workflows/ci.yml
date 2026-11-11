@@ -33,6 +33,10 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
+    # Ubuntu's aarch64 libgcc.a calls glibc's __getauxval for the outline
+    # atomics (LSE); musl has no such symbol, so they are inlined there.
+    env:
+      ARCH_CFLAGS: ${{ runner.arch == 'ARM64' && '-mno-outline-atomics' || '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -42,11 +46,11 @@ jobs:
 
       - name: Build the library and run the tests (CMake / CTest, musl-gcc)
         run: |
-          cmake -B build-musl -DCMAKE_C_COMPILER=musl-gcc -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+          cmake -B build-musl -DCMAKE_C_COMPILER=musl-gcc -DCMAKE_C_FLAGS="-Wall -Wextra -Werror ${ARCH_CFLAGS}"
           cmake --build build-musl
           ctest --test-dir build-musl --output-on-failure
 
       - name: Re-run the tests standalone, statically linked against musl
         run: |
-          CC=musl-gcc CFLAGS="-std=gnu11 -O2 -Wall -Wextra -Werror -static" \
+          CC=musl-gcc CFLAGS="-std=gnu11 -O2 -Wall -Wextra -Werror -static ${ARCH_CFLAGS}" \
             sh tests/run.sh
