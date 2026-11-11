@@ -1,5 +1,7 @@
 # StarLet (utility_routines)
 
+[![CI](https://github.com/SysMan-One/utility_routines/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/SysMan-One/utility_routines/actions/workflows/ci.yml)
+
 Delivered as `StarLet-<ident>.tar.gz`, unpacking into `starlet-<ident>/`.
 
 A small, freestanding-friendly C library of OpenVMS-flavoured building blocks for
@@ -114,7 +116,8 @@ straight into a build pipeline):
   fastest engine of the processor (PCLMULQDQ on x86-64, the CRC32 instructions on
   ARMv8) and under `STARLET_CRC32=SOFTWARE` (the tables).
 
-A GitHub Actions workflow (`.github/workflows/ci.yml`) runs them on every push:
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs them on every push and
+pull request (and by hand), on x86-64 and aarch64 (`ubuntu-24.04`, `ubuntu-24.04-arm`):
 via CTest and standalone under ASan/UBSan with glibc, then again with `musl-gcc`
 (CTest plus the standalone suite statically linked against musl, `-Werror` throughout).
 
