@@ -31,12 +31,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        include:
+          - os: ubuntu-24.04
+            arch_cflags: ""
+          - os: ubuntu-24.04-arm
+            arch_cflags: -mno-outline-atomics
     runs-on: ${{ matrix.os }}
     # Ubuntu's aarch64 libgcc.a calls glibc's __getauxval for the outline
     # atomics (LSE); musl has no such symbol, so they are inlined there.
     env:
-      ARCH_CFLAGS: ${{ runner.arch == 'ARM64' && '-mno-outline-atomics' || '' }}
+      ARCH_CFLAGS: ${{ matrix.arch_cflags }}
 
     steps:
       - uses: actions/checkout@v4
