@@ -192,7 +192,7 @@
 #					compiler, not by the platform - under MinGW GCC __declspec(thread)
 #					was ignored and the log prefix cache (time, tid) was shared by all
 #					the threads. test_log_tls added (Linux and Windows/Wine).
-#		12-NOV-2026	CLD	A Debian package, libstarlet-dev (cpack -G DEB): the static library,
+#		12-NOV-2026	CLD	VERSION -> 1.7.3. A Debian package, libstarlet-dev (cpack -G DEB): the static library,
 #					the headers, the CMake package and the manuals; the contact of
 #					the maintainer was what CPack missed.  The code is not changed.
 #---
@@ -201,7 +201,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.7.2 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.7.3 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.
