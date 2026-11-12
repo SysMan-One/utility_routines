@@ -16,12 +16,16 @@
 #	The tag must be "v" + the project() VERSION exactly; the version is never given on the
 #	command line here, so a tag cannot name a delivery the tree is not.
 #
-#	StarLet is a static library with no packaging of its own (CPack has no DEB maintainer
-#	set), so the sources tarball is the only file of a release.
+#	The Debian package libstarlet-dev_<VERSION>_<arch>.deb (amd64, arm64) is built on
+#	Debian 12, so its libstarlet.a needs no newer glibc than 2.36, and is attached as well;
+#	a tag whose tree has no CPACK_DEBIAN_PACKAGE_NAME (before 1.7.3) cannot be released again.
 #
 #	MODIFICATION HISTORY:
 #
 #	12-NOV-2026	CLD	Initial version, after vHELP's release.yml.
+#	12-NOV-2026	CLD	The Debian package libstarlet-dev for amd64 and arm64, built on Debian 12
+#			(the oldest glibc we serve), installed on Debian 12, 13 and Ubuntu 24.04
+#			and used there by a find_package(StarLet) consumer; attached to the Release.
 #--
 
 name: release
@@ -77,9 +81,87 @@ jobs:
             exit $rc
           }
 
+  deb:
+    name: deb ${{ matrix.arch }}
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: debian:bookworm
+    steps:
+      - name: Install prerequisites
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends build-essential cmake dpkg-dev file git ca-certificates
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Build, test, package
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build -j "$(nproc)"
+          ctest --test-dir build --output-on-failure
+          (cd build && cpack -G DEB)
+
+      - name: Check the package
+        run: |
+          deb=$(ls build/*.deb)
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          case "$deb" in */libstarlet-dev_*_${{ matrix.arch }}.deb) ;; *) echo "::error::wrong name: $deb"; exit 1;; esac
+          dpkg-deb --contents "$deb" | grep -q '/libstarlet\.a$'
+          dpkg-deb --contents "$deb" | grep -q '/usr/include/utility_routines\.h$'
+          dpkg-deb --contents "$deb" | grep -q '/cmake/StarLet/StarLetConfig\.cmake$'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+          path: build/*.deb
+          if-no-files-found: error
+
+  test:
+    name: install ${{ matrix.arch }} on ${{ matrix.distro }}
+    needs: deb
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        distro: ['debian:bookworm', 'debian:trixie', 'ubuntu:noble']
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.distro }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+
+      - name: Install the package, build a consumer, remove it
+        run: |
+          apt-get update
+          apt-get install --yes ./*.deb build-essential cmake
+          mkdir /tmp/c
+          printf 'cmake_minimum_required(VERSION 3.16)\nproject(c C)\nfind_package(StarLet 1.7 REQUIRED)\nadd_executable(c c.c)\ntarget_link_libraries(c StarLet::starlet)\n' > /tmp/c/CMakeLists.txt
+          # a routine of the library itself, not an inline one of the header: the link is what is checked
+          printf '#include <utility_routines.h>\nint main(void) { return __util$crc32c(0, "123456789", 9) ? 0 : 1; }\n' > /tmp/c/c.c
+          cmake -S /tmp/c -B /tmp/c/build
+          cmake --build /tmp/c/build
+          /tmp/c/build/c
+          dpkg --purge libstarlet-dev
+          # (a '!' in front would not stop the step: errexit ignores it)
+          if ls /usr/lib/*/libstarlet.a 2>/dev/null; then echo "::error::libstarlet.a left after the purge"; exit 1; fi
+
   release:
     name: GitHub Release
-    needs: build
+    needs: [build, test]
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.tag, 'v')
     runs-on: ubuntu-24.04
     steps:
@@ -87,6 +169,11 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
           path: src
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'deb-*'
+          merge-multiple: true
 
       - name: Make the files of the Release
         env:
@@ -98,8 +185,9 @@ jobs:
           # The sources: the tree of the tag as git has it, nothing built in it
           git -C src archive --format=tar.gz --prefix="starlet-$ver/" -o "$PWD/StarLet-$ver.tar.gz" HEAD
           tar tzf "StarLet-$ver.tar.gz" | grep -qx "starlet-$ver/CMakeLists.txt"
-          ls -l *.tar.gz
-          sha256sum *.tar.gz > SHA256SUMS
+          ls -l *.deb *.tar.gz
+          test "$(ls libstarlet-dev_"$ver"_*.deb | wc -l)" = 2 || { echo "::error::not the two packages of $ver"; ls *.deb; exit 1; }
+          sha256sum *.deb *.tar.gz > SHA256SUMS
           cat SHA256SUMS
           echo "ver=$ver" >> "$GITHUB_ENV"
 
@@ -133,9 +221,9 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" *.tar.gz SHA256SUMS SHA256SUMS.minisig --clobber
+            gh release upload "$TAG" *.deb *.tar.gz SHA256SUMS SHA256SUMS.minisig --clobber
           else
-            gh release create "$TAG" *.tar.gz SHA256SUMS SHA256SUMS.minisig --title "StarLet $ver" --notes-file - <<EOF
+            gh release create "$TAG" *.deb *.tar.gz SHA256SUMS SHA256SUMS.minisig --title "StarLet $ver" --notes-file - <<EOF
           StarLet $ver - utility routines: OpenVMS-flavoured building blocks for C (logging, message catalogues, FAO, DCL-style CLI, TLV). The sources: \`StarLet-$ver.tar.gz\`, unpacking into \`starlet-$ver/\`; build with \`cmake -B build && cmake --build build && ctest --test-dir build\`, install with \`cmake --install build\`.
 
           To check a download: \`minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14\` (\`SHA256SUMS.minisig\` next to it), then \`sha256sum -c --ignore-missing SHA256SUMS\`.

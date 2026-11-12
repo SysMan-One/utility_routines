@@ -184,7 +184,10 @@ A tag that is `v` + the `project()` VERSION of `CMakeLists.txt`, exactly
 `.github/workflows/release.yml`: the library is built and its tests are run
 (CTest, `-Werror`) on x86-64 and aarch64, with glibc and with `musl-gcc`,
 and the sources tarball `StarLet-<version>.tar.gz` (unpacking into
-`starlet-<version>/`) and `SHA256SUMS` are attached.  A tag that is not the
+`starlet-<version>/`), the Debian packages `libstarlet-dev_<version>_amd64.deb`
+and `_arm64.deb` (built on Debian 12, checked on Debian 12, 13 and Ubuntu 24.04:
+the library, the headers, the CMake package and the manuals under `/usr`) and
+`SHA256SUMS` are attached.  The packages come with 1.7.3 and later.  A tag that is not the
 version of its tree is refused.
 
 Every push and every pull request is built and tested by

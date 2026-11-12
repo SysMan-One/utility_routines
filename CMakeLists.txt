@@ -192,6 +192,9 @@
 #					compiler, not by the platform - under MinGW GCC __declspec(thread)
 #					was ignored and the log prefix cache (time, tid) was shared by all
 #					the threads. test_log_tls added (Linux and Windows/Wine).
+#		12-NOV-2026	CLD	A Debian package, libstarlet-dev (cpack -G DEB): the static library,
+#					the headers, the CMake package and the manuals; the contact of
+#					the maintainer was what CPack missed.  The code is not changed.
 #---
 
 
@@ -401,6 +404,22 @@ install (FILES
 )
 
 # Optional: binary/source packages via 'cpack' in the build dir.
+#
+#	The Debian package (cpack -G DEB) is named as Debian names a library for the
+#	developer, libstarlet-dev: the static libstarlet.a, its headers, the CMake package
+#	(find_package(StarLet)) and the manuals.  Built with -DCMAKE_INSTALL_PREFIX=/usr,
+#	the library goes where GNUInstallDirs puts it, lib/<triplet> on Debian.
+#
+set (CPACK_PACKAGE_CONTACT			"StarLet Squad and Ruslan R. Laishev <polylab240@gmail.com>")
+set (CPACK_PACKAGE_VENDOR			"StarLet Squad")
+set (CPACK_PACKAGE_DESCRIPTION_SUMMARY		"StarLet utility routines - OpenVMS-flavoured building blocks for C")
+set (CPACK_DEBIAN_PACKAGE_NAME			"libstarlet-dev")
+set (CPACK_DEBIAN_FILE_NAME			DEB-DEFAULT)
+set (CPACK_DEBIAN_PACKAGE_SECTION		libdevel)
+set (CPACK_DEBIAN_PACKAGE_PRIORITY		optional)
+set (CPACK_DEBIAN_PACKAGE_HOMEPAGE		"https://github.com/SysMan-One/utility_routines")
+set (CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION ON)
+
 include (CPack)
 
 endif()					# CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
