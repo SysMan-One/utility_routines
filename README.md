@@ -1,6 +1,7 @@
 # StarLet (utility_routines)
 
 [![CI](https://github.com/SysMan-One/utility_routines/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/SysMan-One/utility_routines/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/SysMan-One/utility_routines)](https://github.com/SysMan-One/utility_routines/releases/latest)
 
 Delivered as `StarLet-<ident>.tar.gz`, unpacking into `starlet-<ident>/`.
 
@@ -175,6 +176,37 @@ the OpenVMS manuals:
   the condition values, an index.
 
 They replace `Routines_Reference_EN.pdf` / `Routines_Reference_RU.pdf` of 1.6.x.
+
+## Releases
+
+A tag that is `v` + the `project()` VERSION of `CMakeLists.txt`, exactly
+(`v1.7.2` for `project(StarLet VERSION 1.7.2)`), makes a GitHub Release by
+`.github/workflows/release.yml`: the library is built and its tests are run
+(CTest, `-Werror`) on x86-64 and aarch64, with glibc and with `musl-gcc`,
+and the sources tarball `StarLet-<version>.tar.gz` (unpacking into
+`starlet-<version>/`) and `SHA256SUMS` are attached.  A tag that is not the
+version of its tree is refused.
+
+Every push and every pull request is built and tested by
+`.github/workflows/ci.yml`, the badge at the top.
+
+## Checking a download
+
+A release carries `SHA256SUMS.minisig`, a
+[minisign](https://jedisct1.github.io/minisign/) signature of `SHA256SUMS`.
+The public key is in `minisign.pub` here (the same key signs the kits of
+AlphaEmu, BATCH, HELP and BroTwins):
+
+    RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
+
+Put the files you took next to `SHA256SUMS` and `SHA256SUMS.minisig`, then:
+
+    minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
+    sha256sum -c --ignore-missing SHA256SUMS
+
+The first must say `Signature and comment signature verified`, the second
+`OK` for every file.  Anything else - the file is not the one released: do
+not use it.
 
 ## Coding style
 

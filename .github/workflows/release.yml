@@ -1,0 +1,143 @@
+#++
+#   FACILITY:	StarLet (utility_routines) - the signed GitHub Release of a version tag
+#
+#   AUTHOR:	StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
+#
+#   CREATION DATE: 12-NOV-2026
+#
+#	A push of the tag v<VERSION>, where <VERSION> is the project() VERSION of CMakeLists.txt
+#	(v1.7.2 for project(StarLet VERSION 1.7.2)), builds the library and runs its tests (CTest)
+#	on x86-64 and aarch64, with glibc and with musl-gcc, and attaches the sources tarball
+#	StarLet-<VERSION>.tar.gz (unpacking into starlet-<VERSION>/), SHA256SUMS and its minisign
+#	signature to the Release of that tag.  The manual run (Actions -> release -> Run workflow)
+#	with the <tag> input does the same for an existing tag (the files of its Release are
+#	replaced); without it - only builds and tests the branch.
+#
+#	The tag must be "v" + the project() VERSION exactly; the version is never given on the
+#	command line here, so a tag cannot name a delivery the tree is not.
+#
+#	StarLet is a static library with no packaging of its own (CPack has no DEB maintainer
+#	set), so the sources tarball is the only file of a release.
+#
+#	MODIFICATION HISTORY:
+#
+#	12-NOV-2026	CLD	Initial version, after vHELP's release.yml.
+#--
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing tag (v1.7.2), equal to v + project() VERSION of its tree, to build and release; empty - build only"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.os }} ${{ matrix.libc }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,     libc: glibc, cc: gcc,      arch_cflags: "" }
+          - { os: ubuntu-24.04-arm, libc: glibc, cc: gcc,      arch_cflags: "" }
+          - { os: ubuntu-24.04,     libc: musl,  cc: musl-gcc, arch_cflags: "" }
+          # Ubuntu's aarch64 libgcc.a calls glibc's __getauxval for the outline
+          # atomics (LSE); musl has no such symbol, so they are inlined there.
+          - { os: ubuntu-24.04-arm, libc: musl,  cc: musl-gcc, arch_cflags: -mno-outline-atomics }
+    runs-on: ${{ matrix.os }}
+    env:
+      CC_NAME: ${{ matrix.cc }}
+      ARCH_CFLAGS: ${{ matrix.arch_cflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install the musl toolchain
+        if: matrix.libc == 'musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build the library and run the tests (CMake / CTest)
+        run: |
+          cmake -B build -DCMAKE_C_COMPILER="${CC_NAME}" -DCMAKE_C_FLAGS="-Wall -Wextra -Werror ${ARCH_CFLAGS}"
+          cmake --build build -j "$(nproc)"
+          ctest --test-dir build --output-on-failure || {
+            rc=$?
+            # an annotation is visible without signing in: the names of the failed tests
+            for t in $(sed 's/^[0-9]*://' build/Testing/Temporary/LastTestsFailed.log); do echo "::error::ctest FAILED: $t"; done
+            exit $rc
+          }
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.tag, 'v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          path: src
+
+      - name: Make the files of the Release
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          ver=$(sed -n 's/^project([[:space:]]*StarLet[[:space:]][[:space:]]*VERSION[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' src/CMakeLists.txt)
+          test -n "$ver" || { echo "::error::no project(StarLet VERSION ...) in CMakeLists.txt"; exit 1; }
+          test "$TAG" = "v$ver" || { echo "::error::the tag $TAG is not v + the project() VERSION $ver of CMakeLists.txt"; exit 1; }
+          # The sources: the tree of the tag as git has it, nothing built in it
+          git -C src archive --format=tar.gz --prefix="starlet-$ver/" -o "$PWD/StarLet-$ver.tar.gz" HEAD
+          tar tzf "StarLet-$ver.tar.gz" | grep -qx "starlet-$ver/CMakeLists.txt"
+          ls -l *.tar.gz
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          echo "ver=$ver" >> "$GITHUB_ENV"
+
+      #	The secret MINISIGN_KEY is the secret key of minisign.pub, whole text
+      #	(no password); it lives in the runner's temporary directory for this
+      #	step only.  The signature is checked with the public key pinned below
+      #	(the one of minisign.pub) before anything is published.
+      - name: Sign SHA256SUMS
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [ -z "${MINISIGN_KEY}" ]
+          then
+            echo "::error::no MINISIGN_KEY secret - the release would go out unsigned"
+            exit 1
+          fi
+          sudo apt-get update -q && sudo apt-get install -y -q minisign
+          key="${RUNNER_TEMP}/minisign.key"
+          trap 'rm -f "${key}"' EXIT
+          ( umask 077; printf '%s\n' "${MINISIGN_KEY}" > "${key}" )
+          minisign -S -s "${key}" -m SHA256SUMS \
+            -t "StarLet ${TAG} SHA256SUMS signed $(date -u +%d-%b-%Y | tr a-z A-Z)"
+          # The key is pinned here, not read from src/: a re-run of an older tag has no minisign.pub.
+          minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
+
+      - name: Attach the files to the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" *.tar.gz SHA256SUMS SHA256SUMS.minisig --clobber
+          else
+            gh release create "$TAG" *.tar.gz SHA256SUMS SHA256SUMS.minisig --title "StarLet $ver" --notes-file - <<EOF
+          StarLet $ver - utility routines: OpenVMS-flavoured building blocks for C (logging, message catalogues, FAO, DCL-style CLI, TLV). The sources: \`StarLet-$ver.tar.gz\`, unpacking into \`starlet-$ver/\`; build with \`cmake -B build && cmake --build build && ctest --test-dir build\`, install with \`cmake --install build\`.
+
+          To check a download: \`minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14\` (\`SHA256SUMS.minisig\` next to it), then \`sha256sum -c --ignore-missing SHA256SUMS\`.
+          EOF
+          fi
