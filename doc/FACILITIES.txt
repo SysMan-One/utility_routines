@@ -1,0 +1,50 @@
+# Facility numbers of the StarLet-based projects - the one registry
+#
+# A condition value is $DEFFAC(facility) | $DEFMSG(message) | $DEFSEV(severity):
+# the facility number takes bits 16..31, so 0x0001..0xFFFF.  Two facilities with
+# the same number give the same condition values - the wrong message text, wrong
+# matches of a status.  A number is taken here BEFORE it goes into code.
+#
+# New facility: take a free number (the blocks below), append a line in its
+# block keeping the order, then put the number into the project's catalogue
+# header with a comment "see utility_routines/doc/FACILITIES.txt".
+# Never reuse a number of a retired facility: mark the line "retired".
+#
+# Blocks (by habit so far, not a rule of the code):
+#	0x0001..0x00FF	StarLet itself and the old decimal numbers (TTR 135, T2R 138, TPU 0xAB)
+#	0x0100..0x01FF	system tools and emulators (HELP, SEARCH, vBACKUP, skshow, MSCP-Hub, IA64)
+#	0x0800..0x09FF	daemons (BATCH, yaVNA)
+#	0x0A00..0x0BFF	applications (yaVTERM, ACS, BroTwins)
+#	0x07F0..0x07FF	tests only, never in a product
+#
+# Columns: number, facility (the $FAC prefix), project, where it is defined, notes.
+# Last checked against the code: 17-NOV-2026 (grep of /root/Works for FACNO/$DEFFAC/#define <FAC> n).
+#
+0x0001	UTILS		StarLet			utility_routines.h (__FAC$_UTILS__)
+0x0087	TTR		tootoo3/TTR		src/tootoo3_msgs.h (decimal 135)
+0x008A	T2R		mbus-gw-t2r		src/t2r_msgs.h (decimal 138)
+0x00AB	TPU		yaTPU			tpumsg.h (TPU$_FACILITY)
+0x0110	HELP		vHELP			include/helpdef.h
+0x0111	SEARCH		SEARCH			include/srchdef.h
+0x0112	VBACKUP		vBACKUP			include/vbkdef.h		skshow.c names 0x0112 "SDL", no SDL code found - if SDL is real, it takes another number
+0x0113	SKSHOW		skshow			skshow.c
+0x0120	RTR		MeshRtr-B-n-D		include/rtrdef.h
+0x0121	MH		AlphaEmu/MSCP-Hub	include/mh_def.h
+0x0164	YAIA64		yaIA64Emu		src/emu/msg.h ("IA64")
+0x07F1	TFAC		StarLet tests		tests/test_putmsg_fao.c		tests only
+0x0801	BATCH		BATCH			src/batchmsg.h
+0x0802	YADNSPXY	yaDNSPxy		include/yadnspxy.h		was 0x0120 (a collision with RTR) up to yadnspxy.h X-01-12, 21-NOV-2026
+0x0900	VNAC		yaVNA			src/msgcat.h			crypto core
+0x0901	VNAW		yaVNA			src/msgcat.h			wire
+0x0902	VNAD		yaVNA			src/msgcat.h			data plane
+0x0903	VNAM		yaVNA			src/msgcat.h			control plane
+0x0904	VNAU		yaVNA			src/msgcat.h			operator
+0x0905	VNAP		yaVNA			src/msgcat.h			provisioning
+0x0906	VNAG		yaVNA			src/msgcat.h			Windows GUI
+0x0A70	YAVT		yaVTERM			src/vt_msg.h
+0x0AC5	ACS_TRAIN	ACS			src/acs_train_msg.h
+0x0AC6	ACS_CNTRL	ACS			src/acs_cntrl_msg.h
+0x0AC7	ACS_IMU		ACS			src/acs_imu_msg.h
+0x0BE0	BPROXY		BroTwins/bproxy		src/bproxy_msgs.h
+0x0BE1	BAGENT		BroTwins/bagent		bagent_msgs.h
+0x596E	YNETCHK		yaNetCheck		src/yanetchk.c ('Yn')		outside the blocks
