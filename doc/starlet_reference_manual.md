@@ -4165,6 +4165,7 @@ no C run-time routine except `time()`. It does not use `<stdio.h>`, `<string.h>`
 |---|---|
 | `__util$fao` | Format a control string with a variable list of parameters |
 | `__util$faol` | Format a control string with an array of parameters |
+| `$FAO`, `__util$faoc` | Format a control string with parameters written plain (the macro) or counted (the routine) |
 | `$FAO_DESC` | Initialize an output descriptor over a character array |
 | `__util$gettim` | Return the current binary time |
 | `__util$bintim` | Convert an ASCII time string to binary time |
@@ -4613,6 +4614,65 @@ unsigned short len;
 fao_prm_t      prm [2] = { 5, 77 };
 
 __util$faol ("[!#UL]", &len, &dsc, prm, 2);    /* buf: "[   77]", len 7 */
+```
+
+## $FAO, __util$faoc -- Formatted ASCII Output with a Count
+
+`$FAO` formats into a buffer with the parameters written plain. It is the macro to use in code;
+`__util$faoc` is the routine it calls.
+
+**Format**
+
+```c
+#define $FAO(ctl, outlen, outbuf, ...)
+
+int __util$faoc (const char *a_ctlstr, unsigned short *a_outlen,
+                 fao_desc_t *a_outbuf, int a_prmcnt, ...);
+```
+
+**Returns**
+
+`int`, write only, by value. A condition value.
+
+**Arguments**
+
+| Argument | Type | Access | Mechanism | Description |
+|---|---|---|---|---|
+| `ctl`, `a_ctlstr` | `const char *` | read only | by reference | Zero-terminated control string |
+| `outlen`, `a_outlen` | `unsigned short *` | write only | by reference | Receives the number of bytes written. May be NULL |
+| `outbuf`, `a_outbuf` | `fao_desc_t *` | read only (descriptor), write only (buffer) | by reference | Descriptor of the output buffer |
+| `a_prmcnt` | `int` | read only | by value | `__util$faoc` only: the number of the parameters that follow |
+| `...` | any scalar or pointer (`$FAO`), `fao_prm_t` (`__util$faoc`) | read only | by value | The parameters: 0 to 16 for the macro |
+
+**Description**
+
+`$FAO` casts every parameter to `fao_prm_t` and counts them with `FAO$_NARG` and `FAO$_EACH`,
+as `$LOG_FAO` and `$PUTMSG_FAO` do, and calls `__util$faoc`. The routine gathers the
+parameters into an array and formats it with `__util$faol`. So a control string that consumes
+more parameters than were given gets 0 for them and the status `FAO$K_NOPRM` - unlike
+`__util$fao`, which would read values that do not exist.
+
+The result, as with `__util$fao`, is not zero-terminated.
+
+**Condition Values Returned**
+
+As `__util$faol`; `__util$faoc` also returns `STS$K_ERROR` for a negative `a_prmcnt`.
+
+**Example**
+
+```c
+#include "starlet.h"
+
+char           buf [128];
+fao_desc_t     dsc = $FAO_DESC (buf);
+unsigned short len;
+unsigned char  ip [4] = { 192, 168, 1, 10 };
+int            sts;
+
+sts = $FAO ("peer !%I got !UL file!%S, mask !XL", &len, &dsc, ip, 2, 0xFF00);
+if ( !(1 & sts) )
+    return sts;
+/* buf: "peer 192.168.1.10 got 2 files, mask 0000FF00", len bytes */
 ```
 
 ## $FAO_DESC -- Initialize an Output Descriptor
@@ -6647,6 +6707,7 @@ the item. The four time helpers `__util$add_time`, `__util$sub_time`, `__util$cm
 | `FAO$K_NOPRM` | Condition value: too few parameters | starlet | 3 |
 | `FAO$K_TZOFFSET` | Compile-time time zone offset in seconds | starlet | 3 |
 | `FAO$T_TIME` | Compile-time type behind fao_time_t | starlet | 3 |
+| `$FAO` | Format into a buffer, the parameters written plain (macro) | starlet | 3 |
 | `$FAO_DESC` | Initializer of an output descriptor over a character array | starlet | 3 |
 | `fao_desc_t` | Output buffer descriptor | starlet | 3 |
 | `fao_prm_t` | Type of an FAO parameter (64-bit, by value) | starlet | 3 |
@@ -6717,6 +6778,7 @@ the item. The four time helpers `__util$add_time`, `__util$sub_time`, `__util$cm
 | `__util$deflog` | Select the log file or the syslog host | utility_routines | 2 |
 | `__util$dumphex` | Write a hex dump of a buffer to the log | utility_routines | 2 |
 | `__util$fao` | Format a control string with a variable parameter list | starlet | 3 |
+| `__util$faoc` | Format with a counted parameter list - the routine of `$FAO` | starlet | 3 |
 | `__util$faohex` | Format up to 16 octets as one hex and ASCII line | utility_routines | 2 |
 | `__util$faol` | Format a control string with a parameter array | starlet | 3 |
 | `__util$fill` | Fill a buffer by repeating a pattern | utility_routines | 2 |

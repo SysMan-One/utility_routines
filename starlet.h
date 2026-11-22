@@ -13,9 +13,14 @@
 **
 **  CREATION DATE:  24-JUL-2026
 **
-**  IDENT:	X.01-04		REV: 1.4.0
+**  IDENT:	X.01-05		REV: 1.5.0
 **
 **  MODIFICATION HISTORY:
+**
+**	X.01-05		22-NOV-2026	RRL
+**		StarLet 1.8.0: $FAO() - __util$fao with the parameters written plain, cast and counted
+**		by FAO$_NARG/FAO$_EACH as $PUTMSG_FAO and $LOG_FAO do; __util$faoc(), the counted
+**		varargs form it calls (a directive past the last parameter gets 0 and FAO$K_NOPRM).
 **
 **	X.01-04		31-OCT-2026	CLD
 **		StarLet 1.7.0: includes utility_routines.h itself (include order no longer matters);
@@ -122,6 +127,21 @@ int	__util$fao	(const char *a_ctlstr, unsigned short *a_outlen,
 int	__util$faol	(const char *a_ctlstr, unsigned short *a_outlen,
 			fao_desc_t *a_outbuf,
 			const fao_prm_t *a_prmlst, int a_prmcnt);
+
+int	__util$faoc	(const char *a_ctlstr, unsigned short *a_outlen,
+			fao_desc_t *a_outbuf, int a_prmcnt, ...);
+
+/*
+**  $FAO - format into a buffer with the parameters written plain:
+**
+**	$FAO("!AZ has !UL file!%S", &l_len, &l_dsc, "BACKUP", 3);
+**
+**  The macro casts every parameter to fao_prm_t and counts them (0 to 16) with FAO$_NARG and
+**  FAO$_EACH of utility_routines.h, as $PUTMSG_FAO and $LOG_FAO do, and calls __util$faoc: a
+**  control string that wants more parameters than were given gets 0 for them and FAO$K_NOPRM,
+**  never a read past the argument list.
+*/
+#define	$FAO(ctl, outlen, outbuf, ...)	__util$faoc(ctl, outlen, outbuf, FAO$_NARG(__VA_ARGS__) FAO$_EACH(__VA_ARGS__))
 
 int	__util$bintim	(const char *a_timstr, fao_time_t *a_timadr);
 

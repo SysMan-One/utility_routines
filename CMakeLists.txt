@@ -192,6 +192,10 @@
 #					compiler, not by the platform - under MinGW GCC __declspec(thread)
 #					was ignored and the log prefix cache (time, tid) was shared by all
 #					the threads. test_log_tls added (Linux and Windows/Wine).
+#		22-NOV-2026	RRL	VERSION -> 1.8.0. $FAO() - __util$fao with the parameters written plain,
+#					cast and counted by FAO$_NARG/FAO$_EACH as $PUTMSG_FAO does, through the
+#					new counted __util$faoc() (too few parameters: 0 and FAO$K_NOPRM);
+#					tests/test_fao_macro.c.
 #		12-NOV-2026	CLD	VERSION -> 1.7.3. A Debian package, libstarlet-dev (cpack -G DEB): the static library,
 #					the headers, the CMake package and the manuals; the contact of
 #					the maintainer was what CPack missed.  The code is not changed.
@@ -201,7 +205,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.7.3 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.8.0 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.
@@ -301,7 +305,7 @@ if (BUILD_TESTING)
 	enable_testing()
 
 	set (STARLET_TESTS status_convention cli_features tlv cli_help log_overflow setlogfd putmsg_fao cli_nested cli_filepath fao_addr pattern_match log_fao base64 crc32 lookup_key
-		fao_edge tlv_hostile cli_rules queue strings params log_misc log_tls)
+		fao_edge fao_macro tlv_hostile cli_rules queue strings params log_misc log_tls)
 	# logrotate: Windows passes it (Windows 11, 22-OCT-2026); Wine does not - its delete-pending name of a removed,
 	# still-open file differs from Windows, so a cross build that runs its tests under Wine leaves it out
 	if (NOT (WIN32 AND CMAKE_CROSSCOMPILING_EMULATOR MATCHES "wine"))

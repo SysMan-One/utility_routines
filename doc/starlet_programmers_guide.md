@@ -1024,6 +1024,15 @@ __util$fao("!AZ has !UL file!%S", &l_len, &l_dsc, (fao_prm_t) "BACKUP", (fao_prm
 ```
 
 With the macros you write them plain. A quadword is passed by value, and has been since X.01-09.
+The macro that formats into a buffer is `$FAO` (StarLet 1.8.0): it casts and counts the
+parameters as `$LOG_FAO` and `$PUTMSG_FAO` do, and a control string that wants more parameters
+than were given gets zeros and `FAO$K_NOPRM`, never a read past the argument list:
+
+```c
+$FAO("!AZ has !UL file!%S", &l_len, &l_dsc, "BACKUP", 3);
+```
+
+Write `__util$fao` with casts only where a macro cannot be used; write `$FAO` everywhere else.
 
 A quirk for the veteran: on OpenVMS every parameter is a longword and an address. Here a quadword
 directive reads the whole 64 bits of the parameter. Cast a signed value through its own width first:

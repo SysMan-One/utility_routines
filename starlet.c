@@ -18,6 +18,10 @@
 **
 **  MODIFICATION HISTORY:
 **
+**	X.01-17		22-NOV-2026	RRL
+**		__util$faoc() - the counted varargs form of UTIL$FAO, for the $FAO() macro: the parameters
+**		are gathered into an array and formatted by __util$faol(), so too few of them is FAO$K_NOPRM.
+**
 **	X.01-16		31-OCT-2026	CLD
 **		1.7.0 defect pass: bounded directive scanner (truncated directive = FAO$K_BADDIR), negative time = delta in !%D/!%T,
 **		zero = "now", year > 9999 printed in full, new FAO$K_FLDOVF/FAO$K_NOPRM, first error wins, FAO$K_* real condition values.
@@ -77,8 +81,8 @@
 */
 
 #define	__MODULE__	"STARLET"
-#define	__IDENT__	"X.01-16"
-#define	__REV__		"1.16.0"
+#define	__IDENT__	"X.01-17"
+#define	__REV__		"1.17.0"
 
 #include	<stdarg.h>
 #include	<stdint.h>
@@ -1270,6 +1274,48 @@ static	const fao_prm_t s_empty [1] = { 0 };
 		*a_outlen = (unsigned short) (l_ctx.optr - l_ctx.obase);
 
 	return	l_ctx.sts;
+}
+
+/*
+**++
+**  UTIL$FAOC - UTIL$FAO with a parameter count: the routine of the $FAO() macro.
+**
+**	The macro passes the count and casts every parameter to fao_prm_t; the parameters are gathered
+**	into an array and formatted by UTIL$FAOL, so a control string that wants more than were given
+**	gets 0 for them and FAO$K_NOPRM instead of reading past the argument list.
+**
+**  INPUT:
+**	a_ctlstr - zero-terminated control string
+**	a_outlen - optional address of a word to receive the result length, may be NULL
+**	a_outbuf - output buffer descriptor (fao_desc_t)
+**	a_prmcnt - number of the parameters that follow; past FAO$K_MAXPRM they are not read
+**	...	 - the parameters, each of type fao_prm_t
+**
+**  OUTPUT:
+**	Buffer of a_outbuf - the result (not zero-terminated); *a_outlen - its length
+**
+**  RETURN:
+**	As UTIL$FAOL; STS$K_ERROR also for a negative a_prmcnt.
+**--
+*/
+int	__util$faoc	(const char *a_ctlstr, unsigned short *a_outlen,
+			fao_desc_t *a_outbuf, int a_prmcnt, ...)
+{
+fao_prm_t	l_prm [FAO$K_MAXPRM];
+va_list		l_ap;
+int		l_cnt = (a_prmcnt > FAO$K_MAXPRM) ? FAO$K_MAXPRM : a_prmcnt;
+
+	if ( a_prmcnt < 0 )
+		return	STS$K_ERROR;
+
+	va_start (l_ap, a_prmcnt);
+
+	for ( int i = 0; i < l_cnt; i++ )
+		l_prm[i] = va_arg (l_ap, fao_prm_t);
+
+	va_end (l_ap);
+
+	return	__util$faol (a_ctlstr, a_outlen, a_outbuf, l_prm, l_cnt);
 }
 
 /* S_FAO$TIM_NUM - parse an unsigned decimal of the time string; returns the digit count (0 = field omitted) */
