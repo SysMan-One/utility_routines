@@ -28,6 +28,7 @@
 0x0111	SEARCH		SEARCH			include/srchdef.h
 0x0112	VBACKUP		vBACKUP			include/vbkdef.h		skshow.c names 0x0112 "SDL", no SDL code found - if SDL is real, it takes another number
 0x0113	SKSHOW		skshow			skshow.c
+0x0114	CFG		yaCFG			include/yacfgdef.h		configuration-tree library, taken 22-NOV-2026
 0x0120	RTR		MeshRtr-B-n-D		include/rtrdef.h
 0x0121	MH		AlphaEmu/MSCP-Hub	include/mh_def.h
 0x0164	YAIA64		yaIA64Emu		src/emu/msg.h ("IA64")
