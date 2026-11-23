@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build the library and run the tests (CMake / CTest)
         run: |
@@ -43,7 +43,7 @@ jobs:
       ARCH_CFLAGS: ${{ matrix.arch_cflags }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install the musl toolchain
         run: sudo apt-get update && sudo apt-get install -y musl-tools
