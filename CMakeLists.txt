@@ -199,13 +199,16 @@
 #		12-NOV-2026	CLD	VERSION -> 1.7.3. A Debian package, libstarlet-dev (cpack -G DEB): the static library,
 #					the headers, the CMake package and the manuals; the contact of
 #					the maintainer was what CPack missed.  The code is not changed.
+#		26-NOV-2026	RRL	VERSION -> 1.8.1. Builds on Darwin (macOS; iOS next): utility_routines V.01-34ECO03,
+#					__gettid() through pthread_threadid_np(), CLOCK_REALTIME where there is no
+#					CLOCK_REALTIME_COARSE, avproto.h byte order through <libkern/OSByteOrder.h>.
 #---
 
 
 cmake_minimum_required(VERSION 3.10)
 
 cmake_policy(SET CMP0048 NEW)
-project(StarLet  VERSION 1.8.0 DESCRIPTION "Utility Routines" LANGUAGES C)
+project(StarLet  VERSION 1.8.1 DESCRIPTION "Utility Routines" LANGUAGES C)
 
 # Included AFTER project() so a language (and thus the target architecture) is
 # known - GNUInstallDirs needs it to pick the default lib dir.

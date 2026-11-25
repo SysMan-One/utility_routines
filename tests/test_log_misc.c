@@ -47,6 +47,48 @@ int main (void)
 #include "utility_routines.h"
 #include "starlet.h"
 
+#ifdef	__APPLE__
+/* Darwin has no pthread_barrier_*(): a stand-in on a mutex and a condition variable, enough for these tests */
+typedef struct test_barrier_t {
+	pthread_mutex_t	mtx;
+	pthread_cond_t	cond;
+	unsigned	count, waiting, cycle;
+} pthread_barrier_t;
+
+static int	pthread_barrier_init (pthread_barrier_t *a_bar, const void *a_attr, unsigned a_count)
+{
+	(void) a_attr;
+	a_bar->count = a_count;
+	a_bar->waiting = a_bar->cycle = 0;
+	pthread_mutex_init(&a_bar->mtx, NULL);
+	return	pthread_cond_init(&a_bar->cond, NULL);
+}
+
+static int	pthread_barrier_wait (pthread_barrier_t *a_bar)
+{
+unsigned	l_cycle;
+
+	pthread_mutex_lock(&a_bar->mtx);
+	l_cycle = a_bar->cycle;
+	if ( ++a_bar->waiting == a_bar->count )
+		{
+		a_bar->waiting = 0;
+		a_bar->cycle++;
+		pthread_cond_broadcast(&a_bar->cond);
+		}
+	else	while ( l_cycle == a_bar->cycle )
+			pthread_cond_wait(&a_bar->cond, &a_bar->mtx);
+	pthread_mutex_unlock(&a_bar->mtx);
+	return	0;
+}
+
+static int	pthread_barrier_destroy (pthread_barrier_t *a_bar)
+{
+	pthread_cond_destroy(&a_bar->cond);
+	return	pthread_mutex_destroy(&a_bar->mtx);
+}
+#endif	/* __APPLE__ */
+
 /* ---- syslog() is the recorder's: the libc one would write to the system journal */
 static int	s_sl_calls;
 static int	s_sl_prio;
@@ -103,7 +145,11 @@ ssize_t	l_n = pread(s_logfd, l_buf, sizeof(l_buf) - 1, 0);
 
 static int s_nfd (void)
 {
+#ifdef	__APPLE__
+DIR	*l_d = opendir("/dev/fd");		/* Darwin has no /proc */
+#else
 DIR	*l_d = opendir("/proc/self/fd");
+#endif
 int	l_n = 0;
 
 	while ( readdir(l_d) )

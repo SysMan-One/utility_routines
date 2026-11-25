@@ -73,6 +73,9 @@
 **				$ILE3INI, bzero/iszero, strelem, str2asc, isinrange2, cmp_time/sub_time, uncomment, collapse,
 **				strcat_rx, mask2sym, fill; __util$readparams no longer declared; __util$movc5 rewritten.
 **
+**	26-NOV-2026	RRL	1.8.1 : Darwin (macOS, iOS): __gettid() through pthread_threadid_np() (syscall() is deprecated there),
+**				s___time() falls back to CLOCK_REALTIME where there is no CLOCK_REALTIME_COARSE.
+**
 */
 
 #if _WIN32
@@ -165,13 +168,15 @@ pthread_t	tid = 0;
 
 static inline pid_t	__gettid(void)
 {
-	return	syscall (
 #if defined(__APPLE__) || defined(__OSX__)
-	SYS_thread_selfid
+__uint64_t	l_tid = 0;
+
+	pthread_threadid_np(NULL, &l_tid);	/* syscall(SYS_thread_selfid) is deprecated on Darwin (macOS 10.12+, iOS) */
+
+	return	(pid_t) l_tid;
 #else
-	SYS_gettid
-#endif	/* ANDROID && LINUX*/
-	);
+	return	syscall (SYS_gettid);
+#endif
 }
 
 #endif	/* #if !defined(ANDROID) && !defined(Q_OS_LINUX) */
@@ -244,7 +249,11 @@ struct _timeb timebuffer;
 
 inline static int	s___time(struct timespec *tv)
 {
+#ifdef	CLOCK_REALTIME_COARSE
 	clock_gettime(CLOCK_REALTIME_COARSE, tv);
+#else
+	clock_gettime(CLOCK_REALTIME, tv);		/* Darwin (macOS, iOS) has no _COARSE clock */
+#endif
 
 	return	0;
 }

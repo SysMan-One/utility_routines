@@ -38,6 +38,8 @@
 **	31-OCT-2026	CLD	StarLet 1.7.0: GCC diagnostic pragmas no longer leak to includers; __tlv$put() size is
 **				<unsigned>; __tlv$hset() rejects a signature over 8 octets; __tlv$hget() leaves *a_u_csr on error.
 **
+**	26-NOV-2026	RRL	StarLet 1.8.1: Darwin (macOS, iOS): be16/be32/be64toh(), htobe16/32/64() through OSSwap*() of <libkern/OSByteOrder.h>.
+**
 **--
 */
 
@@ -52,6 +54,14 @@
 #define	be64toh(x)	_byteswap_uint64(x)
 #define	htobe64(x)	_byteswap_uint64(x)
 #define	htobe16(x)	_byteswap_ushort(x)
+#elif	defined(__APPLE__)
+#include	<libkern/OSByteOrder.h>	/* Darwin (macOS, iOS) has no <endian.h> */
+#define	be16toh(x)	OSSwapBigToHostInt16(x)
+#define	be32toh(x)	OSSwapBigToHostInt32(x)
+#define	be64toh(x)	OSSwapBigToHostInt64(x)
+#define	htobe16(x)	OSSwapHostToBigInt16(x)
+#define	htobe32(x)	OSSwapHostToBigInt32(x)
+#define	htobe64(x)	OSSwapHostToBigInt64(x)
 #else
 #include	<endian.h>
 #endif

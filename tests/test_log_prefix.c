@@ -57,7 +57,16 @@ unsigned l_d, l_mo, l_y, l_h, l_mi, l_se, l_ms;
 		"the prefix is byte-identical to the historical snprintf rendering");
 
 	/* The cached thread id equals the kernel's. */
+#ifdef	__APPLE__
+	{
+	__uint64_t	l_tid64 = 0;
+
+	pthread_threadid_np(NULL, &l_tid64);
+	CHECK( l_tid == (int) l_tid64, "the tid column matches pthread_threadid_np()");
+	}
+#else
 	CHECK( l_tid == (int) syscall (SYS_gettid), "the tid column matches gettid()");
+#endif
 
 	/* Two records of the same second share the very same date-time bytes; on
 	** an (unlucky) second boundary between the two, retry once.

@@ -1,6 +1,6 @@
 #define	__MODULE__	"UTIL$"
-#define	__IDENT__	"V.01-34ECO2"
-#define	__REV__		"1.34.2"
+#define	__IDENT__	"V.01-34ECO03"
+#define	__REV__		"1.34.3"
 
 
 /*
@@ -101,6 +101,8 @@
 **	01-NOV-2026	CLD	V.01-34ECO2 : 1.7.2 : UTIL$TLS is __declspec(thread) for MSVC only; GCC/Clang - MinGW included - get _Thread_local (C11) or __thread.
 **				MinGW GCC ignores __declspec(thread) ("'thread' attribute directive ignored"): the time/tid cache of s_util$prefix() was one for
 **				all the threads - records got the tid of the first thread which had logged, the cached date-time string could tear.
+**	26-NOV-2026	RRL	V.01-34ECO03 : 1.8.1 : Darwin (macOS, iOS): the thread id of the log prefix through __gettid() - pthread_threadid_np(), not the deprecated
+**				syscall(SYS_thread_selfid).
 */
 
 
@@ -578,7 +580,7 @@ static UTIL$TLS unsigned s_tid;
 #ifdef	_WIN32
 		s_tid = (unsigned) gettid ();
 #elif	defined(__APPLE__) || defined(__OSX__)
-		s_tid = (unsigned) syscall (SYS_thread_selfid);
+		s_tid = (unsigned) __gettid ();			/* pthread_threadid_np() (utility_routines.h): syscall() is deprecated on Darwin */
 #else
 		s_tid = (unsigned) syscall (SYS_gettid);	/* glibc, musl and Bionic alike: __gettid() is hidden under ANDROID */
 #endif
