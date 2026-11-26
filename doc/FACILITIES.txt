@@ -31,7 +31,7 @@
 0x0114	CFG		yaLIBCFG		include/yalibcfgdef.h		configuration-tree library, taken 22-NOV-2026
 0x0120	RTR		MeshRtr-B-n-D		include/rtrdef.h
 0x0121	MH		AlphaEmu/MSCP-Hub	include/mh_def.h
-0x0122	ALPHAEMU	AlphaEmu		src/emu.h (__FAC__)	log-only for now ($LOG_FAO with the name string, no condition values); taken 26-NOV-2026 for a future message catalogue
+0x0122	ALPHAEMU	AlphaEmu		src/emu_msg.h	message catalogue (ALPHAEMU$_*, $EMUMSG over $PUTMSG_FAO; traces stay $LOG_FAO); taken 26-NOV-2026
 0x0164	YAIA64		yaIA64Emu		src/emu/msg.h ("IA64")
 0x07F1	TFAC		StarLet tests		tests/test_putmsg_fao.c		tests only
 0x0801	BATCH		BATCH			src/batchmsg.h
